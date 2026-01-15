@@ -11,8 +11,11 @@ import {
   LogOut, 
   Menu, 
   X,
-  Settings,
-  BookOpen
+  BookOpen,
+  Sparkles,
+  Loader2,
+  ShieldAlert,
+  Gavel
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -21,6 +24,11 @@ const sidebarItems = [
     title: 'Dashboard',
     href: '/admin/dashboard',
     icon: LayoutDashboard
+  },
+  {
+    title: 'Course Studio',
+    href: '/admin/studio',
+    icon: Sparkles
   },
   {
     title: 'Case Notes',
@@ -39,6 +47,13 @@ const sidebarItems = [
   },
 ]
 
+interface AdminUser {
+  id: string
+  email: string
+  full_name?: string
+  is_admin: boolean
+}
+
 export default function AdminLayout({
   children,
 }: {
@@ -46,9 +61,65 @@ export default function AdminLayout({
 }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [adminUser, setAdminUser] = useState<AdminUser | null>(null)
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
+
+  // Check authentication and admin status
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        // Get current session
+        const { data: { session } } = await supabase.auth.getSession()
+
+        if (!session?.user) {
+          router.replace('/auth/login')
+          return
+        }
+
+        // Check if user is admin
+        const { data: userData, error } = await supabase
+          .from('users')
+          .select('id, email, full_name, is_admin')
+          .eq('id', session.user.id)
+          .single()
+
+        if (error || !userData) {
+          await supabase.auth.signOut()
+          router.replace('/auth/login')
+          return
+        }
+
+        if (!userData.is_admin) {
+          await supabase.auth.signOut()
+          router.replace('/auth/login')
+          return
+        }
+
+        setAdminUser(userData)
+        setIsLoading(false)
+      } catch (err) {
+        console.error('Auth check error:', err)
+        router.replace('/auth/login')
+      }
+    }
+
+    checkAuth()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'SIGNED_OUT' || !session) {
+          router.replace('/auth/login')
+        }
+      }
+    )
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [router, supabase])
 
   useEffect(() => {
     const checkScreen = () => {
@@ -71,12 +142,47 @@ export default function AdminLayout({
     router.refresh()
   }
 
+  // Show loading state while checking auth
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="text-center">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 mb-4 animate-pulse">
+            <Gavel className="w-8 h-8 text-primary" />
+          </div>
+          <p className="text-muted-foreground font-medium">Verifying admin access...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // If no admin user after loading, show access denied
+  if (!adminUser) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="text-center max-w-md p-8 bg-white border border-border rounded-2xl shadow-lg">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-destructive/10 border border-destructive/20 mb-4">
+            <ShieldAlert className="w-8 h-8 text-destructive" />
+          </div>
+          <h2 className="text-xl font-bold text-foreground mb-2">Access Denied</h2>
+          <p className="text-muted-foreground mb-6">You don't have admin privileges to access this portal.</p>
+          <button
+            onClick={() => router.push('/auth/login')}
+            className="w-full px-4 py-2.5 bg-primary text-white font-medium rounded-lg hover:bg-primary-dark transition-colors"
+          >
+            Back to Login
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="min-h-screen bg-muted/30 flex">
+    <div className="min-h-screen bg-bg-muted flex font-sans">
       {/* Mobile Sidebar Overlay */}
       {isMobile && isSidebarOpen && (
         <div 
-          className="fixed inset-0 bg-black/50 z-40"
+          className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 transition-opacity"
           onClick={() => setIsSidebarOpen(false)}
         />
       )}
@@ -84,58 +190,69 @@ export default function AdminLayout({
       {/* Sidebar */}
       <aside 
         className={cn(
-          "fixed lg:static inset-y-0 left-0 z-50 w-64 bg-background border-r border-border transition-transform duration-300 ease-in-out flex flex-col",
+          "fixed lg:static inset-y-0 left-0 z-50 w-72 bg-white border-r border-border shadow-sm flex flex-col transition-all duration-300 ease-in-out",
           !isSidebarOpen && "-translate-x-full lg:translate-x-0 lg:w-20"
         )}
       >
-        <div className="h-16 flex items-center justify-between px-4 border-b border-border">
-          <div className={cn("font-bold text-xl truncate", !isSidebarOpen && "lg:hidden")}>
-            Gavelogy
+        <div className="h-16 flex items-center justify-between px-6 border-b border-border/50">
+          <div className={cn("flex items-center gap-2", !isSidebarOpen && "lg:justify-center w-full")}>
+            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white shrink-0">
+               <Gavel className="w-5 h-5" />
+            </div>
+            <span className={cn("font-bold text-xl tracking-tight text-slate-900 truncate", !isSidebarOpen && "lg:hidden")}>
+              Gavelogy
+            </span>
           </div>
           <button 
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-2 hover:bg-muted rounded-md lg:hidden"
+            className="p-1 hover:bg-muted rounded-md lg:hidden"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5 text-muted-foreground" />
           </button>
         </div>
 
-        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-          {sidebarItems.map((item) => {
-            const isActive = pathname.startsWith(item.href)
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-md transition-colors",
-                  isActive 
-                    ? "bg-primary text-primary-foreground" 
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  !isSidebarOpen && "lg:justify-center lg:px-2"
-                )}
-                title={!isSidebarOpen ? item.title : undefined}
-              >
-                <item.icon className="w-5 h-5 shrink-0" />
-                <span className={cn("truncate", !isSidebarOpen && "lg:hidden")}>
-                  {item.title}
-                </span>
-              </Link>
-            )
-          })}
-        </nav>
+        <div className="p-4">
+          <div className={cn("text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 pl-3", !isSidebarOpen && "lg:hidden")}>
+            Menu
+          </div>
+          <nav className="space-y-1">
+            {sidebarItems.map((item) => {
+              const isActive = pathname.startsWith(item.href)
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative overflow-hidden",
+                    isActive 
+                      ? "bg-primary/5 text-primary font-semibold" 
+                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+                    !isSidebarOpen && "lg:justify-center lg:px-2"
+                  )}
+                  title={!isSidebarOpen ? item.title : undefined}
+                >
+                  {isActive && <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary rounded-r-full" />}
+                  <item.icon className={cn("w-5 h-5 shrink-0 transition-colors", isActive ? "text-primary" : "text-slate-400 group-hover:text-slate-600")} />
+                  <span className={cn("truncate", !isSidebarOpen && "lg:hidden")}>
+                    {item.title}
+                  </span>
+                </Link>
+              )
+            })}
+          </nav>
+        </div>
 
-        <div className="p-4 border-t border-border">
+        <div className="mt-auto p-4 border-t border-border/50">
           <button
             onClick={handleLogout}
             className={cn(
-              "flex items-center gap-3 px-3 py-2 w-full rounded-md text-error hover:bg-error/10 transition-colors",
+              "flex items-center gap-3 px-3 py-2.5 w-full rounded-xl text-slate-500 hover:bg-red-50 hover:text-red-600 transition-colors group",
               !isSidebarOpen && "lg:justify-center lg:px-2"
             )}
             title="Sign Out"
           >
-            <LogOut className="w-5 h-5 shrink-0" />
-            <span className={cn("truncate", !isSidebarOpen && "lg:hidden")}>
+            <LogOut className="w-5 h-5 shrink-0 group-hover:text-red-600 transition-colors" />
+            <span className={cn("truncate font-medium", !isSidebarOpen && "lg:hidden")}>
               Sign Out
             </span>
           </button>
@@ -143,24 +260,42 @@ export default function AdminLayout({
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 bg-background border-b border-border flex items-center justify-between px-4 lg:px-8">
-          <button
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-2 hover:bg-muted rounded-md lg:hidden"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+        <header className="h-16 bg-white/80 backdrop-blur-md border-b border-border/50 flex items-center justify-between px-4 lg:px-8 z-10 sticky top-0">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="p-2 hover:bg-slate-100 rounded-lg lg:hidden"
+            >
+              <Menu className="w-5 h-5 text-slate-600" />
+            </button>
+            <button
+               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+               className="hidden lg:flex p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"
+            >
+               <Menu className="w-5 h-5" />
+            </button>
+          </div>
           
           <div className="flex items-center gap-4 ml-auto">
-            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
-              A
+            <div className="hidden sm:block text-right">
+              <div className="text-sm font-semibold text-slate-900 leading-none mb-1">
+                 {adminUser.full_name || 'Admin User'}
+              </div>
+              <div className="text-xs text-muted-foreground leading-none">
+                {adminUser.email}
+              </div>
+            </div>
+            <div className="w-9 h-9 rounded-full bg-linear-to-br from-primary to-blue-600 flex items-center justify-center text-white font-bold text-sm shadow-md ring-2 ring-white">
+              {adminUser.full_name?.charAt(0) || adminUser.email.charAt(0).toUpperCase()}
             </div>
           </div>
         </header>
 
-        <main className="flex-1 p-4 lg:p-8 overflow-y-auto">
-          {children}
+        <main className="flex-1 p-6 lg:p-8 overflow-y-auto bg-slate-50/50">
+           <div className="max-w-7xl mx-auto">
+             {children}
+           </div>
         </main>
       </div>
     </div>
