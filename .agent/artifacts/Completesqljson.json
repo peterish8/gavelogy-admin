@@ -811,6 +811,67 @@
     ]
   },
   {
+    "table_name": "user_courses",
+    "columns": [
+      {
+        "type": "text",
+        "column": "course_id",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "status",
+        "default": "'active'::text",
+        "nullable": "YES"
+      },
+      {
+        "type": "timestamp with time zone",
+        "column": "purchase_date",
+        "default": "now()",
+        "nullable": "YES"
+      },
+      {
+        "type": "uuid",
+        "column": "id",
+        "default": "gen_random_uuid()",
+        "nullable": "NO"
+      },
+      {
+        "type": "uuid",
+        "column": "user_id",
+        "default": null,
+        "nullable": "NO"
+      }
+    ],
+    "policies": [
+      {
+        "roles": [
+          "public"
+        ],
+        "command": "INSERT",
+        "permissive": "PERMISSIVE",
+        "policy_name": "Users can insert their own courses"
+      },
+      {
+        "roles": [
+          "public"
+        ],
+        "command": "UPDATE",
+        "permissive": "PERMISSIVE",
+        "policy_name": "Users can update their own courses"
+      },
+      {
+        "roles": [
+          "public"
+        ],
+        "command": "SELECT",
+        "permissive": "PERMISSIVE",
+        "policy_name": "Users can view their own courses"
+      }
+    ]
+  },
+  {
     "table_name": "user_points",
     "columns": [
       {
