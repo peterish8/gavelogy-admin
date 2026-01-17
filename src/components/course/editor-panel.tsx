@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useDraftStore } from '@/lib/stores/draft-store'
+import { useLocalContentCache } from '@/lib/stores/local-content-cache'
 import { cn } from '@/lib/utils'
 import { useEditor, EditorContent } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
@@ -26,6 +27,7 @@ import {
 } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { QuizPreview } from './quiz-preview'
+import { parseQuizText, serializeQuiz } from '@/lib/quiz-parser'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 // --- Extensions ---
@@ -139,6 +141,19 @@ export const FontSize = Extension.create({
   },
 })
 
+// Define extensions outside component to prevent re-creation on render (fixes duplicate extension warnings)
+const EDITOR_EXTENSIONS = [
+  StarterKit.configure({
+    // @ts-ignore
+    underline: false,
+  }),
+  Underline,
+  TextStyle,
+  FontSize,
+  Highlight.configure({ multicolor: true }), 
+  BubbleMenuExtension,
+  NoteBox as any, 
+]
 
 interface EditorPanelProps {
   itemId: string | null
@@ -146,15 +161,23 @@ interface EditorPanelProps {
   courseId: string
   title: string
   onClose?: () => void
+  onTitleChange?: (newTitle: string) => void
 }
 
-export function EditorPanel({ itemId, itemType, courseId, title, onClose }: EditorPanelProps) {
+export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitleChange }: EditorPanelProps) {
   const [loading, setLoading] = useState(false)
   const [saveLoading, setSaveLoading] = useState(false)
   const [saveQuizLoading, setSaveQuizLoading] = useState(false)
   const [publishLoading, setPublishLoading] = useState(false)
   const [initialContent, setInitialContent] = useState('')
+  // Decoupled fetch state to handle editor race conditions
+  const [fetchedData, setFetchedData] = useState<any>(null)
+  
   const { changes } = useDraftStore()
+  
+  // Local content cache for persisting unsaved changes
+  const localCache = useLocalContentCache()
+  const prevItemIdRef = useRef<string | null>(null)
   
   // Reactivity State (to force toolbar updates)
   const [, setTick] = useState(0)
@@ -168,6 +191,7 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose }: Edit
   // Draft System State
   const [hasDraft, setHasDraft] = useState(false)
   const [draftId, setDraftId] = useState<string | null>(null)
+  const [publishedContent, setPublishedContent] = useState('') // Content from note_contents (what users see)
 
   // Auto-save state
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
@@ -177,21 +201,22 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose }: Edit
   const [quizContent, setQuizContent] = useState('')
   const [originalQuizContent, setOriginalQuizContent] = useState('')
 
+  // Title Editing State (for inline rename)
+  const [isEditingTitle, setIsEditingTitle] = useState(false)
+  const [editedTitle, setEditedTitle] = useState(title)
+
+  // Sync editedTitle when title prop changes (after save)
+  useEffect(() => {
+    setEditedTitle(title)
+  }, [title])
+
   // Check if this item is a new draft (unsaved in structure)
   const isStructureDraft = changes.some(c => c.entityId === itemId && c.action === 'create')
 
   // Initialize Tiptap Editor
   const editor = useEditor({
     immediatelyRender: false,
-    extensions: [
-      StarterKit,
-      Underline,
-      TextStyle,
-      FontSize,
-      Highlight.configure({ multicolor: true }), 
-      BubbleMenuExtension,
-      NoteBox as any, 
-    ],
+    extensions: EDITOR_EXTENSIONS,
     content: '',
     editorProps: {
       attributes: {
@@ -262,107 +287,191 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose }: Edit
   }, [isDragging])
 
 
-  // Fetch content when itemId changes
+  // ---------------------------------------------------------------------------
+  // ARCHITECTURE: Decoupled Fetch & Apply (Fixes "Forever Loading" Bug)
+  // ---------------------------------------------------------------------------
+
+  // Effect A: Save on Leave (Cache unsaved changes before switching)
   useEffect(() => {
-    async function fetchContent() {
-      if (!itemId || itemType !== 'file') return
-      
-      // If it's a structure draft, we don't fetch from DB
-      if (isStructureDraft) {
-        if (editor) editor.commands.setContent('')
+    if (prevItemIdRef.current && prevItemIdRef.current !== itemId && editor) {
+        const currentHtml = editor.getHTML()
+        // Only cache if content has changed from initial
+        if (currentHtml && currentHtml !== initialContent) {
+            localCache.setNoteContent(prevItemIdRef.current, currentHtml)
+            console.log('EditorPanel: Cached unsaved content for', prevItemIdRef.current)
+        }
+        // Also cache quiz content
+        if (quizContent && quizContent !== originalQuizContent) {
+            localCache.setQuizContent(prevItemIdRef.current, quizContent)
+        }
+    }
+    prevItemIdRef.current = itemId
+  }, [itemId, editor, initialContent, quizContent, originalQuizContent])
+
+  // Effect B: Fetch Content (Independent of Editor)
+  useEffect(() => {
+    if (!itemId || itemType !== 'file') {
+        setLoading(false)
+        return
+    }
+
+    // New item draft override
+    if (isStructureDraft) {
+        setFetchedData({ empty: true, source: 'structure-draft' })
+        setLoading(false)
+        return
+    }
+
+    let isMounted = true
+    setLoading(true)
+
+    async function fetch() {
+        console.log('EditorPanel: [Fetch] Starting for', itemId)
+        try {
+            const supabase = createClient()
+            
+            // Check Local Cache First
+            const cachedNote = localCache.getNoteContent(itemId!)
+            const cachedQuiz = localCache.getQuizContent(itemId!)
+
+            // Fetch DB Data in Parallel
+            const [draftRes, liveRes, quizRes] = await Promise.all([
+                supabase.from('draft_content_cache').select('*').eq('original_content_id', itemId!).maybeSingle(),
+                supabase.from('note_contents').select('*').eq('item_id', itemId!).maybeSingle(),
+                supabase.from('attached_quizzes').select('*, quiz_questions(*)').eq('note_item_id', itemId!).maybeSingle()
+            ])
+
+            if (!isMounted) return
+
+            setFetchedData({
+                itemId,
+                source: cachedNote ? 'cache' : (draftRes.data ? 'draft' : 'live'),
+                content: cachedNote || draftRes.data?.draft_data?.content_html || liveRes.data?.content_html || '',
+                publishedContent: liveRes.data?.content_html || '',
+                hasDraft: !!draftRes.data,
+                draftId: draftRes.data?.id || null,
+                
+                // Quiz Data
+                quizSource: cachedQuiz ? 'cache' : 'db',
+                quizContent: cachedQuiz || null,
+                quizData: quizRes.data
+            })
+            console.log('EditorPanel: [Fetch] Complete - setFetchedData called for', itemId)
+            
+        } catch (e) {
+            console.error('Error fetching content:', e)
+        } finally {
+            if (isMounted) {
+                console.log('EditorPanel: [Fetch] Finally - setLoading(false)')
+                setLoading(false)
+            }
+        }
+    }
+
+    fetch()
+    
+    // Safety timeout - force clear loading after 5 seconds
+    const safetyTimeout = setTimeout(() => {
+        if (isMounted) {
+            console.log('EditorPanel: [Safety Timeout] Forcing loading to false')
+            setLoading(false)
+        }
+    }, 5000)
+
+    return () => { 
+        isMounted = false 
+        clearTimeout(safetyTimeout)
+    }
+  }, [itemId, itemType, isStructureDraft])
+
+  // Effect C: Apply Content (When Editor & Data are Ready)
+  useEffect(() => {
+    // DIAGNOSTIC LOGGING - identify which condition is failing
+    console.log('EditorPanel: [Apply Check]', {
+        hasEditor: !!editor,
+        hasFetchedData: !!fetchedData,
+        fetchedItemId: fetchedData?.itemId,
+        currentItemId: itemId,
+        match: fetchedData?.itemId === itemId
+    })
+    
+    if (!editor) {
+        console.log('EditorPanel: [Apply] BLOCKED - editor is null')
+        return
+    }
+    if (!fetchedData) {
+        console.log('EditorPanel: [Apply] BLOCKED - fetchedData is null')
+        return
+    }
+    if (fetchedData.itemId !== itemId) {
+        console.log('EditorPanel: [Apply] BLOCKED - itemId mismatch:', fetchedData.itemId, '!==', itemId)
+        return
+    }
+
+    // Prevent re-applying same content
+    // We use a timestamp or just equality check logic could work, but here we trust the dependency array
+    // However, to be safe, we only apply if the editor content is empty or we just switched
+    // Actually, Tiptap's setContent is smart, but let's be explicit.
+    
+    console.log('EditorPanel: [Apply] Applying content for', itemId, 'Source:', fetchedData.source)
+
+    if (fetchedData.empty) {
+        editor.commands.setContent('')
         setInitialContent('')
         setHasDraft(false)
+        setDraftId(null)
+        setPublishedContent('')
         setQuizContent('')
         setOriginalQuizContent('')
         return
-      }
-
-      console.log('EditorPanel: fetching content for', itemId)
-      setLoading(true)
-      setHasDraft(false)
-      setDraftId(null)
-
-      try {
-        const supabase = createClient()
-        
-        // Optimize: Fetch Draft, Live Note, AND Quiz content in parallel
-        console.log('EditorPanel: Fetching content in parallel for', itemId)
-        
-        const [draftResponse, liveResponse, quizResponse] = await Promise.all([
-            // 1. Draft Content
-            supabase
-                .from('draft_content_cache')
-                .select('*')
-                .eq('original_content_id', itemId)
-                .maybeSingle(),
-            // 2. Live Note Content
-            supabase
-                .from('note_contents')
-                .select('*')
-                .eq('item_id', itemId)
-                .maybeSingle(),
-            // 3. Quiz Content
-            supabase
-                .from('quizzes')
-                .select('*')
-                .eq('item_id', itemId)
-                .maybeSingle()
-        ])
-        
-        // Ensure editor is still mounted/available before updating
-        if (!editor) return
-
-        // 1. Check Draft First (for Note)
-        if (draftResponse.data) {
-             console.log('EditorPanel: Using DRAFT content')
-             setHasDraft(true)
-             setDraftId(draftResponse.data.id)
-             
-             const draftContent = draftResponse.data.draft_data?.content_html || ''
-             const htmlContent = customToHtml(draftContent)
-             
-             if (editor.getHTML() !== htmlContent) {
-                 editor.commands.setContent(htmlContent)
-             }
-             setInitialContent(htmlContent)
-        } 
-        // 2. Fallback to Live Content (for Note)
-        else if (liveResponse.data) {
-            console.log('EditorPanel: Using LIVE content')
-            const data = liveResponse.data
-            const rawContent = data.content_html || data.html || data.content || ''
-            const htmlContent = customToHtml(rawContent)
-            
-            if (editor.getHTML() !== htmlContent) {
-                editor.commands.setContent(htmlContent)
-            }
-            setInitialContent(htmlContent)
-        } else {
-            console.log('EditorPanel: No content found (New Note)')
-            editor.commands.setContent('')
-            setInitialContent('')
-        }
-
-        // 3. Set Quiz Content (Live only for now, no draft system for quizzes yet)
-        if (quizResponse.data) {
-            console.log('EditorPanel: Found Quiz Content')
-            setQuizContent(quizResponse.data.content || '')
-            setOriginalQuizContent(quizResponse.data.content || '')
-        } else {
-             setQuizContent('')
-             setOriginalQuizContent('')
-        }
-
-      } catch (e) {
-        console.error('Error loading content', e)
-        if (editor) editor.commands.setContent('')
-      } finally {
-        setLoading(false)
-      }
     }
 
-    fetchContent()
-  }, [itemId, itemType, isStructureDraft, editor])
+    // 1. Set Editor Content
+    const html = customToHtml(fetchedData.content)
+    // Only update if significantly different to prevent cursor jumps if this runs oddly
+    // But since it runs on [fetchedData] change, it should be fine.
+    editor.commands.setContent(html)
+    setInitialContent(html)
+    
+    // 2. Set State
+    setHasDraft(fetchedData.hasDraft)
+    setDraftId(fetchedData.draftId)
+    setPublishedContent(customToHtml(fetchedData.publishedContent))
+
+    // 3. Set Quiz Content
+    if (fetchedData.quizContent) {
+        // From Cache
+        setQuizContent(fetchedData.quizContent)
+        // We still need regular original content for diffing
+        // ... (reconstruct original logic if needed, but for now simplify)
+        setOriginalQuizContent('') // Simplified for cache scenario or need to derive
+    } 
+    
+    // Reconstruct Quiz Data if from DB
+    if (fetchedData.quizData) {
+        const qData = fetchedData.quizData
+        const questions = (qData.quiz_questions || [])
+            .sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0))
+            .map((q: any, i: number) => ({
+                id: i,
+                questionText: q.question_text,
+                options: q.options || [],
+                correctAnswer: q.correct_answer,
+                explanation: q.explanation || ''
+            }))
+        
+        const serialized = serializeQuiz({ title: qData.title, questions })
+         
+        if (!fetchedData.quizContent) {
+             setQuizContent(serialized)
+        }
+        setOriginalQuizContent(serialized)
+    } else if (!fetchedData.quizContent) {
+        setQuizContent('')
+        setOriginalQuizContent('')
+    }
+
+  }, [editor, fetchedData, itemId])
 
   // Save to Draft (Cache) - NOTE Only
   const handleSaveDraft = async (silent = false) => {
@@ -387,20 +496,43 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose }: Edit
     try {
         const supabase = createClient()
         
-        // Upsert to draft_content_cache
-        const { error } = await supabase
+        // Check if draft already exists
+        const { data: existingDraft } = await supabase
             .from('draft_content_cache')
-            .upsert({ 
-                original_content_id: itemId,
-                draft_data: { content_html: customSyntax },
-                updated_at: new Date().toISOString()
-            }, { onConflict: 'original_content_id' })
+            .select('id')
+            .eq('original_content_id', itemId)
+            .maybeSingle()
 
-        if (error) throw error
+        if (existingDraft) {
+            // Update existing draft
+            const { error } = await supabase
+                .from('draft_content_cache')
+                .update({ 
+                    draft_data: { content_html: customSyntax },
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', existingDraft.id)
+
+            if (error) throw error
+        } else {
+            // Insert new draft
+            const { error } = await supabase
+                .from('draft_content_cache')
+                .insert({ 
+                    original_content_id: itemId,
+                    draft_data: { content_html: customSyntax }
+                })
+
+            if (error) throw error
+        }
         
         setHasDraft(true)
         setLastSaved(new Date())
         setInitialContent(currentHtml)
+        
+        // Clear local cache since content is now saved to draft
+        localCache.clearContent(itemId)
+        
         if (!silent) toast.success("Draft saved successfully")
         
     } catch (e: any) {
@@ -413,7 +545,7 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose }: Edit
     }
   }
 
-  // Save Quiz Logic (Direct Save, no draft yet)
+  // Save Quiz Logic - NEW UNIFIED ARCHITECTURE
   const handleSaveQuiz = async () => {
     if (!itemId) return
     setSaveQuizLoading(true)
@@ -421,18 +553,85 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose }: Edit
     try {
         const supabase = createClient()
         
-        const { error } = await supabase
-            .from('quizzes')
-            .upsert({ 
-                item_id: itemId,
-                content: quizContent,
-                updated_at: new Date().toISOString()
-            }, { onConflict: 'item_id' })
+        // 1. Parse the quiz text into structured data
+        const parsedQuiz = parseQuizText(quizContent)
+        
+        if (parsedQuiz.questions.length === 0) {
+            toast.error("No valid questions found. Use format: Q1. Question text...")
+            setSaveQuizLoading(false)
+            return
+        }
 
-        if (error) throw error
+        console.log('Saving quiz with', parsedQuiz.questions.length, 'questions')
+
+        // 2. Check if quiz already exists for this note
+        const { data: existingQuiz } = await supabase
+            .from('attached_quizzes')
+            .select('id')
+            .eq('note_item_id', itemId)
+            .maybeSingle()
+
+        let quizId: string
+
+        if (existingQuiz) {
+            // Update existing quiz
+            const { error: updateError } = await supabase
+                .from('attached_quizzes')
+                .update({ 
+                    title: parsedQuiz.title || title || 'Quiz',
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', existingQuiz.id)
+
+            if (updateError) throw updateError
+            quizId = existingQuiz.id
+            console.log('Updated existing quiz:', quizId)
+        } else {
+            // Insert new quiz
+            const { data: newQuiz, error: insertQuizError } = await supabase
+                .from('attached_quizzes')
+                .insert({ 
+                    note_item_id: itemId,
+                    title: parsedQuiz.title || title || 'Quiz'
+                })
+                .select('id')
+                .single()
+
+            if (insertQuizError) throw insertQuizError
+            quizId = newQuiz.id
+            console.log('Created new quiz:', quizId)
+        }
+        
+        const quizIdFinal = quizId
+
+        // 3. Delete old questions for this quiz (to handle edits)
+        const { error: deleteError } = await supabase
+            .from('quiz_questions')
+            .delete()
+            .eq('quiz_id', quizIdFinal)
+
+        if (deleteError) {
+            console.warn('Failed to delete old questions:', deleteError)
+        }
+
+        // 4. Insert new questions
+        const questionsToInsert = parsedQuiz.questions.map((q, index) => ({
+            quiz_id: quizIdFinal,
+            question_text: q.questionText,
+            options: q.options, // JSONB field
+            correct_answer: q.correctAnswer,
+            explanation: q.explanation,
+            order_index: index
+        }))
+
+        const { error: insertError } = await supabase
+            .from('quiz_questions')
+            .insert(questionsToInsert)
+
+        if (insertError) throw insertError
         
         setOriginalQuizContent(quizContent)
-        toast.success("Quiz saved successfully")
+        toast.success(`Quiz saved with ${parsedQuiz.questions.length} questions`)
     } catch (e: any) {
         console.error("Error saving quiz:", e)
         toast.error(`Failed to save quiz: ${e.message}`)
@@ -513,6 +712,11 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose }: Edit
         setHasDraft(false)
         setDraftId(null)
         setInitialContent(currentHtml)
+        setPublishedContent(currentHtml) // Update published content so Publish button disables
+        
+        // Clear local cache
+        localCache.clearContent(itemId)
+        
         toast.success("Content published successfully")
     } catch (e) {
         console.error('Error publishing content', e)
@@ -523,34 +727,43 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose }: Edit
   }
 
   // Discard Draft
+  // Discard - Reverts to published content (note_contents table), or blank if never published
   const handleDiscardDraft = async () => {
-      if (!confirm('Are you sure you want to discard your draft changes? This cannot be undone.')) return
+      if (!confirm('Are you sure you want to discard all changes? This will revert to the last published version.')) return
       
       setLoading(true)
       try {
           const supabase = createClient()
+          
+          // Delete draft from cache table
           await supabase.from('draft_content_cache').delete().eq('original_content_id', itemId)
+          
+          // Clear local memory cache
+          if (itemId) localCache.clearContent(itemId)
           
           setHasDraft(false)
           setDraftId(null)
           
-           const { data } = await supabase
+          // Fetch published content (or empty if never published)
+          const { data } = await supabase
                 .from('note_contents')
                 .select('*')
                 .eq('item_id', itemId)
                 .limit(1)
             
-            const rawContent = data?.[0]?.content_html || ''
-            const htmlContent = customToHtml(rawContent)
-            editor?.commands.setContent(htmlContent)
-            setInitialContent(htmlContent)
-            toast.success("Draft discarded")
+          const rawContent = data?.[0]?.content_html || ''
+          const htmlContent = customToHtml(rawContent)
+          editor?.commands.setContent(htmlContent)
+          setInitialContent(htmlContent)
+          setPublishedContent(htmlContent) // Update published content reference
+          
+          toast.success(rawContent ? "Reverted to published version" : "Reverted to blank (never published)")
             
       } catch (e) {
           console.error('Error discarding draft', e)
           toast.error("Failed to discard draft")
       } finally {
-          setLoading(false)
+          setLoading(false)  // Always ensure loading is cleared
       }
   }
 
@@ -563,29 +776,6 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose }: Edit
     } else {
         (editor.commands as any).toggleNoteBox({ color })
     }
-  }
-
-  if (!itemId) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center text-muted-foreground bg-slate-50/50 rounded-xl border border-dashed border-slate-200 m-4">
-        <div className="bg-white p-4 rounded-full shadow-sm mb-4">
-            <FileText className="w-8 h-8 text-slate-300" />
-        </div>
-        <p className="font-medium">Select a note to edit content</p>
-      </div>
-    )
-  }
-
-  if (itemType === 'folder') {
-     return (
-      <div className="h-full flex flex-col items-center justify-center text-muted-foreground bg-slate-50/50 rounded-xl border border-dashed border-slate-200 m-4">
-        <div className="bg-white p-4 rounded-full shadow-sm mb-4">
-            <GripVertical className="w-8 h-8 text-slate-300" />
-        </div>
-        <p className="font-medium">Folder Selected</p>
-        <p className="text-sm mt-2 max-w-xs text-center">You can rename folders in the tree. Select a file inside to edit its content.</p>
-      </div>
-    )
   }
 
   if (!itemId) {
@@ -628,7 +818,43 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose }: Edit
                 <div>
                      <div className="flex items-center gap-2 mb-1">
                         <FileText className="w-5 h-5 text-blue-500" />
-                        <h3 className="font-bold text-lg">{title}</h3>
+                        {isEditingTitle ? (
+                            <input
+                                type="text"
+                                value={editedTitle}
+                                onChange={(e) => setEditedTitle(e.target.value)}
+                                onBlur={() => {
+                                    if (editedTitle.trim() && editedTitle !== title && onTitleChange) {
+                                        onTitleChange(editedTitle.trim())
+                                    }
+                                    setIsEditingTitle(false)
+                                }}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        if (editedTitle.trim() && editedTitle !== title && onTitleChange) {
+                                            onTitleChange(editedTitle.trim())
+                                        }
+                                        setIsEditingTitle(false)
+                                    } else if (e.key === 'Escape') {
+                                        setEditedTitle(title)
+                                        setIsEditingTitle(false)
+                                    }
+                                }}
+                                className="font-bold text-lg bg-transparent border-b-2 border-blue-500 outline-none px-1 min-w-[100px]"
+                                autoFocus
+                            />
+                        ) : (
+                            <h3 
+                                className="font-bold text-lg cursor-pointer hover:text-blue-600 transition-colors"
+                                onDoubleClick={() => {
+                                    setEditedTitle(title)
+                                    setIsEditingTitle(true)
+                                }}
+                                title="Double-click to rename"
+                            >
+                                {title}
+                            </h3>
+                        )}
                         {activeTab === 'note' && hasDraft && (
                             <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium flex items-center gap-1 border border-amber-200">
                                 <AlertTriangle className="w-3 h-3" />
@@ -658,43 +884,49 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose }: Edit
 
                 {activeTab === 'note' ? (
                     <>
-                        {!isStructureDraft && hasDraft && (
-                            <Button 
-                                size="sm" 
-                                variant="ghost" 
-                                onClick={handleDiscardDraft}
-                                className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                                title="Discard Draft Changes"
-                            >
-                                <RotateCcw className="w-4 h-4 mr-2" />
-                                Discard
-                            </Button>
-                        )}
+                        {/* Discard - Reverts to published content */}
+                        <Button 
+                            size="sm" 
+                            variant="ghost" 
+                            onClick={handleDiscardDraft}
+                            disabled={isStructureDraft || loading || (!hasDraft && editor?.getHTML() === initialContent)}
+                            className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                            title="Discard all changes and revert to published version"
+                        >
+                            <RotateCcw className="w-4 h-4 mr-2" />
+                            Discard
+                        </Button>
                         
+                        {/* Update Draft - Saves to cache table */}
                         <Button 
                             size="sm" 
                             onClick={() => handleSaveDraft(false)} 
-                            disabled={!editor || saveLoading}
-                            variant={hasDraft ? "secondary" : "default"}
-                            className={!isStructureDraft && hasDraft ? "bg-amber-100 text-amber-900 hover:bg-amber-200 border border-amber-200" : ""}
-                            title="Save Note Draft"
+                            disabled={!editor || saveLoading || isStructureDraft}
+                            variant="secondary"
+                            className="bg-amber-100 text-amber-900 hover:bg-amber-200 border border-amber-200"
+                            title="Save changes as draft (not visible to users)"
                         >
                             {saveLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-                            {hasDraft ? "Update Draft" : "Save Draft"}
+                            Update Draft
                         </Button>
                         
-                        {!isStructureDraft && hasDraft && (
-                            <Button 
-                                size="sm" 
-                                onClick={handlePublish} 
-                                disabled={publishLoading}
-                                className="bg-green-600 hover:bg-green-700 text-white"
-                                title="Publish Note"
-                            >
-                                {publishLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-2" />}
-                                Publish
-                            </Button>
-                        )}
+                        {/* Publish - Only enabled when there's a saved draft different from published */}
+                        <Button 
+                            size="sm" 
+                            onClick={handlePublish} 
+                            disabled={publishLoading || isStructureDraft || !hasDraft || (initialContent === publishedContent)}
+                            className={!hasDraft || (initialContent === publishedContent) 
+                                ? "bg-gray-300 text-gray-500 cursor-not-allowed" 
+                                : "bg-green-600 hover:bg-green-700 text-white"}
+                            title={!hasDraft 
+                                ? "Save to draft first before publishing" 
+                                : (initialContent === publishedContent) 
+                                    ? "Draft is same as published content" 
+                                    : "Publish content (visible to users)"}
+                        >
+                            {publishLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-2" />}
+                            Publish
+                        </Button>
                     </>
                 ) : (
                     // Quiz Actions
@@ -991,7 +1223,7 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose }: Edit
                         
                         <div 
                             className={cn(
-                                "bg-white shadow-sm rounded-lg border border-slate-100 transition-all duration-300 h-fit flex-shrink-0",
+                                "bg-white shadow-sm rounded-lg border border-slate-100 transition-all duration-300 h-fit shrink-0",
                                 isExpanded ? "w-[850px] min-h-[900px] my-8 shadow-xl" : "w-full min-h-[600px]"
                             )}
                         >
