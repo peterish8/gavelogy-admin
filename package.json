@@ -25,6 +25,7 @@
     "@radix-ui/react-toggle": "^1.1.10",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.86.0",
+    "@tiptap/core": "^3.15.3",
     "@tiptap/extension-bubble-menu": "^3.15.3",
     "@tiptap/extension-color": "^3.11.1",
     "@tiptap/extension-highlight": "^3.11.1",
