@@ -10,6 +10,7 @@ import { useCourse } from '@/hooks/use-courses'
 import { useStructure, useStructureActions } from '@/hooks/use-structure'
 import { StructureTree } from '@/components/course/structure-tree'
 import { EditorPanel } from '@/components/course/editor-panel'
+import { CourseDeclarationModal } from '@/components/course/course-declaration-modal'
 import type { StructureItem } from '@/types/structure'
 
 export default function CourseDetailPage() {
@@ -161,6 +162,11 @@ export default function CourseDetailPage() {
 
         {isAdmin && (
           <div className="flex items-center gap-2">
+            <CourseDeclarationModal 
+              courseId={courseId}
+              onStructureCreated={refetchStructure}
+              createItem={createItem}
+            />
             <Button variant="outline" size="sm" onClick={() => handleCreateItem('file')}>
               <FileText className="w-4 h-4 mr-2" />
               Add Note
@@ -218,6 +224,11 @@ export default function CourseDetailPage() {
              itemType={selectedItem?.item_type || null}
              courseId={courseId}
              title={selectedItem?.title || ''}
+             onTitleChange={(newTitle) => {
+               if (selectedId) {
+                 updateItem(selectedId, { title: newTitle })
+               }
+             }}
            />
         </div>
       </div>

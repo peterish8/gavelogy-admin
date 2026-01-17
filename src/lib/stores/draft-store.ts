@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import { createClient } from '@/lib/supabase/client'
 import type { DraftChange, EntityType } from '@/types/course-builder'
+import { useCourseStore } from './course-store'
 
 interface DraftState {
   // State
@@ -182,6 +183,46 @@ export const useDraftStore = create<DraftState>((set, get) => ({
 
         if (error) throw new Error(`Failed to update ${change.entityType}: ${error.message}`)
       }
+
+      // SYNC: Apply committed changes to the course store cache
+      // This makes UI update instantly without requiring reload
+      const courseStore = useCourseStore.getState()
+      
+      // Get all structure_item changes and group by course_id
+      const structureChanges = changes.filter(c => c.entityType === 'structure_item')
+      const courseIds = new Set<string>()
+      
+      structureChanges.forEach(change => {
+        const courseId = (change.data as any)?.course_id
+        if (courseId) courseIds.add(courseId)
+      })
+      
+      // For each affected course, apply changes to cached structure
+      courseIds.forEach(courseId => {
+        const cachedItems = courseStore.structures[courseId] || []
+        let updatedItems = [...cachedItems]
+        
+        structureChanges.forEach(change => {
+          if ((change.data as any)?.course_id !== courseId) return
+          
+          if (change.action === 'create') {
+            // Add new item
+            updatedItems.push(change.data as any)
+          } else if (change.action === 'update' || change.action === 'reorder') {
+            // Update existing item
+            const index = updatedItems.findIndex(item => item.id === change.entityId)
+            if (index !== -1) {
+              updatedItems[index] = { ...updatedItems[index], ...change.data }
+            }
+          } else if (change.action === 'delete') {
+            // Remove item
+            updatedItems = updatedItems.filter(item => item.id !== change.entityId)
+          }
+        })
+        
+        // Update the store
+        courseStore.setStructure(courseId, updatedItems)
+      })
 
       // Clear changes on success
       set({
