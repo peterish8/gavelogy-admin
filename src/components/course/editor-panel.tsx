@@ -15,7 +15,7 @@ import BubbleMenuExtension from '@tiptap/extension-bubble-menu'
 import { Extension } from '@tiptap/core'
 import { Node, mergeAttributes } from '@tiptap/core'
 import { htmlToCustom, customToHtml } from '@/lib/content-converter'
-import { Loader2, Save, FileText, GripVertical, Bold, Italic, Underline as UnderlineIcon, X, AlertTriangle, CheckCircle, RotateCcw, Highlighter, Type, Minus, Maximize2, Minimize2, List, ListOrdered, Eye, Edit3, MessageSquare, StickyNote, ChevronLeft } from 'lucide-react'
+import { Loader2, Save, FileText, GripVertical, Bold, Italic, Underline as UnderlineIcon, X, AlertTriangle, CheckCircle, RotateCcw, Highlighter, Type, Minus, Maximize2, Minimize2, List, ListOrdered, Eye, Edit3, MessageSquare, StickyNote, ChevronLeft, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import {
@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { QuizPreview } from './quiz-preview'
+import { FullscreenQuizView } from './fullscreen-quiz-view'
 import { parseQuizText, serializeQuiz } from '@/lib/quiz-parser'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
@@ -162,9 +163,10 @@ interface EditorPanelProps {
   title: string
   onClose?: () => void
   onTitleChange?: (newTitle: string) => void
+  mode?: 'all' | 'notes-only' | 'quiz-only'
 }
 
-export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitleChange }: EditorPanelProps) {
+export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitleChange, mode = 'all' }: EditorPanelProps) {
   const [loading, setLoading] = useState(false)
   const [saveLoading, setSaveLoading] = useState(false)
   const [saveQuizLoading, setSaveQuizLoading] = useState(false)
@@ -185,8 +187,8 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
   // UI State
   const [isExpanded, setIsExpanded] = useState(false)
   
-  // Active Tab
-  const [activeTab, setActiveTab] = useState("note")
+  // Active Tab - set default based on mode
+  const [activeTab, setActiveTab] = useState(mode === 'quiz-only' ? 'quiz' : 'note')
 
   // Draft System State
   const [hasDraft, setHasDraft] = useState(false)
@@ -247,6 +249,7 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
 
   const [quizSplit, setQuizSplit] = useState(50) // Percentage width of left panel
   const [isDragging, setIsDragging] = useState(false)
+  const [previewFullscreen, setPreviewFullscreen] = useState(false)
 
   // Drag handler
   useEffect(() => {
@@ -946,6 +949,7 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
         {/* Tabs & Content */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
             <div className="px-6 border-b bg-slate-50/50">
+            {mode === 'all' ? (
                 <TabsList className="bg-transparent p-0 h-10 w-full justify-start space-x-2">
                     <TabsTrigger 
                         value="note"
@@ -962,6 +966,22 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
                         Quiz
                     </TabsTrigger>
                 </TabsList>
+            ) : (
+                <div className="flex items-center gap-2 h-10 px-2">
+                    {mode === 'notes-only' && (
+                        <>
+                            <StickyNote className="w-4 h-4 text-blue-500" />
+                            <span className="font-medium text-sm">Note Editor</span>
+                        </>
+                    )}
+                    {mode === 'quiz-only' && (
+                        <>
+                            <MessageSquare className="w-4 h-4 text-purple-500" />
+                            <span className="font-medium text-sm">Quiz Editor</span>
+                        </>
+                    )}
+                </div>
+            )}
             </div>
 
             <TabsContent value="note" className="flex-1 overflow-hidden flex flex-col relative m-0 p-0">
@@ -1254,17 +1274,33 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
                 
                 {/* Drag Handle */}
                 <div 
-                    className="w-1.5 h-full bg-slate-100 hover:bg-blue-400 cursor-col-resize z-10 hover:w-2 transition-all flex items-center justify-center group absolute"
-                    style={{ left: `calc(${quizSplit}% - 3px)` }}
+                    className={cn(
+                        "w-3 h-full cursor-col-resize z-50 flex items-center justify-center group absolute top-0",
+                        isDragging ? "bg-blue-400" : "bg-transparent hover:bg-blue-100"
+                    )}
+                    style={{ left: `calc(${quizSplit}% - 6px)` }}
                     onMouseDown={() => setIsDragging(true)}
                 >
-                    <div className="w-0.5 h-8 bg-slate-300 group-hover:bg-white rounded-full" />
+                    <div className={cn(
+                        "w-1 h-12 rounded-full transition-colors",
+                        isDragging ? "bg-blue-600" : "bg-slate-300 group-hover:bg-blue-400"
+                    )} />
                 </div>
                 
                 {/* Quiz Preview (Right) */}
                 <div className="flex flex-col bg-white flex-1 overflow-hidden">
-                     <div className="px-4 py-3 border-b bg-white text-xs font-medium text-slate-500 uppercase tracking-widest">
-                        Live Preview
+                     <div className="px-4 py-3 border-b bg-white text-xs font-medium text-slate-500 uppercase tracking-widest flex items-center justify-between">
+                        <span>Live Preview</span>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setPreviewFullscreen(true)}
+                            className="h-7 px-2 text-slate-400 hover:text-slate-600"
+                            title="Preview in Fullscreen"
+                            disabled={!quizContent}
+                        >
+                            <Maximize2 className="w-4 h-4" />
+                        </Button>
                     </div>
                      <div className="flex-1 overflow-auto relative">
                         {quizContent ? (
@@ -1282,6 +1318,15 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
                         )}
                     </div>
                 </div>
+                
+                {/* Fullscreen Preview Modal */}
+                {previewFullscreen && (
+                    <FullscreenQuizView 
+                        content={quizContent}
+                        title={title}
+                        onClose={() => setPreviewFullscreen(false)}
+                    />
+                )}
             </TabsContent>
         </Tabs>
     </div>
