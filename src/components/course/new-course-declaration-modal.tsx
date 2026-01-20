@@ -72,8 +72,9 @@ function TreePreview({
               ) : (
                 <FileText className="w-4 h-4 text-blue-500 shrink-0" />
               )}
-              <span className="text-sm font-medium text-slate-700 truncate">{item.title}</span>
-              <span className="text-xs text-slate-400 ml-auto shrink-0">{item.id}</span>
+              <span className="text-sm font-medium text-slate-700 line-clamp-2 wrap-break-word">{item.title}</span>
+              {/* ID Hidden as per request */}
+              {/* <span className="text-xs text-slate-400 ml-auto shrink-0">{item.id}</span> */}
               {item.type === 'file' && (
                 <div className="flex gap-1 shrink-0">
                   {item.hasNotes && <span className="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">Notes</span>}
@@ -272,7 +273,7 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+      <DialogContent className="max-w-5xl max-h-[80vh] flex flex-col">
         <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Upload className="w-5 h-5" />

@@ -292,8 +292,13 @@ export default function AdminLayout({
           </div>
         </header>
 
-        <main className="flex-1 p-6 lg:p-8 overflow-y-auto bg-slate-50/50">
-           <div className="w-full">
+        <main className={cn(
+          "flex-1 overflow-y-auto bg-slate-50/50",
+          // Reduce padding for Studio to zero/minimal to allow full-screen IDE feel
+          // Standard admin pages keep the spacious padding
+          pathname.includes('/admin/studio') ? "p-0 overflow-hidden" : "p-6 lg:p-8"
+        )}>
+           <div className={cn("w-full", pathname.includes('/admin/studio') ? "h-full" : "")}>
              {children}
            </div>
         </main>

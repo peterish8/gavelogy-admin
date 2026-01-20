@@ -158,7 +158,7 @@ export function customToHtml(text: string): string {
     html = html.replace(/\[\/hl\]/g, '</mark>')
 
     // 6. Font Size (supports px, pt, em, rem)
-    html = html.replace(/\[size:(\d+(?:px|pt|em|rem)?)\]/g, '<span style="font-size:$1">')
+    html = html.replace(/\[size:(\d+(?:px|pt|em|rem)?)\]/g, '<span style="font-size:$1 !important">')
     html = html.replace(/\[\/size\]/g, '</span>')
 
     // ========== BLOCK ELEMENTS ==========

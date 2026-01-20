@@ -145,7 +145,7 @@ function StructureItemRow({
     <div>
       <div 
         className={cn(
-          "flex items-center gap-2 p-2 rounded-lg cursor-pointer group transition-colors",
+          "relative flex items-center gap-2 p-2 rounded-lg cursor-pointer group transition-colors pr-2", // Added relative
           isSelected ? "bg-primary/10 text-primary" : "hover:bg-muted/50",
           depth > 0 && "ml-6 border-l border-border pl-2" // Indentation line
         )}
@@ -204,8 +204,8 @@ function StructureItemRow({
                 variant="ghost" 
                 size="icon" 
                 className={cn(
-                    "h-8 w-8 transition-opacity",
-                    isSelected || isOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                    "absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 transition-all z-20 hover:bg-slate-200", // Absolute position
+                    (isSelected || isOpen) ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                 )}
                 onClick={(e) => {
                     e.stopPropagation()

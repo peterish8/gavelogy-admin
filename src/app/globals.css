@@ -1,4 +1,6 @@
 @import "tailwindcss";
+
+@plugin "tailwindcss-animate";
 @plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
@@ -110,7 +112,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  /* Use Inter (via layout.tsx --font-inter) */
+  --font-sans: var(--font-inter);
   --font-mono: var(--font-geist-mono);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -150,6 +153,8 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    /* Use Inter from next/font CSS variable */
+    font-family: var(--font-inter), 'Inter', sans-serif !important;
   }
   body {
     @apply bg-background text-foreground;
@@ -252,38 +257,36 @@
   }
 
   /* Rich Text Notes (Block Boxes) */
+  /* Rich Text Notes (Block Boxes) - STRICT USER SITE MIRROR */
   .note-box {
     padding: 1rem;
     border-radius: 0.5rem;
     margin: 1rem 0;
-    border-width: 2px;
-    border-style: solid;
+    border: 2px solid;
+    /* Ensure typography inside boxes inherits correctly */
+    color: #1e293b; 
   }
 
-  .note-blue {
-    background-color: rgba(59, 130, 246, 0.1);
-    border-color: rgba(59, 130, 246, 1);
-  }
+  .note-blue { background: rgba(59, 130, 246, 0.1); border-color: #3B82F6; color: #1e293b; }
+  .note-green { background: rgba(34, 197, 94, 0.1); border-color: #22C55E; color: #1e293b; }
+  .note-red { background: rgba(239, 68, 68, 0.1); border-color: #EF4444; color: #1e293b; }
+  .note-amber { background: rgba(245, 158, 11, 0.1); border-color: #F59E0B; color: #1e293b; }
+  .note-purple { background: rgba(168, 85, 247, 0.1); border-color: #A855F7; color: #1e293b; }
   
-  .note-green {
-    background-color: rgba(34, 197, 94, 0.1); 
-    border-color: rgba(34, 197, 94, 1);
-  }
-
-  .note-red {
-    background-color: rgba(239, 68, 68, 0.1);
-    border-color: rgba(239, 68, 68, 1);
-  }
-
-  .note-amber {
-    background-color: rgba(245, 158, 11, 0.1);
-    border-color: rgba(245, 158, 11, 1);
-  }
-
-  .note-purple {
-    background-color: rgba(168, 85, 247, 0.1);
-    border-color: rgba(168, 85, 247, 1);
-  }
+  /* Violet - Beautiful indigo-inspired box (like Gemini's violet containers) */
+  .note-violet { background: rgba(124, 58, 237, 0.1); border-color: #7C3AED; color: #1e293b; }
+  
+  /* Slate/Dark - Black-ish box with light text for emphasis */
+  .note-slate { background: rgba(30, 41, 59, 0.95); border-color: #334155; color: #f1f5f9; }
+  .note-dark { background: rgba(15, 23, 42, 0.95); border-color: #1e293b; color: #f8fafc; }
+  .note-black { background: rgba(0, 0, 0, 0.9); border-color: #374151; color: #ffffff; }
+  
+  /* Cyan and Pink for variety */
+  .note-cyan { background: rgba(6, 182, 212, 0.1); border-color: #06B6D4; color: #1e293b; }
+  .note-pink { background: rgba(236, 72, 153, 0.1); border-color: #EC4899; color: #1e293b; }
+  
+  /* Map yellow to amber for compatibility */
+  .note-yellow { background: rgba(245, 158, 11, 0.1); border-color: #F59E0B; color: #1e293b; }
 
   /* Horizontal Rule Styling */
   hr, .content-hr {
