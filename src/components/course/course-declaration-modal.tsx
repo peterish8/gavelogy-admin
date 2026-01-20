@@ -86,14 +86,14 @@ function TreePreview({
               )}
 
               {/* Title */}
-              <span className="text-sm font-medium text-slate-700 truncate">
+              <span className="text-sm font-medium text-slate-700 line-clamp-2 wrap-break-word">
                 {item.title}
               </span>
 
-              {/* ID Badge */}
-              <span className="text-xs text-slate-400 ml-auto shrink-0">
+              {/* ID Badge Hidden */}
+              {/* <span className="text-xs text-slate-400 ml-auto shrink-0">
                 {item.id}
-              </span>
+              </span> */}
 
               {/* Notes/Quiz Badges for files */}
               {item.type === 'file' && (
@@ -245,7 +245,7 @@ export function CourseDeclarationModal({
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+      <DialogContent className="max-w-5xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Upload className="w-5 h-5" />

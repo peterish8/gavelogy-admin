@@ -25,42 +25,52 @@ interface LocalContentCache {
   hasUnsavedContent: (itemId: string) => boolean
 }
 
-export const useLocalContentCache = create<LocalContentCache>((set, get) => ({
-  noteContent: {},
-  quizContent: {},
+import { persist, createJSONStorage } from 'zustand/middleware'
 
-  setNoteContent: (itemId, content) => set((state) => ({
-    noteContent: { ...state.noteContent, [itemId]: content }
-  })),
+export const useLocalContentCache = create<LocalContentCache>()(
+  persist(
+    (set, get) => ({
+      noteContent: {},
+      quizContent: {},
 
-  setQuizContent: (itemId, content) => set((state) => ({
-    quizContent: { ...state.quizContent, [itemId]: content }
-  })),
+      setNoteContent: (itemId, content) => set((state) => ({
+        noteContent: { ...state.noteContent, [itemId]: content }
+      })),
 
-  getNoteContent: (itemId) => {
-    return get().noteContent[itemId]
-  },
+      setQuizContent: (itemId, content) => set((state) => ({
+        quizContent: { ...state.quizContent, [itemId]: content }
+      })),
 
-  getQuizContent: (itemId) => {
-    return get().quizContent[itemId]
-  },
+      getNoteContent: (itemId) => {
+        return get().noteContent[itemId]
+      },
 
-  clearContent: (itemId) => set((state) => {
-    const { [itemId]: removedNote, ...restNote } = state.noteContent
-    const { [itemId]: removedQuiz, ...restQuiz } = state.quizContent
-    return {
-      noteContent: restNote,
-      quizContent: restQuiz
+      getQuizContent: (itemId) => {
+        return get().quizContent[itemId]
+      },
+
+      clearContent: (itemId) => set((state) => {
+        const { [itemId]: removedNote, ...restNote } = state.noteContent
+        const { [itemId]: removedQuiz, ...restQuiz } = state.quizContent
+        return {
+          noteContent: restNote,
+          quizContent: restQuiz
+        }
+      }),
+
+      clearAllContent: () => set({
+        noteContent: {},
+        quizContent: {}
+      }),
+
+      hasUnsavedContent: (itemId) => {
+        const state = get()
+        return !!(state.noteContent[itemId] || state.quizContent[itemId])
+      }
+    }),
+    {
+      name: 'gavelogy-local-content-cache', // unique name
+      storage: createJSONStorage(() => localStorage),
     }
-  }),
-
-  clearAllContent: () => set({
-    noteContent: {},
-    quizContent: {}
-  }),
-
-  hasUnsavedContent: (itemId) => {
-    const state = get()
-    return !!(state.noteContent[itemId] || state.quizContent[itemId])
-  }
-}))
+  )
+)

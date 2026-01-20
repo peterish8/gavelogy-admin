@@ -1,21 +1,30 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useDraftStore } from '@/lib/stores/draft-store'
 import { useLocalContentCache } from '@/lib/stores/local-content-cache'
 import { cn } from '@/lib/utils'
 import { useEditor, EditorContent } from '@tiptap/react'
-import { BubbleMenu } from '@tiptap/react/menus'
+import { BubbleMenu } from '@tiptap/react/menus' 
+import { DOMParser as ProseMirrorDOMParser } from 'prosemirror-model'
+import { Extension } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Highlight from '@tiptap/extension-highlight'
 import { TextStyle } from '@tiptap/extension-text-style'
 import BubbleMenuExtension from '@tiptap/extension-bubble-menu'
-import { Extension } from '@tiptap/core'
 import { Node, mergeAttributes } from '@tiptap/core'
 import { htmlToCustom, customToHtml } from '@/lib/content-converter'
-import { Loader2, Save, FileText, GripVertical, Bold, Italic, Underline as UnderlineIcon, X, AlertTriangle, CheckCircle, RotateCcw, Highlighter, Type, Minus, Maximize2, Minimize2, List, ListOrdered, Eye, Edit3, MessageSquare, StickyNote, ChevronLeft, ArrowLeft } from 'lucide-react'
+import {
+    Bold, Italic, Underline as UnderlineIcon,
+    AlignLeft, AlignCenter, AlignRight, AlignJustify,
+    List, ListOrdered, Image as ImageIcon, Link as LinkIcon,
+    Undo, Redo, Save, X, RotateCcw, CheckCircle, AlertTriangle,
+    Maximize2, Minimize2, ChevronRight, ChevronsRight, StickyNote, FileText,
+    Highlighter, Type, Box as BoxIcon, Upload, Braces,
+    GripVertical, ChevronLeft, Loader2, MessageSquare, Minus, ArrowLeft, Eye, Edit3
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import {
@@ -25,6 +34,16 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select"
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+    DialogFooter,
+} from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { QuizPreview } from './quiz-preview'
 import { FullscreenQuizView } from './fullscreen-quiz-view'
@@ -164,9 +183,12 @@ interface EditorPanelProps {
   onClose?: () => void
   onTitleChange?: (newTitle: string) => void
   mode?: 'all' | 'notes-only' | 'quiz-only'
+  // Controlled Expansion State (Optional)
+  isExpandedControlled?: boolean
+  onExpandChange?: (expanded: boolean) => void
 }
 
-export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitleChange, mode = 'all' }: EditorPanelProps) {
+export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitleChange, mode = 'all', isExpandedControlled, onExpandChange }: EditorPanelProps) {
   const [loading, setLoading] = useState(false)
   const [saveLoading, setSaveLoading] = useState(false)
   const [saveQuizLoading, setSaveQuizLoading] = useState(false)
@@ -176,16 +198,53 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
   const [fetchedData, setFetchedData] = useState<any>(null)
   
   const { changes } = useDraftStore()
+
+  // Bubble Menu State
+  const [showHighlightPalette, setShowHighlightPalette] = useState(false)
+  const [showFontSizePalette, setShowFontSizePalette] = useState(false)
+
+  // Import Modal State
+  const [isImportOpen, setIsImportOpen] = useState(false)
+  const [importText, setImportText] = useState('')
+
+  const handleImportContent = () => {
+      if (!importText || !editor) return
+      
+      try {
+          // Convert raw bracket syntax to HTML
+          const html = customToHtml(importText)
+          
+           editor.commands.setContent(html)
+           
+          setImportText('')
+          setIsImportOpen(false)
+          toast.success("Content imported successfully")
+      } catch (e) {
+          console.error(e)
+          toast.error("Failed to parse content")
+      }
+  }
   
   // Local content cache for persisting unsaved changes
   const localCache = useLocalContentCache()
   const prevItemIdRef = useRef<string | null>(null)
+  const currentLoadedItemId = useRef<string | null>(null) // Tracks which item is ACTUALLY in the editor
   
   // Reactivity State (to force toolbar updates)
   const [, setTick] = useState(0)
   
   // UI State
-  const [isExpanded, setIsExpanded] = useState(false)
+  const [internalIsExpanded, setInternalIsExpanded] = useState(false)
+  const isExpanded = isExpandedControlled ?? internalIsExpanded
+
+  const handleToggleExpand = () => {
+    const newState = !isExpanded
+    if (onExpandChange) {
+      onExpandChange(newState)
+    } else {
+      setInternalIsExpanded(newState)
+    }
+  }
   
   // Active Tab - set default based on mode
   const [activeTab, setActiveTab] = useState(mode === 'quiz-only' ? 'quiz' : 'note')
@@ -223,24 +282,89 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
     editorProps: {
       attributes: {
         class: cn(
-            'prose prose-lg max-w-none focus:outline-none p-8 text-lg leading-relaxed outline-none',
-            'prose-headings:font-bold prose-h1:text-4xl prose-h2:text-3xl prose-p:text-slate-700',
-            'prose-li:text-black prose-li:marker:text-black',
-            'min-h-[500px]'
+            // STRICT USER SITE MIRRORING
+            // Single Card Concept: This inner div is THE card.
+            'prose prose-lg max-w-none mx-auto focus:outline-none px-[72px] py-12 text-lg leading-relaxed outline-none text-justify font-sans',
+            'text-slate-700', // Body Color #334155
+            'prose-headings:font-bold prose-headings:text-slate-900', // Headings #0f172a
+            'prose-h1:text-4xl prose-h2:text-3xl', // Specific sizes
+            'prose-li:text-slate-700 prose-li:marker:text-slate-700',
+            'min-h-[900px] bg-white shadow-sm border border-slate-200 rounded-xl my-8'
         ),
       },
+      handlePaste: (view, event) => {
+        const text = event.clipboardData?.getData('text/plain')
+        if (text && (text.includes('[box:') || text.includes('[h1]') || text.includes('[p]') || text.includes('[size:'))) {
+            try {
+                // MAGIC PASTE: Detect AI syntax and render it instantly
+                const html = customToHtml(text)
+                
+                // Parse HTML to ProseMirror Slice
+                const parser = new DOMParser()
+                const dom = parser.parseFromString(html, 'text/html').body
+                
+                const pmSlice = ProseMirrorDOMParser.fromSchema(view.state.schema)
+                    .parseSlice(dom)
+                
+                // Insert content
+                view.dispatch(view.state.tr.replaceSelection(pmSlice))
+                
+                toast.success('AI Content Auto-Formatted!')
+                return true // Prevent default paste
+            } catch (e) {
+                console.error("Auto-format failed", e)
+                return false // Fallback to normal paste
+            }
+        }
+        return false // Normal paste
+      }
     },
+    // Force re-render on selection updates to sync toolbar state (bold, font size, etc)
     // Force re-render on selection updates to sync toolbar state (bold, font size, etc)
     onTransaction: () => {
         setTick(prev => prev + 1)
     },
+    onUpdate: ({ editor }) => {
+        // LOCAL AUTOSAVE: Debounced save to local storage
+        if (!itemId) return
+        const html = editor.getHTML()
+        setInitialContent(html) // Keep tracking current content
+        debouncedSave(itemId, html)
+    }
   })
+
+  // Debounced Autosave Implementation
+  const debouncedSave = useCallback((id: string, content: string) => {
+     // We define this but actually use useDebouncedCallback or just use-debounce lib
+     // But since we can't easily import useDebouncedCallback without checking package.json
+     // Let's implement a simple ref-based debounce here or assumes useDebounce exists?
+     // Actually, let's use a custom lightweight debounce within the effect or onUpdate
+     // Simpler: Just direct call localCache.setNoteContent here, as it's just zustand
+     // persistence might be heavy? No, writing to localStorage 60fps is bad.
+     // Let's use a timeout ref.
+     
+     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+     autoSaveTimerRef.current = setTimeout(() => {
+        localCache.setNoteContent(id, content)
+        // Also save quiz if changed
+        if (quizContent) localCache.setQuizContent(id, quizContent)
+        console.log('Autosave: Saved to localStorage')
+     }, 1000) // 1 second debounce
+  }, [quizContent])
+  
+  // Cleanup timer
+  useEffect(() => {
+      return () => {
+          if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+      }
+  }, [])
 
   // Close expanded mode on Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === 'Escape' && isExpanded) {
-            setIsExpanded(false)
+            if (onExpandChange) onExpandChange(false)
+            else setInternalIsExpanded(false)
         }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -295,9 +419,16 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
   // ---------------------------------------------------------------------------
 
   // Effect A: Save on Leave (Cache unsaved changes before switching)
+  // Effect A: Save on Leave (Cache unsaved changes before switching)
   useEffect(() => {
-    if (prevItemIdRef.current && prevItemIdRef.current !== itemId && editor) {
-        const currentHtml = editor.getHTML()
+    // SECURITY CHECK: Only cache if we are leaving an item that was FULLY LOADED.
+    // This prevents "pollution" where rapid clicking caches empty/stale content for an item that never finished loading.
+    const isSafeToCache = prevItemIdRef.current && 
+                          prevItemIdRef.current === currentLoadedItemId.current && 
+                          editor
+
+    if (isSafeToCache && prevItemIdRef.current) {
+        const currentHtml = editor!.getHTML()
         // Only cache if content has changed from initial
         if (currentHtml && currentHtml !== initialContent) {
             localCache.setNoteContent(prevItemIdRef.current, currentHtml)
@@ -361,8 +492,11 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
             })
             console.log('EditorPanel: [Fetch] Complete - setFetchedData called for', itemId)
             
-        } catch (e) {
+        } catch (e: any) {
             console.error('Error fetching content:', e)
+            toast.error("Failed to load content. Please check your connection or permissions.", {
+                description: e.message || "Unknown error"
+            })
         } finally {
             if (isMounted) {
                 console.log('EditorPanel: [Fetch] Finally - setLoading(false)')
@@ -435,6 +569,7 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
     // But since it runs on [fetchedData] change, it should be fine.
     editor.commands.setContent(html)
     setInitialContent(html)
+    currentLoadedItemId.current = itemId // MARK AS LOADED
     
     // 2. Set State
     setHasDraft(fetchedData.hasDraft)
@@ -499,35 +634,44 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
     try {
         const supabase = createClient()
         
-        // Check if draft already exists
-        const { data: existingDraft } = await supabase
-            .from('draft_content_cache')
-            .select('id')
-            .eq('original_content_id', itemId)
-            .maybeSingle()
+        // Create a timeout promise
 
-        if (existingDraft) {
-            // Update existing draft
-            const { error } = await supabase
+
+        // Wrapper for the DB operation
+        const dbOperation = async () => {
+             // Check if draft already exists
+             const { data: existingDraft } = await supabase
                 .from('draft_content_cache')
-                .update({ 
-                    draft_data: { content_html: customSyntax },
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', existingDraft.id)
+                .select('id')
+                .eq('original_content_id', itemId)
+                .maybeSingle()
 
-            if (error) throw error
-        } else {
-            // Insert new draft
-            const { error } = await supabase
-                .from('draft_content_cache')
-                .insert({ 
-                    original_content_id: itemId,
-                    draft_data: { content_html: customSyntax }
-                })
+             if (existingDraft) {
+                // Update existing draft
+                const { error } = await supabase
+                    .from('draft_content_cache')
+                    .update({ 
+                        draft_data: { content_html: customSyntax },
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', existingDraft.id)
 
-            if (error) throw error
+                if (error) throw error
+            } else {
+                // Insert new draft
+                const { error } = await supabase
+                    .from('draft_content_cache')
+                    .insert({ 
+                        original_content_id: itemId,
+                        draft_data: { content_html: customSyntax }
+                    })
+
+                if (error) throw error
+            }
         }
+
+        // Execute DB Operation directly (let Supabase handle network timeouts)
+        await dbOperation()
         
         setHasDraft(true)
         setLastSaved(new Date())
@@ -712,18 +856,23 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
 
         if (deleteError) console.warn('Failed to clean up draft', deleteError)
         
+        // 3. Clear Local Cache (LocalStorage)
+        localCache.clearContent(itemId)
+
+        // 4. Update UI State
         setHasDraft(false)
         setDraftId(null)
         setInitialContent(currentHtml)
-        setPublishedContent(currentHtml) // Update published content so Publish button disables
+        setPublishedContent(customSyntax) 
         
-        // Clear local cache
-        localCache.clearContent(itemId)
-        
-        toast.success("Content published successfully")
-    } catch (e) {
+        toast.success("Content published successfully", {
+            description: "Draft cleared and content is now live."
+        })
+    } catch (e: any) {
         console.error('Error publishing content', e)
-        toast.error('Failed to publish content')
+        toast.error('Failed to publish content', {
+            description: e.message || "Unknown error"
+        })
     } finally {
         setPublishLoading(false)
     }
@@ -871,14 +1020,14 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
                         )}
                     </div>
                 </div>
-            </div>
+
             
             <div className="flex items-center gap-2">
                 {/* Fullscreen Toggle */}
                 <Button
                      size="sm"
                      variant="ghost"
-                     onClick={() => setIsExpanded(!isExpanded)}
+                     onClick={handleToggleExpand}
                      className="text-slate-500 mr-2"
                      title={isExpanded ? "Exit Full Screen" : "Fill Screen"}
                 >
@@ -910,7 +1059,7 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
                             title="Save changes as draft (not visible to users)"
                         >
                             {saveLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-                            Update Draft
+                            Save Draft
                         </Button>
                         
                         {/* Publish - Only enabled when there's a saved draft different from published */}
@@ -944,6 +1093,7 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
                     </Button>
                 )}
             </div>
+        </div>
         </div>
 
         {/* Tabs & Content */}
@@ -1121,6 +1271,37 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
 
                                 {/* Insert Elements */}
                                 <div className="flex items-center gap-1">
+                                    {/* Import AI Dialog - Icon Only */}
+                                    <Dialog open={isImportOpen} onOpenChange={setIsImportOpen}>
+                                        <DialogTrigger asChild>
+                                            <Button 
+                                                variant="ghost" 
+                                                size="sm" 
+                                                className="h-8 w-8 p-0 text-indigo-600 hover:bg-indigo-50"
+                                                title="Import AI Markup"
+                                            >
+                                                <Braces className="w-4 h-4" />
+                                            </Button>
+                                        </DialogTrigger>
+                                        <DialogContent className="max-w-2xl h-[80vh] flex flex-col">
+                                            <DialogHeader>
+                                                <DialogTitle>Import AI Generated Content</DialogTitle>
+                                                <DialogDescription>
+                                                    Paste the raw content (with [box], [h1] tags) from ChatGPT/Gemini here.
+                                                </DialogDescription>
+                                            </DialogHeader>
+                                            <Textarea 
+                                                value={importText}
+                                                onChange={(e) => setImportText(e.target.value)}
+                                                className="flex-1 font-mono text-xs p-4"
+                                                placeholder="[h1]Title[/h1] ..."
+                                            />
+                                            <DialogFooter>
+                                                <Button onClick={handleImportContent}>Import & Convert</Button>
+                                            </DialogFooter>
+                                        </DialogContent>
+                                    </Dialog>
+
                                     <Button 
                                         variant="ghost" 
                                         size="sm" 
@@ -1142,112 +1323,250 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
                             isExpanded ? "bg-slate-100" : "bg-slate-50/30"
                         )}>
                             {editor && (
-                            <BubbleMenu editor={editor}>
-                                {/* Bold/Italic/Underline */}
-                                <div className="flex items-center gap-1 p-1 bg-white rounded-full shadow-lg border border-slate-200 animate-in zoom-in-95 duration-200 mr-2">
-                                    <button 
-                                        onClick={() => editor.chain().focus().toggleBold().run()}
-                                        className={cn(
-                                            "p-1.5 rounded-full hover:bg-slate-100 text-slate-600 transition-colors",
-                                            editor.isActive('bold') && "bg-slate-100 text-blue-600 font-bold"
-                                        )}
-                                        title="Bold"
-                                    >
-                                        <Bold className="w-4 h-4" />
-                                    </button>
-                                    <button 
-                                        onClick={() => editor.chain().focus().toggleItalic().run()}
-                                        className={cn(
-                                            "p-1.5 rounded-full hover:bg-slate-100 text-slate-600 transition-colors",
-                                            editor.isActive('italic') && "bg-slate-100 text-blue-600 italic"
-                                        )}
-                                        title="Italic"
-                                    >
-                                        <Italic className="w-4 h-4" />
-                                    </button>
-                                    <button 
-                                        onClick={() => editor.chain().focus().toggleUnderline().run()}
-                                        className={cn(
-                                            "p-1.5 rounded-full hover:bg-slate-100 text-slate-600 transition-colors",
-                                            editor.isActive('underline') && "bg-slate-100 text-blue-600 underline"
-                                        )}
-                                        title="Underline"
-                                    >
-                                        <UnderlineIcon className="w-4 h-4" />
-                                    </button>
-                                </div>
-                                  <div className="flex items-center gap-1 p-1 bg-white rounded-full shadow-lg border border-slate-200 animate-in zoom-in-95 duration-200">
-                                     {/* Quick Highlight in Bubble */}
-                                    <button
-                                        onClick={() => editor.chain().focus().toggleHighlight({ color: '#fef08a' }).run()}
-                                        className={cn(
-                                            "p-1.5 rounded-full hover:bg-slate-100 text-slate-600",
-                                            editor.isActive('highlight', { color: '#fef08a' }) && "bg-yellow-100 text-yellow-700"
-                                        )}
-                                        title="Yellow Highlight"
-                                    >
-                                        <Highlighter className="w-4 h-4" />
-                                    </button>
-                                    {/* ... rest of bubble menu ... */}
-                                     <div className="w-px h-4 bg-slate-200 mx-1" />
+                            // @ts-ignore - tippyOptions is valid but types might be mismatching
+                            <BubbleMenu editor={editor} className="flex flex-col gap-1 items-center" tippyOptions={{ placement: 'bottom', duration: 100, maxWidth: 600, animation: 'scale' }}>
+                                {/* Bottom Row: Main Toolbar (Now Top Row visually) */}
+                                <div className="flex items-center gap-1 p-1 bg-white rounded-lg shadow-xl border border-slate-200 animate-in zoom-in-95 duration-200">
+                                    
+                                    {/* Text Styling Group */}
+                                    <div className="flex items-center gap-0.5 border-r border-slate-200 pr-1 mr-1">
+                                        <button 
+                                            onClick={() => editor.chain().focus().toggleBold().run()}
+                                            className={cn(
+                                                "p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors",
+                                                editor.isActive('bold') && "bg-slate-100 text-blue-600 font-bold"
+                                            )}
+                                            title="Bold"
+                                        >
+                                            <Bold className="w-4 h-4" />
+                                        </button>
+                                        <button 
+                                            onClick={() => editor.chain().focus().toggleItalic().run()}
+                                            className={cn(
+                                                "p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors",
+                                                editor.isActive('italic') && "bg-slate-100 text-blue-600 italic"
+                                            )}
+                                            title="Italic"
+                                        >
+                                            <Italic className="w-4 h-4" />
+                                        </button>
+                                        <button 
+                                            onClick={() => editor.chain().focus().toggleUnderline().run()}
+                                            className={cn(
+                                                "p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors",
+                                                editor.isActive('underline') && "bg-slate-100 text-blue-600 underline"
+                                            )}
+                                            title="Underline"
+                                        >
+                                            <UnderlineIcon className="w-4 h-4" />
+                                        </button>
+                                    </div>
 
-                                    <button 
-                                        onClick={() => toggleNote('red')}
-                                        className={cn(
-                                            "w-6 h-6 rounded-full hover:scale-110 transition-transform flex items-center justify-center", 
-                                            "bg-red-100 border-2 border-red-500",
-                                            editor.isActive('noteBox', { color: 'red' }) && "ring-2 ring-offset-1 ring-slate-400"
-                                        )}
-                                        title="Red Note Box"
-                                    />
-                                    <button 
-                                        onClick={() => toggleNote('green')}
-                                        className={cn(
-                                            "w-6 h-6 rounded-full hover:scale-110 transition-transform flex items-center justify-center", 
-                                            "bg-green-100 border-2 border-green-500",
-                                            editor.isActive('noteBox', { color: 'green' }) && "ring-2 ring-offset-1 ring-slate-400"
-                                        )}
-                                        title="Green Note Box"
-                                    />
-                                    <button 
-                                        onClick={() => toggleNote('blue')}
-                                        className={cn(
-                                            "w-6 h-6 rounded-full hover:scale-110 transition-transform flex items-center justify-center", 
-                                            "bg-blue-100 border-2 border-blue-500",
-                                            editor.isActive('noteBox', { color: 'blue' }) && "ring-2 ring-offset-1 ring-slate-400"
-                                        )}
-                                        title="Blue Note Box"
-                                    />
-                                    <button 
-                                        onClick={() => toggleNote('amber')}
-                                        className={cn(
-                                            "w-6 h-6 rounded-full hover:scale-110 transition-transform flex items-center justify-center", 
-                                            "bg-amber-100 border-2 border-amber-500",
-                                            editor.isActive('noteBox', { color: 'amber' }) && "ring-2 ring-offset-1 ring-slate-400"
-                                        )}
-                                        title="Amber Note Box"
-                                    />
+                                        {/* Lists & Code */}
+                                        <div className="flex items-center gap-0.5 border-r border-slate-200 pr-1 mr-1">
+                                            <button 
+                                                onClick={() => editor.chain().focus().toggleBulletList().run()}
+                                                className={cn(
+                                                    "p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors",
+                                                    editor.isActive('bulletList') && "bg-slate-100 text-blue-600"
+                                                )}
+                                                title="Bullet List"
+                                            >
+                                                <List className="w-4 h-4" />
+                                            </button>
+                                            <button 
+                                                onClick={() => editor.chain().focus().toggleCode().run()}
+                                                className={cn(
+                                                    "p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors",
+                                                    editor.isActive('code') && "bg-slate-100 text-blue-600"
+                                                )}
+                                                title="Inline Code"
+                                            >
+                                                <Braces className="w-4 h-4" />
+                                            </button>
+                                        </div>
+
+                                        {/* Font Size Selector (Stacked Toggle) */}
+                                        <div className="flex items-center border-r border-slate-200 pr-1 mr-1">
+                                            <button
+                                                onClick={() => {
+                                                    setShowFontSizePalette(!showFontSizePalette)
+                                                    setShowHighlightPalette(false) // Mutex
+                                                }}
+                                                className={cn(
+                                                    "flex items-center gap-1 h-7 px-2 text-xs font-medium rounded hover:bg-slate-100 text-slate-600 transition-colors",
+                                                    showFontSizePalette && "bg-slate-100 text-primary"
+                                                )}
+                                                title="Font Size"
+                                            >
+                                                {/* Display current size roughly */}
+                                                {(() => {
+                                                    const size = editor.getAttributes('textStyle')?.fontSize
+                                                    if (size === '12px') return 'Small'
+                                                    if (size === '14px') return 'Normal'
+                                                    if (size === '18px') return 'Medium'
+                                                    if (size === '20px') return 'Large'
+                                                    if (size === '24px') return 'Ex-Lg'
+                                                    if (size === '30px') return 'H1'
+                                                    return 'Default'
+                                                })()}
+                                                <ChevronRight className={cn("w-3 h-3 text-slate-400 transition-transform", showFontSizePalette && "rotate-90")} />
+                                            </button>
+                                        </div>
+
+                                        {/* Highlight & Note Boxes */}
+                                        <div className="flex items-center gap-1.5">
+                                            {/* Open Highlight Palette Button */}
+                                            <button
+                                                onClick={() => {
+                                                    setShowHighlightPalette(!showHighlightPalette)
+                                                    setShowFontSizePalette(false) // Mutex
+                                                }}
+                                                className={cn(
+                                                    "p-1.5 rounded hover:bg-slate-100 text-slate-600 flex items-center gap-1 transition-colors",
+                                                    (editor.isActive('highlight') || showHighlightPalette) && "bg-yellow-100 text-yellow-700"
+                                                )}
+                                                title="Highlight Colors"
+                                            >
+                                                <Highlighter className="w-4 h-4" />
+                                                <ChevronRight className={cn("w-3 h-3 text-slate-400 transition-transform", showHighlightPalette && "rotate-90")} />
+                                            </button>
+
+                                        <div className="w-px h-4 bg-slate-200" />
+
+                                        {/* Colored Note Containers */}
+                                        <div className="flex items-center gap-1">
+                                            {['red', 'green', 'blue', 'amber', 'violet'].map(color => (
+                                                <button 
+                                                    key={color}
+                                                    onClick={() => toggleNote(color)}
+                                                    className={cn(
+                                                        "w-4 h-4 rounded-full hover:scale-125 transition-transform border",
+                                                        color === 'red' && "bg-red-100 border-red-400",
+                                                        color === 'green' && "bg-green-100 border-green-400",
+                                                        color === 'blue' && "bg-blue-100 border-blue-400",
+                                                        color === 'amber' && "bg-amber-100 border-amber-400",
+                                                        color === 'violet' && "bg-violet-100 border-violet-400",
+                                                        editor.isActive('noteBox', { color }) && "ring-2 ring-offset-1 ring-slate-400 scale-110"
+                                                    )}
+                                                    title={`${color.charAt(0).toUpperCase() + color.slice(1)} Box`}
+                                                />
+                                            ))}
+                                        </div>
+                                    </div>
                                     
                                     <div className="w-px h-4 bg-slate-200 mx-1" />
-                                    
-                                    <button
-                                        onClick={() => (editor.commands as any).unsetNoteBox()}
-                                        className="p-1 hover:bg-slate-100 rounded-full text-slate-400 hover:text-red-500 transition-colors"
-                                        title="Clear Note Box"
+
+                                    {/* Clear Format */}
+                                    <button 
+                                        onClick={() => {
+                                            editor.chain().focus().unsetAllMarks().run()
+                                            if (editor.isActive('noteBox')) {
+                                                (editor.commands as any).unsetNoteBox()
+                                            }
+                                        }}
+                                        className="p-1.5 rounded hover:bg-slate-100 text-slate-400 hover:text-red-500 transition-colors"
+                                        title="Clear Formatting"
                                     >
                                         <X className="w-4 h-4" />
                                     </button>
                                 </div>
+
+                                {/* Top Row: Highlight Palette (Now Btm Check) */}
+                                {showHighlightPalette && ( // Swapped
+                                    <div className="flex items-center gap-2 p-1.5 bg-slate-900/90 backdrop-blur text-white rounded-full shadow-xl mt-1 animate-in slide-in-from-top-2 duration-200">
+                                            {[
+                                                { color: '#fef08a', name: 'Yellow', border: '#eab308' },
+                                                { color: '#bbf7d0', name: 'Green', border: '#22c55e' },
+                                                { color: '#bfdbfe', name: 'Blue', border: '#3b82f6' },
+                                                { color: '#fbcfe8', name: 'Pink', border: '#ec4899' },
+                                                { color: '#fed7aa', name: 'Orange', border: '#f97316' },
+                                            ].map((item) => (
+                                                <button
+                                                    key={item.color}
+                                                    onClick={() => {
+                                                        editor.chain().focus().toggleHighlight({ color: item.color }).run()
+                                                        // Optional: Keep palette open or close it? User didn't specify, keeping open might be nice for exploration, 
+                                                        // but usually selecting an action closes the submenu. Let's keep it toggled for now as "mode".
+                                                        // actually, "previous box shld also be there" implies a mode.
+                                                    }}
+                                                    className={cn(
+                                                        "w-6 h-6 rounded-full border border-white/20 shadow-sm hover:scale-125 transition-transform",
+                                                        editor.isActive('highlight', { color: item.color }) && "ring-2 ring-white scale-125"
+                                                    )}
+                                                    style={{ backgroundColor: item.color }}
+                                                    title={item.name}
+                                                />
+                                            ))}
+                                            
+                                            <div className="w-px h-4 bg-white/20 mx-1" />
+                                            
+                                            <button
+                                                onClick={() => {
+                                                    editor.chain().focus().unsetHighlight().run()
+                                                    setShowHighlightPalette(false) // Close palette on reset
+                                                }}
+                                                className="w-6 h-6 rounded-full border border-white/20 flex items-center justify-center bg-transparent text-white/70 hover:text-red-400 hover:border-red-400/50 transition-colors"
+                                                title="Remove Highlight"
+                                            >
+                                                <X className="w-3 h-3" />
+                                            </button>
+                                    </div>
+                                )}
+
+                                {/* Top Row: Font Size Palette (Now Btm Check) */}
+                                {showFontSizePalette && ( // Swapped
+                                    <div className="flex items-center gap-1 p-1.5 bg-slate-900/90 backdrop-blur text-white rounded-full shadow-xl mt-1 animate-in slide-in-from-top-2 duration-200 overflow-x-auto max-w-[90vw] no-scrollbar">
+                                        {[
+                                            { size: '12px', label: 'Small (12)' },
+                                            { size: '14px', label: 'Normal (14)' },
+                                            { size: '16px', label: 'Default (16)' },
+                                            { size: '18px', label: 'Medium (18)' },
+                                            { size: '20px', label: 'Large (20)' },
+                                            { size: '24px', label: 'XL (24)' },
+                                            { size: '30px', label: 'H1 (30)' },
+                                        ].map((item) => (
+                                            <button
+                                                key={item.size}
+                                                onClick={() => {
+                                                    editor.chain().focus().setFontSize(item.size).run()
+                                                }}
+                                                className={cn(
+                                                    "px-2.5 py-1 text-xs font-medium rounded-full hover:bg-white/20 transition-colors whitespace-nowrap",
+                                                    editor.getAttributes('textStyle')?.fontSize === item.size 
+                                                        ? "bg-white text-slate-900 shadow-sm" 
+                                                        : "text-white/80"
+                                                )}
+                                            >
+                                                {item.label}
+                                            </button>
+                                        ))}
+
+                                        <div className="w-px h-4 bg-white/20 mx-1" />
+                                            
+                                        <button
+                                            onClick={() => {
+                                                editor.chain().focus().unsetFontSize().run()
+                                                setShowFontSizePalette(false) // Close palette on reset
+                                            }}
+                                            className="w-6 h-6 rounded-full border border-white/20 flex items-center justify-center bg-transparent text-white/70 hover:text-red-400 hover:border-red-400/50 transition-colors"
+                                            title="Reset Size"
+                                        >
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    </div>
+                                )}
                             </BubbleMenu>
                         )}
                         
                         <div 
                             className={cn(
-                                "bg-white shadow-sm rounded-lg border border-slate-100 transition-all duration-300 h-fit shrink-0",
-                                isExpanded ? "w-[850px] min-h-[900px] my-8 shadow-xl" : "w-full min-h-[600px]"
+                                // WRAPPER: Transparent, just layout positioning. No borders/backgrounds here.
+                                "transition-all duration-300 h-fit shrink-0 w-full flex justify-center",
+                                isExpanded ? "min-h-[900px] my-8" : "min-h-[600px]"
                             )}
                         >
-                                <EditorContent editor={editor} />
+                                <EditorContent editor={editor} className="w-full" />
                         </div>
                     </div>
                 </div>
@@ -1291,16 +1610,15 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
                 <div className="flex flex-col bg-white flex-1 overflow-hidden">
                      <div className="px-4 py-3 border-b bg-white text-xs font-medium text-slate-500 uppercase tracking-widest flex items-center justify-between">
                         <span>Live Preview</span>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setPreviewFullscreen(true)}
-                            className="h-7 px-2 text-slate-400 hover:text-slate-600"
-                            title="Preview in Fullscreen"
-                            disabled={!quizContent}
-                        >
-                            <Maximize2 className="w-4 h-4" />
-                        </Button>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleToggleExpand}
+                                className="h-8 w-8 p-0 text-slate-500 hover:text-slate-900"
+                                title={isExpanded ? "Collapse View" : "Expand View"}
+                            >
+                                {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                            </Button>
                     </div>
                      <div className="flex-1 overflow-auto relative">
                         {quizContent ? (

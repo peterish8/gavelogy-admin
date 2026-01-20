@@ -47,7 +47,7 @@ export function FullscreenQuizView({ content, title, onClose }: FullscreenQuizVi
 
   if (questions.length === 0) {
     return (
-      <div className="fixed inset-0 z-[100] bg-gradient-to-br from-blue-100 via-slate-50 to-purple-100 flex items-center justify-center">
+      <div className="fixed inset-0 z-100 bg-linear-to-br from-blue-100 via-slate-50 to-purple-100 flex items-center justify-center">
         <button onClick={onClose} className="absolute top-6 left-6 p-2 hover:bg-white/50 rounded-full transition-colors">
           <ArrowLeft className="w-6 h-6 text-slate-600" />
         </button>
@@ -63,7 +63,7 @@ export function FullscreenQuizView({ content, title, onClose }: FullscreenQuizVi
   const displayTitle = parsedQuiz.title || title
 
   return (
-    <div className="fixed inset-0 z-[100] bg-gradient-to-br from-blue-100 via-slate-50 to-purple-100 overflow-auto">
+    <div className="fixed inset-0 z-100 bg-linear-to-br from-blue-100 via-slate-50 to-purple-100 overflow-auto">
       {/* Header */}
       <div className="sticky top-0 z-10 px-6 py-4 flex items-center justify-between">
         <button 
@@ -195,7 +195,7 @@ export function FullscreenQuizView({ content, title, onClose }: FullscreenQuizVi
 
       {/* Fixed Footer with Continue/Restart */}
       {showResult && (
-        <div className="fixed bottom-0 left-0 right-0 z-20 p-6 bg-gradient-to-t from-slate-100 to-transparent">
+        <div className="fixed bottom-0 left-0 right-0 z-20 p-6 bg-linear-to-t from-slate-100 to-transparent">
           <div className="max-w-4xl mx-auto flex justify-center">
             {currentIndex < totalQuestions - 1 ? (
               <Button 

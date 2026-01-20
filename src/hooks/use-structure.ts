@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { StructureItem, ItemType } from '@/types/structure'
 import { useDraftStore } from '@/lib/stores/draft-store'
@@ -6,7 +6,7 @@ import { useCourseStore } from '@/lib/stores/course-store'
 
 export function useStructure(courseId: string) {
   const store = useCourseStore()
-  const [items, setItems] = useState<StructureItem[]>([])
+  // const [items, setItems] = useState<StructureItem[]>([]) // REFACTOR: Using useMemo to prevent render lag
   
   // Cache check
   const storeData = store.structures[courseId]
@@ -84,18 +84,25 @@ export function useStructure(courseId: string) {
   }, [courseId, fetchStructureFromDb, storeData]) 
   
   // Derive final items from Store Data + Draft Changes
-  useEffect(() => {
+  const items = useMemo(() => {
+    // If no store data and we are loading, return empty? 
+    // Or just process what we have.
+    // If storeData is missing, we treat it as empty until fetched.
+    
     let processedData = [...(storeData || [])]
 
     const draftChanges = changes.filter(c => c.entityType === 'structure_item')
     
     draftChanges.forEach(change => {
+      // NOTE: We only care about this course's items
+      // For create, we need to check course_id
       if (change.action === 'create') {
         const newData = change.data as any
         if (newData.course_id === courseId) {
           processedData.push(newData)
         }
       } else if (change.action === 'update' || change.action === 'reorder') {
+        // Only if item exists in this course (or was added to it)
         const index = processedData.findIndex(item => item.id === change.entityId)
         if (index !== -1) {
           processedData[index] = { ...processedData[index], ...change.data }
@@ -105,8 +112,7 @@ export function useStructure(courseId: string) {
       }
     })
 
-    const tree = buildTree(processedData)
-    setItems(tree)
+    return buildTree(processedData)
   }, [storeData, changes, courseId])
 
   return { items, isLoading, error, refetch: fetchStructureFromDb }

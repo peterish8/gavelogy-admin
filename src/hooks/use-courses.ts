@@ -23,6 +23,12 @@ export function useCourses() {
     setIsFetching(true)
     setError(null)
     
+    // Safety timeout
+    const timeoutId = setTimeout(() => {
+        setIsFetching(false)
+        console.warn('useCourses: forced timeout')
+    }, 5000)
+    
     try {
       console.log('useCourses: invoking supabase client')
       const supabase = createClient()
@@ -40,6 +46,7 @@ export function useCourses() {
       console.error('useCourses: caught error', message)
       setError(message)
     } finally {
+      clearTimeout(timeoutId)
       setIsFetching(false)
     }
   }, [store.setCourses])
