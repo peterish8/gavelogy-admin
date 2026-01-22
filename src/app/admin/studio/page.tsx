@@ -1,7 +1,23 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import Link from 'next/link'
+import { useState, useEffect, useRef, useMemo } from 'react'
+
+import { 
+  Filter as FilterIcon, 
+  ArrowUpDown, 
+  Calendar,
+  Layers
+} from 'lucide-react'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+
+import { createClient } from '@/lib/supabase/client'
+import { toast } from 'sonner'
 import {
   DndContext,
   closestCenter,
@@ -29,6 +45,11 @@ import { useDraftStore } from '@/lib/stores/draft-store'
 export default function StudioPage() {
   const { isAdmin, isLoading: adminLoading } = useAdmin()
   const { courses, isLoading, error, refetch } = useCourses()
+  
+  // Organization State
+  const [filterType, setFilterType] = useState<'all' | 'normal' | 'crash'>('all')
+  const [sortOrder, setSortOrder] = useState<'custom' | 'newest' | 'oldest'>('custom')
+
   const { createCourse, updateCourse, deleteCourse, reorderCourse } = useCourseActions()
   const addChange = useDraftStore((state) => state.addChange)
   
@@ -37,12 +58,30 @@ export default function StudioPage() {
   
   // Update local courses when fetched courses change
   useEffect(() => {
-    console.log('StudioPage: updating localCourses from courses', courses?.length)
+    // console.log('StudioPage: updating localCourses from courses', courses?.length)
     if (courses) {
       setLocalCourses(courses)
     }
   }, [courses])
 
+  // Auto-scroll logic
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const prevCountRef = useRef(0)
+  
+  useEffect(() => {
+     if (localCourses.length > prevCountRef.current && localCourses.length > 0) {
+          console.log('StudioPage: Course count increased, scrolling...', localCourses.length)
+          setTimeout(() => {
+              bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          }, 100)
+          setTimeout(() => {
+              bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          }, 500)
+      }
+      prevCountRef.current = localCourses.length
+  }, [localCourses.length])
+
+  // DND Sensors
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -53,6 +92,10 @@ export default function StudioPage() {
       coordinateGetter: sortableKeyboardCoordinates
     })
   )
+
+  const handleRefresh = () => {
+      refetch()
+  }
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
@@ -65,123 +108,187 @@ export default function StudioPage() {
       const newCourses = arrayMove(localCourses, oldIndex, newIndex)
       setLocalCourses(newCourses)
 
-      // Add reorder change to draft
-      reorderCourse(active.id as string, newIndex, oldIndex)
+      // Add reorder change to draft (now direct save)
+      reorderCourse(active.id as string, newIndex)
     }
   }
 
-  const handleCreateCourse = () => {
-    const newId = createCourse({
-      name: 'New Course',
-      description: 'Course description',
-      icon: '📚',
-      order_index: localCourses.length
-    })
-    // Optimistically add to local state
-    setLocalCourses((prev) => [
-      ...prev,
-      {
-        id: newId,
+  const handleCreateCourse = async () => {
+    try {
+      const supabase = createClient()
+      const newCourseId = crypto.randomUUID()
+      
+      const newCourse = {
+        id: newCourseId,
         name: 'New Course',
         description: 'Course description',
         icon: '📚',
-        order_index: prev.length,
+        order_index: localCourses.length,
         price: 0,
-        is_active: true,
+        is_active: false, // Default to hidden
         version: 1,
-        created_at: new Date().toISOString(),
+        is_crash_course: false, // Default normal
         updated_at: new Date().toISOString()
       }
-    ])
+
+      // Optimistically add to local state
+      setLocalCourses((prev) => [
+        ...prev,
+        {
+            ...newCourse,
+            created_at: new Date().toISOString(),
+        }
+      ])
+
+      const { data, error } = await supabase
+        .from('courses')
+        .insert(newCourse)
+        .select()
+        .single()
+
+      if (error) throw error
+
+      toast.success('Course created')
+      refetch() // Sync 
+      
+    } catch (error: any) {
+      console.error('Error creating course:', error)
+      toast.error('Failed to create course: ' + (error.message || 'Unknown error'))
+      refetch() // Revert 
+    }
   }
 
-  const handleDeleteCourse = (id: string) => {
-    if (confirm('Delete this course? This action will be saved when you click "Save Changes".')) {
-      deleteCourse(id)
-      // Optimistically remove from local state
-      setLocalCourses((prev) => prev.filter((c) => c.id !== id))
+  const handleDeleteCourse = async (id: string) => {
+    if (confirm('Are you sure you want to delete this course? This action cannot be undone.')) {
+      try {
+        const supabase = createClient()
+        setLocalCourses((prev) => prev.filter((c) => c.id !== id))
+        const { error } = await supabase.from('courses').delete().eq('id', id)
+        if (error) throw error
+        toast.success('Course deleted')
+        refetch() 
+      } catch (error: any) {
+        console.error('Error deleting course:', error)
+        toast.error('Failed to delete course')
+        refetch() 
+      }
     }
   }
 
   const handleEditCourse = (id: string, updates: Partial<typeof courses[0]>) => {
     if (Object.keys(updates).length > 0) {
       updateCourse(id, updates)
-      // Optimistically update local state
       setLocalCourses((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)))
     }
   }
 
-  if (adminLoading || isLoading) {
-    return (
-      <div className="flex items-center justify-center h-[60vh]">
-        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-        <span className="sr-only">Loading...</span>
-      </div>
-    )
-  }
+  // Derived Courses Logic
+  const processedCourses = useMemo(() => {
+    let result = [...localCourses]
 
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center h-[60vh] text-center">
-        <p className="text-destructive mb-4">{error}</p>
-        <Button onClick={refetch} variant="outline">
-          Try Again
-        </Button>
-      </div>
-    )
-  }
+    // 1. Filter
+    if (filterType === 'normal') {
+      result = result.filter(c => !c.is_crash_course)
+    } else if (filterType === 'crash') {
+      result = result.filter(c => c.is_crash_course)
+    }
 
-  // Safety check for courses
-  const safeCourses = courses || []
-  const safeLocalCourses = localCourses || []
-  const displayCourses = safeLocalCourses.length > 0 ? safeLocalCourses : safeCourses
+    // 2. Sort
+    if (sortOrder === 'newest') {
+      result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    } else if (sortOrder === 'oldest') {
+      result.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    } 
+    // 'custom' uses the order in localCourses (already sorted by order_index usually)
+    
+    return result
+  }, [localCourses, filterType, sortOrder])
+  
+  const isDndEnabled = sortOrder === 'custom' && filterType === 'all'
 
-  console.log('StudioPage rendering', { 
-    coursesCount: safeCourses.length, 
-    localCoursesCount: safeLocalCourses.length,
-    displayCount: displayCourses.length 
-  })
+  
+  const displayCourses = processedCourses
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 pb-32">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border/50 pb-6">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
-            <div className="p-2 bg-primary/10 rounded-xl">
-               <Sparkles className="w-6 h-6 text-primary" />
+      <div className="flex flex-col gap-6 border-b border-border/50 pb-6">
+        <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
+                <div className="p-2 bg-primary/10 rounded-xl">
+                   <Sparkles className="w-6 h-6 text-primary" />
+                </div>
+                Course Studio
+              </h1>
+              <p className="text-slate-500 mt-2 text-lg">
+                Manage your course worlds and content structure
+              </p>
             </div>
-            Course Studio
-          </h1>
-          <p className="text-slate-500 mt-2 text-lg">
-            Manage your course worlds and content structure
-          </p>
-        </div>
 
-        {isAdmin && (
-          <div className="flex items-center gap-2">
-            <NewCourseDeclarationModal 
-              coursesCount={displayCourses.length}
-              onComplete={refetch}
-            />
-            <CrashCourseModal 
-              coursesCount={displayCourses.length}
-              onImportComplete={refetch}
-            />
-            <Button onClick={handleCreateCourse} className="h-11 px-6 shadow-md shadow-primary/20">
-              <Plus className="w-5 h-5 mr-2" />
-              New Course
-            </Button>
-          </div>
-        )}
+            {isAdmin && (
+              <div className="flex items-center gap-2">
+                <NewCourseDeclarationModal 
+                  coursesCount={displayCourses.length}
+                  onComplete={handleRefresh}
+                />
+                <CrashCourseModal 
+                  coursesCount={displayCourses.length}
+                  onImportComplete={handleRefresh}
+                />
+                <Button onClick={handleCreateCourse} className="h-11 px-6 shadow-md shadow-primary/20">
+                  <Plus className="w-5 h-5 mr-2" />
+                  New Course
+                </Button>
+              </div>
+            )}
+        </div>
+        
+        {/* Toolbar */}
+        <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-border">
+                <FilterIcon className="w-4 h-4 text-slate-400 ml-2" />
+                <Select value={filterType} onValueChange={(v: any) => setFilterType(v)}>
+                    <SelectTrigger className="w-[140px] border-none shadow-none h-8 font-medium">
+                        <SelectValue placeholder="Filter" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="all">All Courses</SelectItem>
+                        <SelectItem value="normal">Normal Only</SelectItem>
+                        <SelectItem value="crash">Crash Courses</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
+
+            <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-border">
+                <ArrowUpDown className="w-4 h-4 text-slate-400 ml-2" />
+                <Select value={sortOrder} onValueChange={(v: any) => setSortOrder(v)}>
+                    <SelectTrigger className="w-[140px] border-none shadow-none h-8 font-medium">
+                        <SelectValue placeholder="Sort" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="custom">Custom Order</SelectItem>
+                        <SelectItem value="newest">Newest First</SelectItem>
+                        <SelectItem value="oldest">Oldest First</SelectItem>
+                    </SelectContent>
+                </Select>
+            </div>
+            
+            {!isDndEnabled && (
+                <div className="text-xs text-amber-600 bg-amber-50 px-3 py-1.5 rounded-full font-medium flex items-center gap-1.5">
+                    <Layers className="w-3 h-3" />
+                    Reordering disabled while filtered/sorted
+                </div>
+            )}
+        </div>
       </div>
 
       {/* Admin notice */}
-      {isAdmin && (
+      {isAdmin && isDndEnabled && (
         <div className="p-4 bg-blue-50/50 border border-blue-100/50 rounded-xl flex items-center gap-3 text-blue-700">
           <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
           <p className="text-sm font-medium">
-             Drag cards to reorder. Changes are saved when you click "Save Changes" in the bottom bar.
+             Drag cards to reorder.
           </p>
         </div>
       )}
@@ -192,11 +299,13 @@ export default function StudioPage() {
           <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
             <Sparkles className="w-10 h-10 text-slate-300" />
           </div>
-          <h3 className="text-xl font-bold text-slate-900 mb-2">No courses yet</h3>
+          <h3 className="text-xl font-bold text-slate-900 mb-2">No courses found</h3>
           <p className="text-slate-500 mb-8 max-w-sm mx-auto">
-            Get started by creating your first course world. It will appear here.
+             {filterType === 'all' 
+                ? "Get started by creating your first course world. It will appear here."
+                : "Try adjusting your filters to see more results."}
           </p>
-          {isAdmin && (
+          {isAdmin && filterType === 'all' && (
             <Button onClick={handleCreateCourse} size="lg" variant="outline" className="border-slate-300 text-slate-700">
               <Plus className="w-5 h-5 mr-2" />
               Create First Course
@@ -212,6 +321,7 @@ export default function StudioPage() {
           <SortableContext
             items={displayCourses.map((c) => c.id)}
             strategy={verticalListSortingStrategy}
+            disabled={!isDndEnabled} 
           >
             <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {displayCourses.map((course) => (
@@ -221,10 +331,13 @@ export default function StudioPage() {
                   isAdmin={isAdmin}
                   onEdit={handleEditCourse}
                   onDelete={handleDeleteCourse}
+                  // Maybe pass drag handle prop if needed to hide visual handles?
+                  // For now, SortableContext disable prevents drag.
                 />
               ))}
             </div>
           </SortableContext>
+          {isDndEnabled && <div ref={bottomRef} className="w-full h-1" />}
         </DndContext>
       )}
     </div>

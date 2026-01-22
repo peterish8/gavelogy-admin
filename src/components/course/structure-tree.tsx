@@ -35,7 +35,7 @@ interface StructureTreeProps {
   parentId?: string | null
   depth?: number
   isAdmin: boolean
-  onAdd: (parentId: string | null, type: 'folder' | 'file') => void
+  onAdd: (parentId: string | null, type: 'folder' | 'file') => void | Promise<any>
   onEdit: (id: string, updates: Partial<StructureItem>) => void
   onDelete: (item: StructureItem) => void
   onSelect: (id: string) => void
@@ -136,7 +136,7 @@ function StructureItemRow({
   item: StructureItem
   depth: number 
   isAdmin: boolean
-  onAdd: (parentId: string | null, type: 'folder' | 'file') => void
+  onAdd: (parentId: string | null, type: 'folder' | 'file') => void | Promise<any>
   onEdit: (id: string, updates: Partial<StructureItem>) => void
   onDelete: (item: StructureItem) => void
   onSelect: (id: string) => void

@@ -23,11 +23,12 @@ export function useCourses() {
     setIsFetching(true)
     setError(null)
     
-    // Safety timeout
+    // Safety timeout (increased to 30s)
     const timeoutId = setTimeout(() => {
         setIsFetching(false)
         console.warn('useCourses: forced timeout')
-    }, 5000)
+        setError('Connection timed out. Please check your internet or try again.')
+    }, 30000)
     
     try {
       console.log('useCourses: invoking supabase client')
@@ -87,10 +88,11 @@ export function useCourse(courseId: string) {
     setIsFetching(true)
     setError(null)
 
-    // Safety timeout
+    // Safety timeout (increased to 30s)
     const timeoutId = setTimeout(() => {
         setIsFetching(false)
-    }, 5000)
+        setError('Connection timed out. Please check your internet or try again.')
+    }, 30000)
 
     // 1. Check drafts (unchanged logic)
     const draftChange = getChangeForEntity(courseId)
@@ -171,57 +173,73 @@ export function useCourse(courseId: string) {
 }
 
 // Hook for CRUD operations (uses draft store)
+// Hook for CRUD operations (Direct DB - Instant Save)
 export function useCourseActions() {
-  const addChange = useDraftStore((state) => state.addChange)
+    // Note: create and delete are now handled directly in page.tsx for better optimistic control
+    // taking them out here or keeping them as legacy wrappers isn't ideal. 
+    // Let's refactor to keep logic central if possible, but for Page's specific needs we did inline.
+    // For consistency, let's make these powerful async functions too.
 
-  const createCourse = useCallback((courseData: Partial<Course>) => {
-    const tempId = crypto.randomUUID()
-    addChange({
-      action: 'create',
-      entityType: 'course',
-      entityId: tempId,
-      data: {
+  const createCourse = useCallback(async (courseData: Partial<Course>) => {
+      // NOTE: This is used by some components, better to have a central async version
+      const supabase = createClient()
+      const tempId = crypto.randomUUID()
+      const newCourse = {
         id: tempId,
         name: courseData.name || 'New Course',
         description: courseData.description || null,
         price: courseData.price || 0,
         icon: courseData.icon || '📚',
         order_index: courseData.order_index || 0,
-        is_active: true,
+        is_active: false,
         version: 1,
-        ...courseData
+        ...courseData,
+        updated_at: new Date().toISOString()
       }
-    })
-    return tempId
-  }, [addChange])
+      
+      const { error } = await supabase.from('courses').insert(newCourse)
+      if (error) throw error
+      return tempId
+  }, [])
 
-  const updateCourse = useCallback((courseId: string, updates: Partial<Course>) => {
-    addChange({
-      action: 'update',
-      entityType: 'course',
-      entityId: courseId,
-      data: updates
-    })
-  }, [addChange])
+  const updateCourse = useCallback(async (courseId: string, updates: Partial<Course>) => {
+    try {
+        const supabase = createClient()
+        const { error } = await supabase
+            .from('courses')
+            .update(updates)
+            .eq('id', courseId)
+        
+        if (error) throw error
+        // Toast handled by caller usually, but for instant save:
+        // toast.success('Saved') // Too spammy for every character?
+    } catch (e) {
+        console.error('Failed to update course', e)
+        // toast.error('Failed to save')
+        throw e
+    }
+  }, [])
 
-  const deleteCourse = useCallback((courseId: string) => {
-    addChange({
-      action: 'delete',
-      entityType: 'course',
-      entityId: courseId,
-      data: {}
-    })
-  }, [addChange])
+  const deleteCourse = useCallback(async (courseId: string) => {
+      const supabase = createClient()
+      const { error } = await supabase.from('courses').delete().eq('id', courseId)
+      if (error) throw error
+  }, [])
 
-  const reorderCourse = useCallback((courseId: string, newIndex: number, originalIndex: number) => {
-    addChange({
-      action: 'reorder',
-      entityType: 'course',
-      entityId: courseId,
-      data: { order_index: newIndex },
-      originalData: { order_index: originalIndex }
-    })
-  }, [addChange])
+  const reorderCourse = useCallback(async (courseId: string, newIndex: number) => {
+    try {
+       const supabase = createClient()
+       const { error } = await supabase
+        .from('courses')
+        .update({ order_index: newIndex })
+        .eq('id', courseId)
+       
+       if (error) throw error
+    } catch (e) {
+        console.error('Failed to reorder', e)
+        throw e
+    }
+  }, [])
 
   return { createCourse, updateCourse, deleteCourse, reorderCourse }
 }

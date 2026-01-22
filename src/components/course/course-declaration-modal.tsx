@@ -35,7 +35,7 @@ interface CourseDeclarationModalProps {
     item_type: 'folder' | 'file'
     title: string
     order_index: number
-  }) => string
+  }) => Promise<string>
 }
 
 // Recursive Tree Preview Component
