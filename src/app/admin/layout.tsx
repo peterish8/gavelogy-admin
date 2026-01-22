@@ -11,6 +11,7 @@ import {
   LogOut, 
   Menu, 
   X,
+  ChevronsLeft,
   BookOpen,
   Sparkles,
   Loader2,
@@ -83,7 +84,7 @@ export default function AdminLayout({
 }: {
   children: React.ReactNode
 }) {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null)
@@ -169,7 +170,8 @@ export default function AdminLayout({
       if (window.innerWidth < 1024) {
         setIsSidebarOpen(false)
       } else {
-        setIsSidebarOpen(true)
+        // Respect the closed default requested by user
+        // setIsSidebarOpen(true) // Removed to keep it closed by default
       }
     }
 
@@ -231,27 +233,39 @@ export default function AdminLayout({
         />
       )}
 
+      {/* Floating Menu Toggle (Visible only when sidebar is closed on desktop) */}
+      {!isSidebarOpen && !isMobile && (
+        <button
+          onClick={() => setIsSidebarOpen(true)}
+          className="fixed top-4 left-4 z-[60] p-2 bg-white/80 backdrop-blur-md border border-border rounded-lg text-slate-400 hover:text-slate-600 hover:bg-white shadow-sm transition-all duration-200"
+          title="Expand Sidebar"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+      )}
+
       {/* Sidebar */}
       <aside 
         className={cn(
-          "fixed lg:static inset-y-0 left-0 z-50 w-72 bg-white border-r border-border shadow-sm flex flex-col transition-all duration-300 ease-in-out",
-          !isSidebarOpen && "-translate-x-full lg:translate-x-0 lg:w-20"
+          "fixed lg:static inset-y-0 left-0 z-50 w-[240px] bg-white border-r border-border shadow-sm flex flex-col transition-all duration-300 ease-in-out overflow-hidden",
+          !isSidebarOpen && "-translate-x-full lg:translate-x-0 lg:w-0 lg:border-none"
         )}
       >
-        <div className="h-16 flex items-center justify-between px-6 border-b border-border/50">
-          <div className={cn("flex items-center gap-2", !isSidebarOpen && "lg:justify-center w-full")}>
+        <div className="h-16 flex items-center justify-between px-4 border-b border-border/50 shrink-0">
+          <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white shrink-0">
-               <Gavel className="w-5 h-5" />
+              <Gavel className="w-5 h-5" />
             </div>
-            <span className={cn("font-bold text-xl tracking-tight text-slate-900 truncate", !isSidebarOpen && "lg:hidden")}>
+            <span className="font-bold text-xl tracking-tight text-slate-900 truncate">
               Gavelogy
             </span>
           </div>
           <button 
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-1 hover:bg-muted rounded-md lg:hidden"
+            onClick={() => setIsSidebarOpen(false)}
+            className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"
+            title="Collapse Sidebar"
           >
-            <X className="w-5 h-5 text-muted-foreground" />
+            <ChevronsLeft className="w-5 h-5" />
           </button>
         </div>
 
@@ -351,12 +365,6 @@ export default function AdminLayout({
               className="p-2 hover:bg-slate-100 rounded-lg lg:hidden"
             >
               <Menu className="w-5 h-5 text-slate-600" />
-            </button>
-            <button
-               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-               className="hidden lg:flex p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"
-            >
-               <Menu className="w-5 h-5" />
             </button>
           </div>
           
