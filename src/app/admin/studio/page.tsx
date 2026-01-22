@@ -210,22 +210,31 @@ export default function StudioPage() {
   
   const displayCourses = processedCourses
 
-  // Header Integration
+  // Header Integration - using refs to avoid dependency loops
   const setHeader = useHeaderStore(state => state.setHeader)
   const clearHeader = useHeaderStore(state => state.clearHeader)
+  
+  // Store callbacks in refs to avoid re-triggering useEffect
+  const handleRefreshRef = useRef(handleRefresh)
+  const handleCreateCourseRef = useRef(handleCreateCourse)
+  
+  useEffect(() => {
+    handleRefreshRef.current = handleRefresh
+    handleCreateCourseRef.current = handleCreateCourse
+  })
 
   useEffect(() => {
     const headerActions = isAdmin ? (
       <div className="flex items-center gap-2">
         <NewCourseDeclarationModal 
           coursesCount={displayCourses.length}
-          onComplete={handleRefresh}
+          onComplete={() => handleRefreshRef.current()}
         />
         <CrashCourseModal 
           coursesCount={displayCourses.length}
-          onImportComplete={handleRefresh}
+          onImportComplete={() => handleRefreshRef.current()}
         />
-        <Button onClick={handleCreateCourse} className="h-11 px-6 shadow-md shadow-primary/20">
+        <Button onClick={() => handleCreateCourseRef.current()} className="h-11 px-6 shadow-md shadow-primary/20">
           <Plus className="w-5 h-5 mr-2" />
           New Course
         </Button>
@@ -234,7 +243,7 @@ export default function StudioPage() {
 
     setHeader('Course Studio', headerActions)
     return () => clearHeader()
-  }, [isAdmin, displayCourses.length, handleRefresh, handleCreateCourse, setHeader, clearHeader])
+  }, [isAdmin, displayCourses.length, setHeader, clearHeader])
 
   if (adminLoading || isLoading) {
     return (

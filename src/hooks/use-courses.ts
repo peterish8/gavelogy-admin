@@ -59,12 +59,14 @@ export function useCourses() {
     fetchCourses()
   }, [fetchCourses])
 
+  const refetch = useCallback(() => fetchCourses(true), [fetchCourses])
+
   return { 
     courses: store.courses, 
     isLoading: !isLoaded && isFetching, // Only show FULL loading spinner if we have NO data
     isFetching, // Allow showing subtle "syncing" indicator
     error, 
-    refetch: () => fetchCourses(true) 
+    refetch 
   }
 }
 
