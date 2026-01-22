@@ -61,7 +61,8 @@ export function useCourses() {
 
   return { 
     courses: store.courses, 
-    isLoading: !isLoaded && isFetching, // Only show loading spinner if we have NO data
+    isLoading: !isLoaded && isFetching, // Only show FULL loading spinner if we have NO data
+    isFetching, // Allow showing subtle "syncing" indicator
     error, 
     refetch: () => fetchCourses(true) 
   }

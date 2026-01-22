@@ -15,11 +15,33 @@ import {
   Sparkles,
   Loader2,
   ShieldAlert,
-  Gavel
+  Gavel,
+  ChevronUp,
+  User,
+  Settings
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { RealtimeProvider } from '@/lib/realtime/realtime-provider'
 import { PresenceAvatars } from '@/components/admin/presence-avatars'
+import { useHeaderStore } from '@/lib/stores/header-store'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 const sidebarItems = [
   {
@@ -65,6 +87,8 @@ export default function AdminLayout({
   const [isMobile, setIsMobile] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null)
+  const [isLogoutOpen, setIsLogoutOpen] = useState(false)
+  const { title: headerTitle, actions: headerActions } = useHeaderStore()
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
@@ -263,19 +287,58 @@ export default function AdminLayout({
         </div>
 
         <div className="mt-auto p-4 border-t border-border/50">
-          <button
-            onClick={handleLogout}
-            className={cn(
-              "flex items-center gap-3 px-3 py-2.5 w-full rounded-xl text-slate-500 hover:bg-red-50 hover:text-red-600 transition-colors group",
-              !isSidebarOpen && "lg:justify-center lg:px-2"
-            )}
-            title="Sign Out"
-          >
-            <LogOut className="w-5 h-5 shrink-0 group-hover:text-red-600 transition-colors" />
-            <span className={cn("truncate font-medium", !isSidebarOpen && "lg:hidden")}>
-              Sign Out
-            </span>
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className={cn(
+                  "flex items-center gap-3 px-3 py-3 w-full rounded-xl hover:bg-slate-50 transition-all group",
+                  !isSidebarOpen && "lg:justify-center lg:px-2"
+                )}
+              >
+                <div className="w-10 h-10 rounded-lg bg-linear-to-br from-purple-500 to-primary flex items-center justify-center text-white font-bold text-lg shadow-sm shrink-0">
+                  {adminUser.full_name?.charAt(0) || adminUser.email.charAt(0).toUpperCase()}
+                </div>
+                {isSidebarOpen && (
+                  <div className="flex-1 text-left min-w-0">
+                    <div className="text-sm font-bold text-slate-900 truncate">
+                      {adminUser.full_name || 'Admin User'}
+                    </div>
+                    <div className="text-[11px] text-slate-500 truncate">
+                      {adminUser.email}
+                    </div>
+                  </div>
+                )}
+                {isSidebarOpen && (
+                  <ChevronUp className="w-4 h-4 text-slate-400 group-hover:text-slate-600 shrink-0 transition-colors" />
+                )}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64 mb-2 p-1" side="top" sideOffset={12}>
+              <DropdownMenuLabel className="font-normal">
+                <div className="flex flex-col space-y-1 p-2">
+                  <p className="text-sm font-bold leading-none text-slate-900">{adminUser.full_name || 'Admin User'}</p>
+                  <p className="text-xs leading-none text-slate-500">{adminUser.email}</p>
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="gap-2 rounded-lg py-2.5 cursor-pointer">
+                <User className="w-4 h-4 text-slate-500" />
+                <span>My Profile</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem className="gap-2 rounded-lg py-2.5 cursor-pointer">
+                <Settings className="w-4 h-4 text-slate-500" />
+                <span>Account Settings</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem 
+                className="gap-2 rounded-lg py-2.5 text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer"
+                onClick={() => setIsLogoutOpen(true)}
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Sign Out</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </aside>
 
@@ -297,20 +360,30 @@ export default function AdminLayout({
             </button>
           </div>
           
-          <div className="flex items-center gap-4 ml-auto">
+          <div className="flex items-center gap-4 flex-1 px-4 lg:px-8">
+            {headerTitle && (
+              <div className="flex items-center gap-3">
+                <div className="h-6 w-px bg-slate-200 hidden md:block" />
+                <h2 className="text-lg font-bold text-slate-800 tracking-tight whitespace-nowrap">
+                  {headerTitle}
+                </h2>
+              </div>
+            )}
+            
+            <div className="flex items-center gap-2 ml-4">
+              {headerActions}
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-4 ml-auto shrink-0">
             {/* Live presence avatars - shows other admins online */}
             <PresenceAvatars />
             
-            <div className="hidden sm:block text-right">
-              <div className="text-sm font-semibold text-slate-900 leading-none mb-1">
-                 {adminUser.full_name || 'Admin User'}
-              </div>
-              <div className="text-xs text-muted-foreground leading-none">
-                {adminUser.email}
-              </div>
-            </div>
-            <div className="w-9 h-9 rounded-full bg-linear-to-br from-primary to-blue-600 flex items-center justify-center text-white font-bold text-sm shadow-md ring-2 ring-white">
-              {adminUser.full_name?.charAt(0) || adminUser.email.charAt(0).toUpperCase()}
+            <div className="bg-slate-200 h-8 w-px mx-2 hidden sm:block" />
+            
+            <div className="flex items-center gap-2">
+               <div className="w-2 h-2 rounded-full bg-green-500 shadow-sm shadow-green-200" />
+               <span className="text-xs font-bold text-slate-500 uppercase tracking-widest whitespace-nowrap">Admin Portal</span>
             </div>
           </div>
         </header>
@@ -330,6 +403,25 @@ export default function AdminLayout({
         </main>
       </div>
     </div>
+        <AlertDialog open={isLogoutOpen} onOpenChange={setIsLogoutOpen}>
+          <AlertDialogContent className="rounded-2xl max-w-[400px]">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-xl font-bold text-slate-900">Sign Out</AlertDialogTitle>
+              <AlertDialogDescription className="text-slate-600">
+                Are you sure you want to sign out? You will need to log in again to access the admin features.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="gap-2 mt-4">
+              <AlertDialogCancel className="rounded-xl border-slate-200 text-slate-600 hover:bg-slate-50 font-medium">Cancel</AlertDialogCancel>
+              <AlertDialogAction 
+                onClick={handleLogout}
+                className="bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium shadow-md shadow-red-100 border-none"
+              >
+                Sign Out
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
     </RealtimeProvider>
   )
 }

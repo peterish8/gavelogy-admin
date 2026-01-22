@@ -41,10 +41,11 @@ import { CourseCard } from '@/components/course/course-card'
 import { NewCourseDeclarationModal } from '@/components/course/new-course-declaration-modal'
 import { CrashCourseModal } from '@/components/course/crash-course-modal'
 import { useDraftStore } from '@/lib/stores/draft-store'
+import { useHeaderStore } from '@/lib/stores/header-store'
 
 export default function StudioPage() {
   const { isAdmin, isLoading: adminLoading } = useAdmin()
-  const { courses, isLoading, error, refetch } = useCourses()
+  const { courses, isLoading, isFetching, error, refetch } = useCourses()
   
   // Organization State
   const [filterType, setFilterType] = useState<'all' | 'normal' | 'crash'>('all')
@@ -209,79 +210,109 @@ export default function StudioPage() {
   
   const displayCourses = processedCourses
 
+  // Header Integration
+  const setHeader = useHeaderStore(state => state.setHeader)
+  const clearHeader = useHeaderStore(state => state.clearHeader)
+
+  useEffect(() => {
+    const headerActions = isAdmin ? (
+      <div className="flex items-center gap-2">
+        <NewCourseDeclarationModal 
+          coursesCount={displayCourses.length}
+          onComplete={handleRefresh}
+        />
+        <CrashCourseModal 
+          coursesCount={displayCourses.length}
+          onImportComplete={handleRefresh}
+        />
+        <Button onClick={handleCreateCourse} className="h-11 px-6 shadow-md shadow-primary/20">
+          <Plus className="w-5 h-5 mr-2" />
+          New Course
+        </Button>
+      </div>
+    ) : null
+
+    setHeader('Course Studio', headerActions)
+    return () => clearHeader()
+  }, [isAdmin, displayCourses.length, handleRefresh, handleCreateCourse, setHeader, clearHeader])
+
+  if (adminLoading || isLoading) {
+    return (
+      <div className="flex items-center justify-center h-[60vh]">
+        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+        <span className="sr-only">Loading...</span>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] text-center">
+        <p className="text-destructive mb-4">{error}</p>
+        <Button onClick={handleRefresh} variant="outline">
+          Try Again
+        </Button>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-8 pb-32">
-      {/* Header */}
-      <div className="flex flex-col gap-6 border-b border-border/50 pb-6">
-        <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
-                <div className="p-2 bg-primary/10 rounded-xl">
-                   <Sparkles className="w-6 h-6 text-primary" />
-                </div>
-                Course Studio
-              </h1>
-              <p className="text-slate-500 mt-2 text-lg">
+      {/* Page Toolbar (Filter & Sort) */}
+      <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <p className="text-slate-500 text-sm">
                 Manage your course worlds and content structure
               </p>
             </div>
+          </div>
 
-            {isAdmin && (
-              <div className="flex items-center gap-2">
-                <NewCourseDeclarationModal 
-                  coursesCount={displayCourses.length}
-                  onComplete={handleRefresh}
-                />
-                <CrashCourseModal 
-                  coursesCount={displayCourses.length}
-                  onImportComplete={handleRefresh}
-                />
-                <Button onClick={handleCreateCourse} className="h-11 px-6 shadow-md shadow-primary/20">
-                  <Plus className="w-5 h-5 mr-2" />
-                  New Course
-                </Button>
+          <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-border shrink-0 shadow-sm">
+                  <FilterIcon className="w-4 h-4 text-slate-400 ml-2" />
+                  <Select value={filterType} onValueChange={(v: any) => setFilterType(v)}>
+                      <SelectTrigger className="w-[140px] border-none shadow-none h-8 font-medium">
+                          <SelectValue placeholder="Filter" />
+                      </SelectTrigger>
+                      <SelectContent>
+                          <SelectItem value="all">All Courses</SelectItem>
+                          <SelectItem value="normal">Normal Only</SelectItem>
+                          <SelectItem value="crash">Crash Courses</SelectItem>
+                      </SelectContent>
+                  </Select>
               </div>
-            )}
-        </div>
-        
-        {/* Toolbar */}
-        <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-border">
-                <FilterIcon className="w-4 h-4 text-slate-400 ml-2" />
-                <Select value={filterType} onValueChange={(v: any) => setFilterType(v)}>
-                    <SelectTrigger className="w-[140px] border-none shadow-none h-8 font-medium">
-                        <SelectValue placeholder="Filter" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">All Courses</SelectItem>
-                        <SelectItem value="normal">Normal Only</SelectItem>
-                        <SelectItem value="crash">Crash Courses</SelectItem>
-                    </SelectContent>
-                </Select>
-            </div>
 
-            <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-border">
-                <ArrowUpDown className="w-4 h-4 text-slate-400 ml-2" />
-                <Select value={sortOrder} onValueChange={(v: any) => setSortOrder(v)}>
-                    <SelectTrigger className="w-[140px] border-none shadow-none h-8 font-medium">
-                        <SelectValue placeholder="Sort" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="custom">Custom Order</SelectItem>
-                        <SelectItem value="newest">Newest First</SelectItem>
-                        <SelectItem value="oldest">Oldest First</SelectItem>
-                    </SelectContent>
-                </Select>
-            </div>
-            
-            {!isDndEnabled && (
-                <div className="text-xs text-amber-600 bg-amber-50 px-3 py-1.5 rounded-full font-medium flex items-center gap-1.5">
-                    <Layers className="w-3 h-3" />
-                    Reordering disabled while filtered/sorted
+              <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-border shrink-0 shadow-sm">
+                  <ArrowUpDown className="w-4 h-4 text-slate-400 ml-2" />
+                  <Select value={sortOrder} onValueChange={(v: any) => setSortOrder(v)}>
+                      <SelectTrigger className="w-[140px] border-none shadow-none h-8 font-medium">
+                          <SelectValue placeholder="Sort" />
+                      </SelectTrigger>
+                      <SelectContent>
+                          <SelectItem value="custom">Custom Order</SelectItem>
+                          <SelectItem value="newest">Newest First</SelectItem>
+                          <SelectItem value="oldest">Oldest First</SelectItem>
+                      </SelectContent>
+                  </Select>
+              </div>
+              
+              {!isDndEnabled && (
+                  <div className="text-xs text-amber-600 bg-amber-50 px-3 py-1.5 rounded-full font-medium flex items-center gap-1.5 animate-in fade-in slide-in-from-left-2">
+                      <Layers className="w-3 h-3" />
+                      Reordering disabled
+                  </div>
+              )}
+
+              {isFetching && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-full text-[10px] font-bold text-slate-400 uppercase tracking-wider animate-pulse ml-auto">
+                  <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                  Syncing
                 </div>
-            )}
-        </div>
+              )}
+          </div>
       </div>
+
 
       {/* Admin notice */}
       {isAdmin && isDndEnabled && (
