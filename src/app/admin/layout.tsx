@@ -181,10 +181,22 @@ export default function AdminLayout({
   }, [])
 
   const handleLogout = async () => {
+    // Close dialog immediately for instant feedback
+    setIsLogoutOpen(false)
+    
+    // Clear local storage immediately
     localStorage.removeItem('gavelogy_admin_user')
-    await supabase.auth.signOut()
+    
+    // Navigate immediately (don't wait for signOut)
     router.push('/auth/login')
     router.refresh()
+    
+    // Sign out in background
+    try {
+      await supabase.auth.signOut()
+    } catch (e) {
+      console.error('Signout error:', e)
+    }
   }
 
   // Show loading state while checking auth
@@ -237,7 +249,7 @@ export default function AdminLayout({
       {!isSidebarOpen && !isMobile && (
         <button
           onClick={() => setIsSidebarOpen(true)}
-          className="fixed top-4 left-4 z-[60] p-2 bg-white/80 backdrop-blur-md border border-border rounded-lg text-slate-400 hover:text-slate-600 hover:bg-white shadow-sm transition-all duration-200"
+          className="fixed top-4 left-4 z-60 p-2 bg-white/80 backdrop-blur-md border border-border rounded-lg text-slate-400 hover:text-slate-600 hover:bg-white shadow-sm transition-all duration-200"
           title="Expand Sidebar"
         >
           <Menu className="w-5 h-5" />
@@ -297,7 +309,7 @@ export default function AdminLayout({
                 </Link>
               )
             })}
-          </nav>
+        </nav>
         </div>
 
         <div className="mt-auto p-4 border-t border-border/50">
