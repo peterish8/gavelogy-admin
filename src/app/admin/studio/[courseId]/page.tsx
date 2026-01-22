@@ -1,9 +1,9 @@
 'use client'
 
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useRouter, useSearchParams, usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { Plus, Loader2, ArrowLeft, Settings, Folder, FileText, ChevronRight, Edit2, Maximize2, Minimize2, Copy, FileJson, FileType, MoreHorizontal, GripVertical } from 'lucide-react'
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { Plus, Loader2, ArrowLeft, Settings, Folder, FileText, ChevronRight, Edit2, Maximize2, Minimize2, Copy, FileJson, FileType, MoreHorizontal, GripVertical, Search, X, StickyNote, HelpCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import {
@@ -18,8 +18,26 @@ import { useStructure, useStructureActions } from '@/hooks/use-structure'
 import { StructureTree } from '@/components/course/structure-tree'
 import { EditorPanel } from '@/components/course/editor-panel'
 import { CourseDeclarationModal } from '@/components/course/course-declaration-modal'
+import { SaveBar } from '@/components/admin/save-bar'
 import type { StructureItem } from '@/types/structure'
 import { cn } from '@/lib/utils'
+
+// DND Kit Imports
+import {
+  DndContext,
+  closestCenter,
+  pointerWithin,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+  DragOverEvent
+} from '@dnd-kit/core'
+import {
+  arrayMove,
+  sortableKeyboardCoordinates,
+} from '@dnd-kit/sortable'
 
 export default function CourseDetailPage() {
   const params = useParams()
@@ -28,7 +46,7 @@ export default function CourseDetailPage() {
   const { isAdmin, isLoading: adminLoading } = useAdmin()
   const { course, isLoading: courseLoading, refetch: refetchCourse } = useCourse(courseId)
   const { items, isLoading: structureLoading, refetch: refetchStructure } = useStructure(courseId)
-  const { createItem, updateItem, deleteItem } = useStructureActions()
+  const { createItem, updateItem, deleteItem, moveItem } = useStructureActions()
 
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -37,6 +55,11 @@ export default function CourseDetailPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   
+  // Search State
+  const [searchQuery, setSearchQuery] = useState('')
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const [filteredIds, setFilteredIds] = useState<Set<string> | null>(null)
+
   // Fullscreen State (Lifted for URL persistence)
   const [fullscreen, setFullscreen] = useState(false)
   
@@ -46,14 +69,115 @@ export default function CourseDetailPage() {
   const sidebarRef = useRef<HTMLDivElement>(null)
   const sidebarLeftRef = useRef<number>(0) // STORE LEFT OFFSET
 
+  // DND Sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+        activationConstraint: {
+            distance: 8, // Require 8px drag to start (prevents accidental drags on click)
+        },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
+
+  // --- Stats Calculation ---
+  const stats = useMemo(() => {
+    let folders = 0
+    let files = 0
+    let notes = 0
+    let quizzes = 0
+
+    const traverse = (list: StructureItem[]) => {
+        list.forEach(item => {
+            // Dynamic Stats: Skip items hidden by search
+            if (filteredIds !== null && !filteredIds.has(item.id)) return
+
+            if (item.item_type === 'folder') folders++
+            else {
+                files++
+                if (item.note_content && item.note_content.content_html) notes++
+                if (item.attached_quiz) quizzes++
+            }
+            if (item.children) traverse(item.children)
+        })
+    }
+    traverse(items || [])
+    return { folders, files, notes, quizzes }
+  }, [items, filteredIds])
+
+  // Helper to find all parent IDs for a given item ID (Search Logic)
+  const getAllParentIds = (targetId: string, currentItems: StructureItem[], path: string[] = []): string[] | null => {
+    for (const item of currentItems) {
+        if (item.id === targetId) {
+            return path
+        }
+        if (item.children) {
+            const result = getAllParentIds(targetId, item.children, [...path, item.id])
+            if (result) return result
+        }
+    }
+    return null
+  }
+  
+  const handleSearch = (query: string) => {
+    setSearchQuery(query)
+    
+    if (!query.trim()) {
+      setExpandedIds(new Set())
+      setFilteredIds(null)
+      return
+    }
+
+    const lowerQuery = query.toLowerCase()
+    const newExpandedIds = new Set<string>()
+    const newVisibleIds = new Set<string>()
+
+    // DSA Expert: Recursive Search with Path Collection
+    const traverse = (list: StructureItem[]): boolean => {
+      let anyMatchInList = false
+      
+      for (const item of list) {
+        // 1. Check Self
+        const selfMatch = item.title.toLowerCase().includes(lowerQuery)
+        
+        // 2. Check Children (Recursion)
+        let childMatch = false
+        if (item.children && item.children.length > 0) {
+             childMatch = traverse(item.children)
+        }
+
+        // 3. Significance Logic
+        // If I match OR my children match, I am significant (visible).
+        if (selfMatch || childMatch) {
+            newVisibleIds.add(item.id)
+            anyMatchInList = true
+        }
+
+        // 4. Expansion Logic
+        // If my children matched, I must be expanded to show them.
+        if (childMatch) {
+            newExpandedIds.add(item.id)
+        }
+      }
+      
+      return anyMatchInList
+    }
+
+    traverse(items || [])
+    setExpandedIds(newExpandedIds)
+    setFilteredIds(newVisibleIds)
+  }
+
   // Handle Resize Logic
   const startResizing = useCallback((e: React.MouseEvent) => {
     e.preventDefault() // prevent text selection
     if (sidebarRef.current) {
         // Capture the exact starting left position
-        sidebarLeftRef.current = sidebarRef.current.getBoundingClientRect().left
+        const rect = sidebarRef.current.getBoundingClientRect()
+        sidebarLeftRef.current = rect.left 
+        setIsResizing(true)
     }
-    setIsResizing(true)
   }, [])
 
   const stopResizing = useCallback(() => {
@@ -66,7 +190,6 @@ export default function CourseDetailPage() {
       const newWidth = mouseMoveEvent.clientX - sidebarLeftRef.current
       
       // Clamp values (Min 240, Max 800 for wider screens?)
-      // Using Math.max/min ensures we don't "lose" the handle if mouse goes out of bounds
       const clampedWidth = Math.max(240, Math.min(newWidth, 800))
       setSidebarWidth(clampedWidth)
     }
@@ -142,13 +265,164 @@ export default function CourseDetailPage() {
     return null
   }
 
+  // Auto-Expand on Hover Logic
+  const handleDragOver = useCallback((event: DragOverEvent) => {
+    const { over, active } = event
+    
+    // Safety checks
+    if (!over || !active) return
+    if (over.id === active.id) return
+
+    // Identify if hovering over a "container" (empty folder drop zone) or a regular item
+    let targetId = over.id as string
+    
+    // If hovering over a drop container (e.g., "container-folder123"), extract IDs
+    if (targetId.startsWith('container-')) {
+        // Already inside, no need to expand.
+        return 
+    }
+
+    // Find the item we are hovering over
+    const overItem = findItem(items || [], targetId)
+    
+    // If it's a folder and it's NOT open, open it!
+    if (overItem && overItem.item_type === 'folder') {
+        setExpandedIds((prev) => {
+            if (!prev.has(overItem.id)) {
+                return new Set(prev).add(overItem.id)
+            }
+            return prev
+        })
+    }
+  }, [items])
+
+  // Helper to find parent items (returns array for root)
+  const findContainerItems = (id: string, currentItems: StructureItem[]): StructureItem[] | undefined => {
+    // Check if in root
+    if (currentItems.find(i => i.id === id)) return currentItems
+
+    // Check children
+    for (const item of currentItems) {
+        if (item.children) {
+            const found = findContainerItems(id, item.children)
+            if (found) return found
+        }
+    }
+    return undefined
+  }
+
+  // Helper to find the parent object of an ID
+  const findParent = (id: string, currentItems: StructureItem[], parent: StructureItem | null = null): StructureItem | null => {
+      if (currentItems.find(i => i.id === id)) return parent;
+      
+      for (const item of currentItems) {
+          if (item.children) {
+              const found = findParent(id, item.children, item)
+              if (found !== undefined) return found
+          }
+      }
+      return null
+  }
+
   const selectedItem = selectedId ? findItem(items, selectedId) : null
 
+  // --- DND HANDLER ---
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    
+    if (!over || active.id === over.id) return
+    
+    // 1. Check if dropped on a Container (Empty folder or gap)
+    if (over.id.toString().startsWith('container-')) {
+        const containerId = over.id.toString().replace('container-', '')
+        const newParentId = containerId === 'root' ? null : containerId
+        
+        // Prevent dropping folder into itself
+        if (active.id === newParentId) return
+        
+        // Move to end of that folder
+        moveItem(active.id as string, newParentId, 999999) // Append
+        toast.success("Moved to folder.")
+        return
+    }
+
+    // 2. Dropped on an Item (Reorder or Move between existing items)
+    // Find containers for both items
+    const activeContainer = findContainerItems(active.id as string, items)
+    const overContainer = findContainerItems(over.id as string, items)
+    
+    if (activeContainer && overContainer) {
+        // Find parent ID of the target container (where 'over' item lives)
+        const overParent = findParent(over.id as string, items)
+        const newParentId = overParent ? overParent.id : null
+        
+        // Prevent dropping parent into its own child (Circular dependency)
+        // We need a helper `isChild(parentId, childId)`? 
+        // For now, let's just rely on backend loop prevention or check depth.
+        // Quick check: traverse up from newParent to see if we hit active.id
+        // But `overParent` is the *immediate* parent. 
+        // If I drag "Folder A" into "Folder A > Child B", newParent is "Folder A".
+        // Wait, if I drag Folder A into Child B, newParent is Child B.
+        // We must check if `active.id` is an ancestor of `newParentId`.
+        let checkId = newParentId
+        let isAncestor = false
+        while (checkId) {
+            if (checkId === active.id) {
+                isAncestor = true
+                break
+            }
+            const parent = findParent(checkId, items)
+            checkId = parent ? parent.id : null
+        }
+        if (isAncestor) {
+            toast.error("Cannot move a folder into its own child.")
+            return
+        }
+
+        const oldIndex = activeContainer.findIndex(i => i.id === active.id)
+        const newIndex = overContainer.findIndex(i => i.id === over.id)
+
+        if (activeContainer === overContainer) {
+             // Same Container Reordering
+             if (oldIndex !== -1 && newIndex !== -1) {
+                 const newOrder = arrayMove(activeContainer, oldIndex, newIndex)
+                 newOrder.forEach((item, index) => {
+                     const desiredOrder = (index + 1) * 1024
+                     if (item.order_index !== desiredOrder) {
+                         updateItem(item.id, { order_index: desiredOrder, course_id: courseId })
+                     }
+                 })
+                 toast.success("Order changed.")
+            }
+        } else {
+            // Reparenting to a different list (between items)
+            const overItem = overContainer[newIndex]
+            let desiredOrder = 0;
+            
+            if (newIndex === 0) {
+                 // Placed at top
+                 desiredOrder = overItem.order_index / 2
+            } else {
+                 // Placed after someone
+                 // We need to be careful with index. Rephrase:
+                 // We are dropping OVER item X. 
+                 // If we came from above? Irrelevant in different container.
+                 // Usually replace strategy -> we take X's spot, X moves down.
+                 
+                 // If taking X's spot (newIndex), we want order < X.order.
+                 // Similar to "top" logic, but relative to X and X-1.
+                 
+                 desiredOrder = overItem.order_index - 100
+                 if (desiredOrder <= 0) desiredOrder = 100
+            }
+
+            moveItem(active.id as string, newParentId, desiredOrder)
+            toast.success("Moved and reordered.")
+        }
+    }
+  }
+
   const handleCreateItem = (type: 'folder' | 'file') => {
-    // Determine parent: 
-    // If folder selected -> that's the parent
-    // If file selected -> file's parent is the parent (sibling)
-    // If nothing selected -> root
     let parentId: string | null = null
 
     if (selectedItem) {
@@ -164,10 +438,9 @@ export default function CourseDetailPage() {
       parent_id: parentId,
       item_type: type,
       title: type === 'folder' ? 'New Module' : 'New Note',
-      order_index: 9999 // Hook handles reordering usually, or draft store appends
+      order_index: 999999
     })
 
-    // Auto-select and Enter Edit Mode
     setSelectedId(newItemId)
     setEditingId(newItemId)
   }
@@ -179,7 +452,7 @@ export default function CourseDetailPage() {
       parent_id: parentId,
       item_type: type,
       title: type === 'folder' ? 'New Module' : 'New Note',
-      order_index: 9999
+      order_index: 999999
     })
     setSelectedId(newItemId)
     setEditingId(newItemId)
@@ -216,36 +489,6 @@ export default function CourseDetailPage() {
   const handleCopyJson = (mode: 'current' | 'template') => {
     if (!course || !items) return
 
-    // Helper to deeply clone and transform
-    const processItems = (list: StructureItem[], idMap?: Map<string, string>, counter?: { current: number }): any[] => {
-        return list.map((item, index) => {
-             let newId = item.id
-             
-             // Template Mode: Generate sequential IDs (1, 1.1, etc is hard for flat map, simplified to 1, 2, 3 unique)
-             // Actually, simple unique strings "1", "2" etc are fine.
-             if (mode === 'template') {
-                 if (!idMap) idMap = new Map()
-                 if (!counter) counter = { current: 1 } // Should pass from root
-                 
-                 // We need a global counter for flat ID uniqueness or per-level?
-                 // The import modal requires UNIQUE string IDs.
-                 // Let's use a simple incrementing counter for the whole tree.
-                 // But wait, the recursive call needs the shared counter.
-                 // We'll handle this by generating ids in a flat pass or passing ref.
-             }
-
-            return {
-                id: item.id, // Placeholder, replaced below if needed
-                type: item.item_type,
-                title: item.title,
-                hasNotes: !!item.note_content,
-                hasQuiz: !!item.attached_quiz,
-                children: item.children ? [] : [] // Placeholder
-            }
-        })
-    }
-
-    // Better approach for Template Mode: Pre-calculate ID mappings
     let mappedStructure = []
     
     if (mode === 'template') {
@@ -325,6 +568,12 @@ export default function CourseDetailPage() {
     )
   }
 
+  // Calculate next order index for appending new items
+  const maxOrderIndex = items && items.length > 0 
+    ? Math.max(...items.map(i => i.order_index)) 
+    : 0
+  const nextOrderIndex = maxOrderIndex + 1
+
   return (
     <div className="space-y-6 w-full px-4 h-[calc(100vh-100px)] flex flex-col">
       {/* Header */}
@@ -361,6 +610,7 @@ export default function CourseDetailPage() {
           <div className="flex items-center gap-2">
             <CourseDeclarationModal 
               courseId={courseId}
+              nextOrderIndex={nextOrderIndex}
               onStructureCreated={refetchStructure}
               createItem={createItem}
             />
@@ -397,44 +647,114 @@ export default function CourseDetailPage() {
       {/* Main Content Area - Flex Row for Resizing */}
       <div className="flex flex-1 min-h-0 overflow-hidden relative" onMouseUp={stopResizing}>
         {/* Left Sidebar: Structure Tree */}
-        <div 
-            ref={sidebarRef}
-            style={{ width: sidebarWidth, flexShrink: 0 }}
-            className="hidden lg:flex bg-white border border-border rounded-xl flex-col overflow-hidden shadow-sm h-full z-10"
+        <DndContext 
+            sensors={sensors} 
+            collisionDetection={pointerWithin} 
+            onDragOver={handleDragOver}
+            onDragEnd={(e) => {
+                if (searchQuery) return; // Disable DND during search
+                handleDragEnd(e);
+            }}
         >
-          <div className="p-4 border-b border-border bg-slate-50/50 flex items-center justify-between shrink-0">
-            <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">
-              {items.length} Items
-            </h3>
-            <div className="flex gap-2">
-               {/* Optional Toolbar items */}
-            </div>
-          </div>
+            <div 
+                ref={sidebarRef}
+                style={{ width: sidebarWidth, flexShrink: 0 }}
+                className="hidden lg:flex bg-white border border-border rounded-xl flex-col overflow-hidden shadow-sm h-full z-10"
+            >
+            <div className="p-4 border-b border-border bg-slate-50/50 flex flex-col gap-4 shrink-0 transition-all">
+               
+                {/* Cute Stats Dashboard */}
+                <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-white border border-blue-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
+                        <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
+                             <Folder className="w-4 h-4" />
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-sm font-bold text-slate-700">{stats.folders}</span>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Modules</span>
+                        </div>
+                    </div>
+                    
+                    <div className="bg-white border border-purple-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
+                        <div className="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center text-purple-600">
+                             <FileText className="w-4 h-4" />
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-sm font-bold text-slate-700">{stats.files}</span>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Files</span>
+                        </div>
+                    </div>
 
-          <div className="flex-1 overflow-y-auto p-4">
-            {items.length === 0 ? (
-                <div className="text-center py-16 text-muted-foreground">
-                <Folder className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                <p>This course is empty.</p>
-                {isAdmin && (
-                    <p className="text-sm mt-1">Add a module to get started.</p>
-                )}
+                    <div className="bg-white border border-amber-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
+                        <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600">
+                             <StickyNote className="w-4 h-4" />
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-sm font-bold text-slate-700">{stats.notes}</span>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Content</span>
+                        </div>
+                    </div>
+
+                    <div className="bg-white border border-rose-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
+                        <div className="w-8 h-8 rounded-lg bg-rose-50 flex items-center justify-center text-rose-600">
+                             <HelpCircle className="w-4 h-4" />
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-sm font-bold text-slate-700">{stats.quizzes}</span>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Quizzes</span>
+                        </div>
+                    </div>
                 </div>
-            ) : (
-                <StructureTree 
-                items={items}
-                isAdmin={isAdmin}
-                onAdd={handleAddItemSpecific}
-                onEdit={updateItem}
-                onDelete={handleDeleteItem}
-                onSelect={handleSelectItem}
-                selectedId={selectedId}
-                editingId={editingId}
-                setEditingId={setEditingId}
-                />
-            )}
-          </div>
-        </div>
+                
+                {/* Search Bar */}
+                <div className="relative group">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-primary transition-colors" />
+                    <input 
+                        type="text" 
+                        placeholder="Filter course structure..." 
+                        className="w-full pl-9 pr-8 h-10 text-sm rounded-xl border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-slate-400"
+                        value={searchQuery}
+                        onChange={(e) => handleSearch(e.target.value)}
+                    />
+                     {searchQuery && (
+                        <button 
+                            onClick={() => handleSearch('')}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                        >
+                            <X className="w-3 h-3" />
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* Tree Area */}
+            <div className="flex-1 overflow-y-auto p-2 scrollbar-hide">
+                {items.length === 0 && !searchQuery ? (
+                    <div className="text-center py-16 text-muted-foreground">
+                    <Folder className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                    <p>This course is empty.</p>
+                    {isAdmin && (
+                        <p className="text-sm mt-1">Add a module to get started.</p>
+                    )}
+                    </div>
+                ) : (
+                    <StructureTree 
+                        items={items}
+                        isAdmin={isAdmin}
+                        onAdd={handleAddItemSpecific}
+                        onEdit={updateItem}
+                        onDelete={handleDeleteItem}
+                        onSelect={handleSelectItem}
+                        selectedId={selectedId}
+                        editingId={editingId}
+                        setEditingId={setEditingId}
+                        expandedIds={expandedIds}
+                        searchQuery={searchQuery}
+                    />
+                )}
+            </div>
+            </div>
+        </DndContext>
 
         {/* Drag Handle */}
         <div
@@ -480,6 +800,9 @@ export default function CourseDetailPage() {
           )}
         </div>
       </div>
+      
+      {/* Save Bar for Reordering Changes */}
+      <SaveBar />
     </div>
   )
 }

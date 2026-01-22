@@ -63,6 +63,7 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete }: CourseCardProp
   }
 
   const [showDisableDialog, setShowDisableDialog] = useState(false)
+  const [isTogglingActive, setIsTogglingActive] = useState(false)
 
   const handleToggleActive = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -70,9 +71,31 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete }: CourseCardProp
     setShowDisableDialog(true)
   }
 
-  const confirmToggle = () => {
-    onEdit?.(course.id, { is_active: !course.is_active })
+  const confirmToggle = async () => {
+    setIsTogglingActive(true)
     setShowDisableDialog(false)
+    
+    try {
+      // Direct Supabase call - bypasses DraftStore for instant update
+      const { createClient } = await import('@/lib/supabase/client')
+      const supabase = createClient()
+      
+      const { error } = await supabase
+        .from('courses')
+        .update({ is_active: !course.is_active })
+        .eq('id', course.id)
+      
+      if (error) throw error
+      
+      // Update local state via the prop (for cache invalidation)
+      onEdit?.(course.id, { is_active: !course.is_active })
+    } catch (error) {
+      console.error('Failed to toggle course visibility:', error)
+      const { toast } = await import('sonner')
+      toast.error('Failed to update course visibility')
+    } finally {
+      setIsTogglingActive(false)
+    }
   }
 
   const isEnabling = !course.is_active
@@ -161,7 +184,7 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete }: CourseCardProp
             </div>
           ) : (
             <p className={cn(
-              "text-sm text-muted-foreground line-clamp-2 min-h-[2.5rem]",
+              "text-sm text-muted-foreground line-clamp-2 min-h-10",
               isAdmin && "hover:text-foreground cursor-pointer"
             )}>
               {course.description || 'No description provided'}
@@ -234,13 +257,13 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete }: CourseCardProp
     >
       {/* If editing, don't use Link wrapper to avoid navigation issues */}
       {editingField ? (
-        <div className="block p-6 h-full flex flex-col pt-12">
+        <div className="p-6 h-full flex flex-col pt-12">
           {linkContent}
         </div>
       ) : (
         <Link
           href={`/admin/studio/${course.id}`}
-          className="block p-6 h-full flex flex-col pt-12 pb-12"
+          className="p-6 h-full flex flex-col pt-12 pb-12"
         >
           {linkContent}
         </Link>

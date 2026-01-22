@@ -8,6 +8,7 @@ export interface Course {
   icon: string // emoji
   price: number
   is_active: boolean
+  is_crash_course?: boolean
   order_index: number
   created_at: string
   updated_at: string

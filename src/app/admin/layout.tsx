@@ -18,6 +18,8 @@ import {
   Gavel
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { RealtimeProvider } from '@/lib/realtime/realtime-provider'
+import { PresenceAvatars } from '@/components/admin/presence-avatars'
 
 const sidebarItems = [
   {
@@ -67,6 +69,20 @@ export default function AdminLayout({
   const router = useRouter()
   const supabase = createClient()
 
+  // 1. Optimistic Auth Check (Instant Load)
+  useEffect(() => {
+    const cached = localStorage.getItem('gavelogy_admin_user')
+    if (cached) {
+      try {
+        const user = JSON.parse(cached)
+        setAdminUser(user)
+        setIsLoading(false)
+      } catch (e) {
+        localStorage.removeItem('gavelogy_admin_user')
+      }
+    }
+  }, [])
+
   // Check authentication and admin status
   useEffect(() => {
     const checkAuth = async () => {
@@ -99,6 +115,7 @@ export default function AdminLayout({
         }
 
         setAdminUser(userData)
+        localStorage.setItem('gavelogy_admin_user', JSON.stringify(userData))
         setIsLoading(false)
       } catch (err) {
         console.error('Auth check error:', err)
@@ -109,8 +126,9 @@ export default function AdminLayout({
     checkAuth()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      async (event: string, session: any) => {
         if (event === 'SIGNED_OUT' || !session) {
+          localStorage.removeItem('gavelogy_admin_user')
           router.replace('/auth/login')
         }
       }
@@ -137,6 +155,7 @@ export default function AdminLayout({
   }, [])
 
   const handleLogout = async () => {
+    localStorage.removeItem('gavelogy_admin_user')
     await supabase.auth.signOut()
     router.push('/auth/login')
     router.refresh()
@@ -178,6 +197,7 @@ export default function AdminLayout({
   }
 
   return (
+    <RealtimeProvider>
     <div className="min-h-screen bg-bg-muted flex font-sans">
       {/* Mobile Sidebar Overlay */}
       {isMobile && isSidebarOpen && (
@@ -278,6 +298,9 @@ export default function AdminLayout({
           </div>
           
           <div className="flex items-center gap-4 ml-auto">
+            {/* Live presence avatars - shows other admins online */}
+            <PresenceAvatars />
+            
             <div className="hidden sm:block text-right">
               <div className="text-sm font-semibold text-slate-900 leading-none mb-1">
                  {adminUser.full_name || 'Admin User'}
@@ -293,16 +316,20 @@ export default function AdminLayout({
         </header>
 
         <main className={cn(
-          "flex-1 overflow-y-auto bg-slate-50/50",
-          // Reduce padding for Studio to zero/minimal to allow full-screen IDE feel
-          // Standard admin pages keep the spacious padding
-          pathname.includes('/admin/studio') ? "p-0 overflow-hidden" : "p-6 lg:p-8"
+          "flex-1 bg-slate-50/50",
+          // The main list page should scroll normally
+          pathname === '/admin/studio' ? "p-6 lg:p-8 overflow-y-auto" : 
+          // The IDE page handles its own scroll internally
+          pathname.includes('/admin/studio/') ? "p-0 overflow-hidden" : 
+          // Other pages scroll normally
+          "p-6 lg:p-8 overflow-y-auto"
         )}>
-           <div className={cn("w-full", pathname.includes('/admin/studio') ? "h-full" : "")}>
+           <div className={cn("w-full mx-auto", pathname.includes('/admin/studio/') ? "h-full" : "max-w-7xl")}>
              {children}
            </div>
         </main>
       </div>
     </div>
+    </RealtimeProvider>
   )
 }

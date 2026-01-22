@@ -110,6 +110,7 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
   const [parseError, setParseError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [step, setStep] = useState<'input' | 'preview'>('input')
+  const [copied, setCopied] = useState(false) // Add copied state
 
   const handleParse = useCallback(() => {
     try {
@@ -211,36 +212,41 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
 
       const newCourseId = courseData.id
 
-      // 2. Recursively create structure items directly in database
-      const createRecursive = async (items: CourseDeclarationItem[], parentId: string | null, orderStart: number = 0) => {
-        for (let i = 0; i < items.length; i++) {
-          const item = items[i]
+      // 2. Prepare Structure Items for Batch Insert
+      const itemsToInsert: any[] = []
+
+      const processItems = (items: CourseDeclarationItem[], parentId: string | null, orderStart: number = 0) => {
+        items.forEach((item, i) => {
+          const newId = crypto.randomUUID()
           
-          const { data: itemData, error: itemError } = await supabase
-            .from('structure_items')
-            .insert({
-              course_id: newCourseId,
-              parent_id: parentId,
-              item_type: item.type,
-              title: item.title,
-              order_index: orderStart + i
-            })
-            .select()
-            .single()
+          itemsToInsert.push({
+            id: newId,
+            course_id: newCourseId,
+            parent_id: parentId,
+            item_type: item.type,
+            title: item.title,
+            order_index: orderStart + i,
+            is_active: true
+            // note_content/quiz logic would go here if needed in future
+          })
 
-          if (itemError) {
-            console.error('Error creating item:', itemError)
-            continue
+          if (item.children && item.children.length > 0) {
+            processItems(item.children, newId, 0)
           }
-
-          // Create children recursively
-          if (item.children && item.children.length > 0 && itemData) {
-            await createRecursive(item.children, itemData.id, 0)
-          }
-        }
+        })
       }
 
-      await createRecursive(parsedData.structure, null, 0)
+      processItems(parsedData.structure, null, 0)
+
+      // 3. Batch Insert Structure Items
+      if (itemsToInsert.length > 0) {
+        console.log('Batch inserting', itemsToInsert.length, 'structure items...')
+        const { error: itemsError } = await supabase
+          .from('structure_items')
+          .insert(itemsToInsert)
+        
+        if (itemsError) throw itemsError
+      }
       
       toast.success('Course created successfully! (Private by default)')
       onComplete()
@@ -283,25 +289,97 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
 
         {step === 'input' ? (
           <div className="flex-1 flex flex-col gap-4 min-h-0">
-            <p className="text-sm text-muted-foreground">
-              Paste your course structure JSON. This will create a <strong>new course</strong> with the full structure.
-            </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-muted/30 p-3 rounded-lg border">
+              <p className="text-sm text-muted-foreground">
+                Use ChatGPT to generate the structure JSON from. This creates a <strong>new course</strong>.
+              </p>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className={cn(
+                  "gap-2 h-8 shrink-0 transition-all",
+                  copied 
+                    ? "bg-emerald-100 text-emerald-700 border-emerald-200" 
+                    : "bg-background hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200"
+                )}
+                onClick={() => {
+                  const prompt = `I need you to generate a valid JSON object for a course structure based on a list of topics I will provide.
 
-            <Textarea
-              placeholder='{"courseName": "...", "structure": [...]}'
-              className="flex-1 min-h-[200px] font-mono text-sm"
-              value={jsonInput}
-              onChange={(e) => setJsonInput(e.target.value)}
-            />
+IMPORTANT: The JSON must strictly follow this exact schema or the system will reject it. DO NOT add any markdown formatting or explanations, just the raw JSON.
+
+Structure Requirements:
+1. Root object must have: courseName (string), courseDescription (string), isPublic (boolean, set to false), and structure (array).
+2. structure array contains items.
+3. Each item must have:
+   - "id": unique string (e.g., "1", "1-1")
+   - "type": exact string "folder" (for modules/chapters) or "file" (for lessons)
+   - "title": string name of the content
+   - "children": (optional) array of items inside a folder
+   - "hasNotes": true (boolean) - ADD THIS TO EVERY FILE
+   - "hasQuiz": true (boolean) - ADD THIS TO EVERY FILE
+
+Example Output Format:
+{
+  "courseName": "My Course",
+  "courseDescription": "Generated course structure",
+  "isPublic": false,
+  "structure": [
+    {
+      "id": "1",
+      "type": "folder",
+      "title": "Module 1",
+      "children": [
+        {
+          "id": "1-1",
+          "type": "file",
+          "title": "Lesson 1",
+          "hasNotes": true,
+          "hasQuiz": true
+        }
+      ]
+    }
+  ]
+}
+
+Here are the topics to convert into this JSON structure:
+[PASTE YOUR TOPICS HERE]`
+                  navigator.clipboard.writeText(prompt)
+                  toast.success('Prompt copied to clipboard!')
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 2000)
+                }}
+              >
+                {copied ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <div className="w-4 h-4 text-emerald-600">✨</div>
+                    Copy AI Prompt
+                  </>
+                )}
+              </Button>
+            </div>
+
+            <div className="flex-1 min-h-[300px] relative">
+              <Textarea
+                placeholder='{"courseName": "...", "structure": [...]}'
+                className="absolute inset-0 w-full h-full font-mono text-sm resize-none"
+                value={jsonInput}
+                onChange={(e) => setJsonInput(e.target.value)}
+              />
+            </div>
 
             {parseError && (
-              <div className="flex items-center gap-2 text-destructive text-sm bg-destructive/10 p-3 rounded-lg">
+              <div className="flex items-center gap-2 text-destructive text-sm bg-destructive/10 p-3 rounded-lg shrink-0">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 {parseError}
               </div>
             )}
 
-            <div className="flex justify-end gap-2">
+            <div className="flex justify-end gap-2 shrink-0 pt-2 border-t mt-auto">
               <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
               <Button onClick={handleParse} disabled={!jsonInput.trim()}>Preview Structure</Button>
             </div>

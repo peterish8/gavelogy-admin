@@ -11,6 +11,7 @@ export interface Course {
   description: string | null
   price: number
   is_active: boolean
+  is_crash_course?: boolean
   icon: string
   order_index: number
   version: number

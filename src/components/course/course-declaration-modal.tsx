@@ -27,6 +27,7 @@ interface CourseDeclaration {
 
 interface CourseDeclarationModalProps {
   courseId: string
+  nextOrderIndex?: number
   onStructureCreated: () => void
   createItem: (params: {
     course_id: string
@@ -125,6 +126,7 @@ function TreePreview({
 
 export function CourseDeclarationModal({ 
   courseId, 
+  nextOrderIndex = 0,
   onStructureCreated,
   createItem 
 }: CourseDeclarationModalProps) {
@@ -134,9 +136,11 @@ export function CourseDeclarationModal({
   const [parseError, setParseError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [step, setStep] = useState<'input' | 'preview'>('input')
+  const [copied, setCopied] = useState(false) // Add copied state
 
   // Parse JSON and validate structure
   const handleParse = useCallback(() => {
+    // ... existing parse logic
     try {
       const data = JSON.parse(jsonInput) as CourseDeclaration
 
@@ -190,38 +194,72 @@ export function CourseDeclarationModal({
     setSaving(true)
 
     try {
-      // Recursively create items in the database
-      const createRecursive = (
+      // Direct Supabase Batch Insert (Bypassing DraftStore for speed)
+      const { createClient } = await import('@/lib/supabase/client')
+      const supabase = createClient()
+      
+      const itemsToInsert: any[] = []
+      
+      // Helper to process items recursively and prepare for batch insert
+      const processItems = (
         items: CourseDeclarationItem[], 
         parentId: string | null,
-        orderStart: number = 0
+        orderStart: number
       ) => {
         items.forEach((item, index) => {
-          const newId = createItem({
+          const newId = crypto.randomUUID()
+          
+          itemsToInsert.push({
+            id: newId,
             course_id: courseId,
             parent_id: parentId,
             item_type: item.type,
             title: item.title,
-            order_index: orderStart + index
+            order_index: orderStart + index,
+            is_active: true,
+            // Add note_content if it's a file with notes (placeholder for now)
+            // In a real scenario we'd insert note_content separately
           })
 
-          // Create children recursively
+          // Recurse for children
           if (item.children && item.children.length > 0) {
-            createRecursive(item.children, newId, 0)
+            processItems(item.children, newId, 0)
           }
         })
       }
 
-      // Create all items
-      createRecursive(parsedData.structure, null, 0)
+      // 1. Prepare data
+      processItems(parsedData.structure, null, nextOrderIndex)
+      
+      // 2. Batch Insert
+      if (itemsToInsert.length > 0) {
+        console.log('Batch inserting', itemsToInsert.length, 'structure items...')
+        const { error } = await supabase
+          .from('structure_items')
+          .insert(itemsToInsert)
+        
+        if (error) throw error
+      }
 
-      toast.success('Course structure created successfully!')
+      // 3. Update Course Info (if needed)
+      // We don't update name/desc here as per modal design, usually just structure.
+      // But if we wanted to update course details from JSON:
+      /*
+      if (parsedData.courseName) {
+         await supabase.from('courses').update({ 
+           name: parsedData.courseName,
+           description: parsedData.courseDescription 
+         }).eq('id', courseId)
+      }
+      */
+
+      toast.success(`Successfully imported ${itemsToInsert.length} items!`)
       onStructureCreated()
       setOpen(false)
       resetModal()
-    } catch (e) {
+    } catch (e: any) {
       console.error('Error creating structure:', e)
-      toast.error('Failed to create structure')
+      toast.error('Failed to create structure: ' + (e.message || 'Unknown error'))
     } finally {
       setSaving(false)
     }
@@ -254,13 +292,84 @@ export function CourseDeclarationModal({
         </DialogHeader>
 
         {step === 'input' ? (
-          <div className="space-y-4 flex-1">
-            <p className="text-sm text-muted-foreground">
-              Paste your course structure JSON below. Use ChatGPT to generate this from your topic list.
-            </p>
+          <div className="flex-1 flex flex-col gap-4 min-h-0">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-muted/30 p-3 rounded-lg border">
+              <p className="text-sm text-muted-foreground">
+                Use ChatGPT to generate the structure JSON from your topic list.
+              </p>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className={cn(
+                  "gap-2 h-8 shrink-0 transition-all",
+                  copied 
+                    ? "bg-emerald-100 text-emerald-700 border-emerald-200" 
+                    : "bg-background hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200"
+                )}
+                onClick={() => {
+                  const prompt = `I need you to generate a valid JSON object for a course structure based on a list of topics I will provide.
 
-            <Textarea
-              placeholder={`{
+IMPORTANT: The JSON must strictly follow this exact schema or the system will reject it. DO NOT add any markdown formatting or explanations, just the raw JSON.
+
+Structure Requirements:
+1. Root object must have: courseName (string), courseDescription (string), isPublic (boolean, set to false), and structure (array).
+2. structure array contains items.
+3. Each item must have:
+   - "id": unique string (e.g., "1", "1-1")
+   - "type": exact string "folder" (for modules/chapters) or "file" (for lessons)
+   - "title": string name of the content
+   - "children": (optional) array of items inside a folder
+   - "hasNotes": true (boolean) - ADD THIS TO EVERY FILE
+   - "hasQuiz": true (boolean) - ADD THIS TO EVERY FILE
+
+Example Output Format:
+{
+  "courseName": "My Course",
+  "courseDescription": "Generated course structure",
+  "isPublic": false,
+  "structure": [
+    {
+      "id": "1",
+      "type": "folder",
+      "title": "Module 1",
+      "children": [
+        {
+          "id": "1-1",
+          "type": "file",
+          "title": "Lesson 1",
+          "hasNotes": true,
+          "hasQuiz": true
+        }
+      ]
+    }
+  ]
+}
+
+Here are the topics to convert into this JSON structure:
+[PASTE YOUR TOPICS HERE]`
+                  navigator.clipboard.writeText(prompt)
+                  toast.success('Prompt copied to clipboard!')
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 2000)
+                }}
+              >
+                {copied ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <div className="w-4 h-4 text-emerald-600">✨</div>
+                    Copy AI Prompt
+                  </>
+                )}
+              </Button>
+            </div>
+
+            <div className="flex-1 min-h-[300px] relative">
+              <Textarea
+                placeholder={`{
   "courseName": "Indian Contract Act",
   "courseDescription": "...",
   "isPublic": false,
@@ -273,19 +382,20 @@ export function CourseDeclarationModal({
     }
   ]
 }`}
-              className="min-h-[300px] font-mono text-sm"
-              value={jsonInput}
-              onChange={(e) => setJsonInput(e.target.value)}
-            />
+                className="absolute inset-0 w-full h-full font-mono text-sm resize-none"
+                value={jsonInput}
+                onChange={(e) => setJsonInput(e.target.value)}
+              />
+            </div>
 
             {parseError && (
-              <div className="flex items-center gap-2 text-destructive text-sm bg-destructive/10 p-3 rounded-lg">
+              <div className="flex items-center gap-2 text-destructive text-sm bg-destructive/10 p-3 rounded-lg shrink-0">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 {parseError}
               </div>
             )}
 
-            <div className="flex justify-end gap-2">
+            <div className="flex justify-end gap-2 shrink-0 pt-2 border-t mt-auto">
               <Button variant="outline" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
@@ -295,9 +405,9 @@ export function CourseDeclarationModal({
             </div>
           </div>
         ) : (
-          <div className="space-y-4 flex-1 flex flex-col">
+          <div className="flex-1 flex flex-col gap-4 min-h-0">
             {/* Stats */}
-            <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-lg">
+            <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-lg shrink-0">
               <div className="flex items-center gap-2">
                 <Folder className="w-4 h-4 text-amber-500" />
                 <span className="text-sm font-medium">{stats?.folders} Folders</span>
@@ -319,11 +429,11 @@ export function CourseDeclarationModal({
             </div>
 
             {/* Preview */}
-            <div className="flex-1 border rounded-lg p-3 max-h-[350px] overflow-y-auto">
+            <div className="flex-1 border rounded-lg p-3 min-h-[200px] overflow-y-auto">
               <TreePreview items={parsedData?.structure || []} />
             </div>
 
-            <div className="flex justify-between gap-2">
+            <div className="flex justify-between gap-2 shrink-0 pt-2 border-t mt-auto">
               <Button variant="ghost" onClick={() => setStep('input')}>
                 ← Edit JSON
               </Button>
