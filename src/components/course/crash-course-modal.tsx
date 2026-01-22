@@ -9,7 +9,6 @@ import { Label } from '@/components/ui/label'
 import { Loader2, PlusCircle, Check, BookOpen, AlertCircle, Search, X } from 'lucide-react'
 import { useCourses } from '@/hooks/use-courses'
 import { createClient } from '@/lib/supabase/client'
-import { v4 as uuidv4 } from 'uuid'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -59,7 +58,7 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
     const supabase = createClient()
 
     try {
-      const newCourseId = uuidv4()
+      const newCourseId = crypto.randomUUID()
 
       // 1. Create the course DIRECTLY in DB (not through draft store)
       const { error: courseError } = await supabase.from('courses').insert({
@@ -118,7 +117,7 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
         })
 
         // Create root folder for this course (use incrementing index)
-        const rootFolderId = uuidv4()
+        const rootFolderId = crypto.randomUUID()
         newItems.push({
           id: rootFolderId,
           course_id: newCourseId,
@@ -139,7 +138,7 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
           const children = itemsByParent[parentKey] || []
 
           for (const item of children) {
-            const newItemId = uuidv4()
+            const newItemId = crypto.randomUUID()
             newItems.push({
               id: newItemId,
               course_id: newCourseId,
