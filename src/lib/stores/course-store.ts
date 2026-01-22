@@ -21,29 +21,44 @@ interface CourseStore {
   invalidate: () => void
 }
 
-export const useCourseStore = create<CourseStore>((set) => ({
-  courses: [],
-  coursesLoaded: false,
-  lastCoursesFetch: 0,
-  courseDetails: {},
-  structures: {},
+import { persist } from 'zustand/middleware'
 
-  setCourses: (courses) => set({ 
-    courses, 
-    coursesLoaded: true, 
-    lastCoursesFetch: Date.now() 
-  }),
+export const useCourseStore = create<CourseStore>()(
+  persist(
+    (set) => ({
+      courses: [],
+      coursesLoaded: false,
+      lastCoursesFetch: 0,
+      courseDetails: {},
+      structures: {},
 
-  setCourseDetail: (course) => set((state) => ({
-    courseDetails: { ...state.courseDetails, [course.id]: course }
-  })),
+      setCourses: (courses) => set({ 
+        courses, 
+        coursesLoaded: true, 
+        lastCoursesFetch: Date.now() 
+      }),
 
-  setStructure: (courseId, items) => set((state) => ({
-    structures: { ...state.structures, [courseId]: items }
-  })),
+      setCourseDetail: (course) => set((state) => ({
+        courseDetails: { ...state.courseDetails, [course.id]: course }
+      })),
 
-  invalidate: () => set({ 
-    coursesLoaded: false, 
-    lastCoursesFetch: 0 
-  })
-}))
+      setStructure: (courseId, items) => set((state) => ({
+        structures: { ...state.structures, [courseId]: items }
+      })),
+
+      invalidate: () => set({ 
+        coursesLoaded: false, 
+        lastCoursesFetch: 0 
+      })
+    }),
+    {
+      name: 'gavelogy-courses-cache',
+      // Only persist specific keys to avoid bloat
+      partialize: (state) => ({ 
+        courses: state.courses, 
+        coursesLoaded: state.coursesLoaded,
+        lastCoursesFetch: state.lastCoursesFetch
+      }),
+    }
+  )
+)
