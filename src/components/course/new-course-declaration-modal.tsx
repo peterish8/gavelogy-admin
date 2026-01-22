@@ -188,8 +188,10 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
   const handleSave = async () => {
     if (!parsedData) return
     setSaving(true)
+    let toastId: string | number = ''
 
     try {
+      toastId = toast.loading('Creating course...')
       const supabase = createClient()
 
       // 1. Create the course directly in database (PRIVATE by default: is_active = false)
@@ -213,6 +215,7 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
       const newCourseId = courseData.id
 
       // 2. Prepare Structure Items for Batch Insert
+      toast.loading(`Preparing ${stats?.files! + stats?.folders!} items...`, { id: toastId })
       const itemsToInsert: any[] = []
 
       const processItems = (items: CourseDeclarationItem[], parentId: string | null, orderStart: number = 0) => {
@@ -238,24 +241,37 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
 
       processItems(parsedData.structure, null, 0)
 
-      // 3. Batch Insert Structure Items
+      // 3. Batch Insert Structure Items in CHUNKS
       if (itemsToInsert.length > 0) {
-        console.log('Batch inserting', itemsToInsert.length, 'structure items...')
-        const { error: itemsError } = await supabase
-          .from('structure_items')
-          .insert(itemsToInsert)
+        const CHUNK_SIZE = 1000
+        const chunks = []
+        for (let i = 0; i < itemsToInsert.length; i += CHUNK_SIZE) {
+          chunks.push(itemsToInsert.slice(i, i + CHUNK_SIZE))
+        }
+
+        console.log(`Batch inserting ${itemsToInsert.length} items in ${chunks.length} chunks...`)
         
-        if (itemsError) throw itemsError
+        for (let i = 0; i < chunks.length; i++) {
+           const chunk = chunks[i]
+           toast.loading(`Saving items (${i + 1}/${chunks.length})...`, { id: toastId })
+           
+           const { error: itemsError } = await supabase
+             .from('structure_items')
+             .insert(chunk)
+           
+           if (itemsError) throw itemsError
+        }
       }
       
-      toast.success('Course created successfully! (Private by default)')
+      toast.success('Course created successfully!', { id: toastId })
       onComplete()
       setOpen(false)
       resetModal()
       router.push(`/admin/studio/${newCourseId}`)
-    } catch (e) {
+    } catch (e: any) {
       console.error('Error creating course:', e)
-      toast.error('Failed to create course')
+      const errorMessage = e?.message || 'Failed to create course'
+      toast.error(errorMessage, { id: toastId })
     } finally {
       setSaving(false)
     }

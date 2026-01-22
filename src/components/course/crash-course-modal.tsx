@@ -56,8 +56,10 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
     
     setIsImporting(true)
     const supabase = createClient()
+    let toastId: string | number = ''
 
     try {
+      toastId = toast.loading('Creating crash course...')
       const newCourseId = crypto.randomUUID()
 
       // 1. Create the course DIRECTLY in DB (not through draft store)
@@ -74,6 +76,7 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
       if (courseError) throw courseError
 
       // 2. Fetch ALL structure items for ALL selected courses in ONE query
+      toast.loading('Fetching source content...', { id: toastId })
       const { data: allItems, error: itemsError } = await supabase
         .from('structure_items')
         .select('*')
@@ -82,7 +85,7 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
 
       if (itemsError) throw itemsError
       if (!allItems || allItems.length === 0) {
-        toast.success('Crash course created (no items to clone)')
+        toast.success('Crash course created (no items to clone)', { id: toastId })
         onImportComplete()
         setOpen(false)
         resetState()
@@ -91,6 +94,7 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
       }
 
       // 3. Build all new structure items in memory
+      toast.loading(`Cloning ${allItems.length} items...`, { id: toastId })
       const newItems: any[] = []
 
       // Group by course_id
@@ -155,16 +159,31 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
         }
       }
 
-      // 4. Insert ALL items in ONE batch operation (SUPER FAST)
+      // 4. Insert ALL items in CHUNKS (Avoid payload too large errors)
       if (newItems.length > 0) {
-        const { error: insertError } = await supabase
-          .from('structure_items')
-          .insert(newItems)
+        const CHUNK_SIZE = 1000
+        const chunks = []
+        for (let i = 0; i < newItems.length; i += CHUNK_SIZE) {
+          chunks.push(newItems.slice(i, i + CHUNK_SIZE))
+        }
 
-        if (insertError) throw insertError
+        toast.loading(`Saving ${newItems.length} items (0/${chunks.length})...`, { id: toastId })
+        
+        // Process chunks sequentially to maintain basic order integrity and avoid flooding DB
+        for (let i = 0; i < chunks.length; i++) {
+           const chunk = chunks[i]
+           const { error: insertError } = await supabase
+             .from('structure_items')
+             .insert(chunk)
+             
+           if (insertError) throw insertError
+           
+           // Update progress
+           toast.loading(`Saving ${newItems.length} items (${i + 1}/${chunks.length})...`, { id: toastId })
+        }
       }
 
-      toast.success(`Crash course created with ${newItems.length} items!`)
+      toast.success(`Crash course created with ${newItems.length} items!`, { id: toastId })
       onImportComplete()
       setOpen(false)
       resetState()
@@ -176,11 +195,8 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
       console.error('Import error:', error)
       console.error('Error details:', JSON.stringify(error, null, 2))
       
-      // Handle Supabase error objects which have a 'message' property
-      const errorMessage = error?.message || error?.error_description || 
-        (typeof error === 'object' ? JSON.stringify(error) : 'Failed to create crash course')
-      
-      toast.error(errorMessage)
+      const errorMessage = error?.message || 'Failed to create crash course'
+      toast.error(errorMessage, { id: toastId })
     } finally {
       setIsImporting(false)
     }

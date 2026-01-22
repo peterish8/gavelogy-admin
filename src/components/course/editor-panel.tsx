@@ -459,11 +459,23 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
     let isMounted = true
     setLoading(true)
 
+    // Safety timeout defined BEFORE fetch so we can clear it
+    const safetyTimeout = setTimeout(() => {
+        if (isMounted) {
+            console.log('EditorPanel: [Safety Timeout] Forcing loading to false')
+            setLoading(false)
+            toast.error('Loading timed out. Please refresh the page.')
+        }
+    }, 30000)
+
     async function fetch() {
         console.log('EditorPanel: [Fetch] Starting for', itemId)
         try {
             const supabase = createClient()
             
+            // Checks for draft content
+            let localDraft = null; // Add draft logic if needed
+
             // Check Local Cache First
             const cachedNote = localCache.getNoteContent(itemId!)
             const cachedQuiz = localCache.getQuizContent(itemId!)
@@ -501,19 +513,12 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
             if (isMounted) {
                 console.log('EditorPanel: [Fetch] Finally - setLoading(false)')
                 setLoading(false)
+                clearTimeout(safetyTimeout) // Clear timeout on completion
             }
         }
     }
 
     fetch()
-    
-    // Safety timeout - force clear loading after 5 seconds
-    const safetyTimeout = setTimeout(() => {
-        if (isMounted) {
-            console.log('EditorPanel: [Safety Timeout] Forcing loading to false')
-            setLoading(false)
-        }
-    }, 5000)
 
     return () => { 
         isMounted = false 
