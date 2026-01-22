@@ -1324,7 +1324,7 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
                         )}>
                             {editor && (
                             // @ts-ignore - tippyOptions is valid but types might be mismatching
-                            <BubbleMenu editor={editor} className="flex flex-col gap-1 items-center" tippyOptions={{ placement: 'bottom', duration: 100, maxWidth: 600, animation: 'scale' }}>
+                            <BubbleMenu editor={editor} className="flex flex-col gap-1 items-center" options={{ placement: 'bottom' }}>
                                 {/* Bottom Row: Main Toolbar (Now Top Row visually) */}
                                 <div className="flex items-center gap-1 p-1 bg-white rounded-lg shadow-xl border border-slate-200 animate-in zoom-in-95 duration-200">
                                     

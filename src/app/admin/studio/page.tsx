@@ -23,6 +23,7 @@ import { useAdmin } from '@/contexts/admin-context'
 import { useCourses, useCourseActions } from '@/hooks/use-courses'
 import { CourseCard } from '@/components/course/course-card'
 import { NewCourseDeclarationModal } from '@/components/course/new-course-declaration-modal'
+import { CrashCourseModal } from '@/components/course/crash-course-modal'
 import { useDraftStore } from '@/lib/stores/draft-store'
 
 export default function StudioPage() {
@@ -160,8 +161,12 @@ export default function StudioPage() {
         {isAdmin && (
           <div className="flex items-center gap-2">
             <NewCourseDeclarationModal 
-              coursesCount={localCourses.length}
+              coursesCount={displayCourses.length}
               onComplete={refetch}
+            />
+            <CrashCourseModal 
+              coursesCount={displayCourses.length}
+              onImportComplete={refetch}
             />
             <Button onClick={handleCreateCourse} className="h-11 px-6 shadow-md shadow-primary/20">
               <Plus className="w-5 h-5 mr-2" />

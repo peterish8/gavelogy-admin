@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { AdminContextType } from '@/types/course-builder'
+import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
 
 const AdminContext = createContext<AdminContextType>({
   isAdmin: false,
@@ -64,7 +65,7 @@ export function AdminProvider({ children }: AdminProviderProps) {
     // Subscribe to auth changes
     const supabase = createClient()
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      async (event: AuthChangeEvent, session: Session | null) => {
         if (event === 'SIGNED_OUT') {
           setIsAdmin(false)
           setUserId(null)

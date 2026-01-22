@@ -56,7 +56,7 @@ export default function QuizzesPage() {
         if (quizError) throw quizError
         
         // Get the structure items and courses for these quizzes
-        const itemIds = (quizData || []).map(q => q.note_item_id).filter(Boolean)
+        const itemIds = (quizData || []).map((q: any) => q.note_item_id).filter(Boolean)
         
         if (itemIds.length === 0) {
           setQuizzes([])
@@ -75,12 +75,12 @@ export default function QuizzesPage() {
         if (itemsError) throw itemsError
         
         // Merge the data
-        const itemsMap = new Map((itemsData || []).map(item => [item.id, item]))
+        const itemsMap = new Map<string, any>((itemsData || []).map((item: any) => [item.id, item]))
         
         const transformedData = (quizData || [])
-          .filter(quiz => itemsMap.has(quiz.note_item_id))
+          .filter((quiz: any) => itemsMap.has(quiz.note_item_id))
           .map((quiz: any) => {
-            const item = itemsMap.get(quiz.note_item_id)!
+            const item = itemsMap.get(quiz.note_item_id)
             return {
               id: quiz.id,
               title: quiz.title,

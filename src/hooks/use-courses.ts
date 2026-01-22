@@ -53,15 +53,10 @@ export function useCourses() {
 
   // Initial fetch
   useEffect(() => {
-    // Determine if we need to fetch
-    // If empty or if it's been a while (optional), or just always "revalidate"
-    if (!store.coursesLoaded || store.courses.length === 0) {
-        fetchCourses()
-    } else {
-        // We have data, but let's refresh silently in the background
-        fetchCourses()
-    }
-  }, [fetchCourses, store.coursesLoaded]) // Remove store.courses.length to avoid loops? No, fetchCourses is stable.
+    // Always fetch on mount to ensure freshness, store handles diffing.
+    // This fixes the issue where navigating back might show stale/empty state if store was reset or dehydrated.
+    fetchCourses()
+  }, [fetchCourses])
 
   return { 
     courses: store.courses, 

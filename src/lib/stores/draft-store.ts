@@ -13,6 +13,7 @@ interface DraftState {
 
   // Actions
   addChange: (change: Omit<DraftChange, 'id' | 'timestamp'>) => void
+  addChanges: (changesList: Omit<DraftChange, 'id' | 'timestamp'>[]) => void
   updateChange: (entityId: string, updates: Partial<DraftChange>) => void
   removeChange: (entityId: string) => void
   getChangeForEntity: (entityId: string) => DraftChange | undefined
@@ -74,6 +75,40 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     return {
       changes: newChanges,
       hasUnsavedChanges: newChanges.length > 0,
+      lastSaveError: null
+    }
+  }),
+
+  // Add multiple changes at once
+  addChanges: (changesList) => set((state) => {
+    const updatedChanges = [...state.changes]
+    const now = Date.now()
+
+    changesList.forEach((change, index) => {
+      const existingIndex = updatedChanges.findIndex(
+        (c) => c.entityId === change.entityId && c.entityType === change.entityType
+      )
+
+      if (existingIndex >= 0) {
+        const existing = updatedChanges[existingIndex]
+        updatedChanges[existingIndex] = {
+          ...existing,
+          action: change.action === 'delete' ? 'delete' : existing.action,
+          data: { ...existing.data, ...change.data },
+          timestamp: now
+        }
+      } else {
+        updatedChanges.push({
+          ...change,
+          id: `${change.entityType}-${change.entityId}-${now}-${index}`,
+          timestamp: now
+        })
+      }
+    })
+
+    return {
+      changes: updatedChanges,
+      hasUnsavedChanges: updatedChanges.length > 0,
       lastSaveError: null
     }
   }),
@@ -146,42 +181,62 @@ export const useDraftStore = create<DraftState>((set, get) => ({
 
     try {
       const supabase = createClient()
+      
+      console.log('[DraftStore] Starting commit with', changes.length, 'changes')
 
-      // Group changes by type and action for efficient processing
+      // Group changes for batching
       const deleteChanges = changes.filter(c => c.action === 'delete')
       const createChanges = changes.filter(c => c.action === 'create')
       const updateChanges = changes.filter(c => c.action === 'update' || c.action === 'reorder')
 
-      // Process deletions first
-      for (const change of deleteChanges) {
-        const tableName = getTableName(change.entityType)
-        const { error } = await supabase
-          .from(tableName)
-          .delete()
-          .eq('id', change.entityId)
+      // 1. Batch Deletions
+      if (deleteChanges.length > 0) {
+        console.log('[DraftStore] Deleting', deleteChanges.length, 'items...')
+        const deletionsByTable = deleteChanges.reduce((acc, c) => {
+          const table = getTableName(c.entityType)
+          if (!acc[table]) acc[table] = []
+          acc[table].push(c.entityId)
+          return acc
+        }, {} as Record<string, string[]>)
 
-        if (error) throw new Error(`Failed to delete ${change.entityType}: ${error.message}`)
+        for (const [table, ids] of Object.entries(deletionsByTable)) {
+          const { error } = await supabase.from(table).delete().in('id', ids)
+          if (error) throw new Error(`Failed to delete from ${table}: ${error.message}`)
+        }
+        console.log('[DraftStore] Deletions complete')
       }
 
-      // Process creates
-      for (const change of createChanges) {
-        const tableName = getTableName(change.entityType)
-        const { error } = await supabase
-          .from(tableName)
-          .insert(change.data)
+      // 2. Batch Inserts (Creates only)
+      if (createChanges.length > 0) {
+        console.log('[DraftStore] Inserting', createChanges.length, 'new items...')
+        const insertsByTable = createChanges.reduce((acc, c) => {
+          const table = getTableName(c.entityType)
+          if (!acc[table]) acc[table] = []
+          acc[table].push({ ...c.data, id: c.entityId })
+          return acc
+        }, {} as Record<string, any[]>)
 
-        if (error) throw new Error(`Failed to create ${change.entityType}: ${error.message}`)
+        for (const [table, items] of Object.entries(insertsByTable)) {
+          console.log(`[DraftStore] Inserting ${items.length} to ${table}...`)
+          const { error } = await supabase.from(table).insert(items)
+          if (error) throw new Error(`Failed to insert to ${table}: ${error.message}`)
+        }
+        console.log('[DraftStore] Inserts complete')
       }
 
-      // Process updates
-      for (const change of updateChanges) {
-        const tableName = getTableName(change.entityType)
-        const { error } = await supabase
-          .from(tableName)
-          .update(change.data)
-          .eq('id', change.entityId)
-
-        if (error) throw new Error(`Failed to update ${change.entityType}: ${error.message}`)
+      // 3. Individual Updates (to avoid overwriting existing data)
+      if (updateChanges.length > 0) {
+        console.log('[DraftStore] Updating', updateChanges.length, 'items...')
+        for (const change of updateChanges) {
+          const table = getTableName(change.entityType)
+          const { error } = await supabase
+            .from(table)
+            .update(change.data)
+            .eq('id', change.entityId)
+          
+          if (error) throw new Error(`Failed to update ${table}: ${error.message}`)
+        }
+        console.log('[DraftStore] Updates complete')
       }
 
       // SYNC: Apply committed changes to the course store cache
