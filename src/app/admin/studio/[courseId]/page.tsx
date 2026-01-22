@@ -422,7 +422,7 @@ export default function CourseDetailPage() {
     }
   }
 
-  const handleCreateItem = (type: 'folder' | 'file') => {
+  const handleCreateItem = async (type: 'folder' | 'file') => {
     let parentId: string | null = null
 
     if (selectedItem) {
@@ -433,7 +433,7 @@ export default function CourseDetailPage() {
       }
     }
 
-    const newItemId = createItem({
+    const newItemId = await createItem({
       course_id: courseId,
       parent_id: parentId,
       item_type: type,
@@ -446,8 +446,8 @@ export default function CourseDetailPage() {
   }
 
   // Legacy handler passed to tree's specific "Add" dropdown actions
-  const handleAddItemSpecific = (parentId: string | null, type: 'folder' | 'file') => {
-    const newItemId = createItem({
+  const handleAddItemSpecific = async (parentId: string | null, type: 'folder' | 'file') => {
+    const newItemId = await createItem({
       course_id: courseId,
       parent_id: parentId,
       item_type: type,
