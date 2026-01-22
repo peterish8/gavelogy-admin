@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { Course, CourseWithSubjects } from '@/types/course-builder'
 import { useDraftStore } from '@/lib/stores/draft-store'
@@ -11,23 +11,43 @@ export function useCourses() {
   const [error, setError] = useState<string | null>(null)
   
   // If we have data in store, we are NOT loading from user perspective (Instant Load)
-  // unless we want to force a refresh UI (which we usually don't for stale-while-revalidate)
   const isLoaded = store.coursesLoaded
   const [isFetching, setIsFetching] = useState(false)
+  
+  // Use refs to persist across re-renders
+  const isFetchingRef = useRef(false)
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const hasFetchedRef = useRef(false)
 
   const fetchCourses = useCallback(async (force = false) => {
-    // If we have data and not forced, strictly speaking we could skip.
-    // But usually we want "Stale While Revalidate" -> Show old data, fetch new.
+    // Skip if already fetching or already fetched (unless forced)
+    if (isFetchingRef.current) {
+      console.log('useCourses: skipping, already fetching')
+      return
+    }
+    if (hasFetchedRef.current && !force) {
+      console.log('useCourses: skipping, already fetched')
+      return
+    }
     
-    if (isFetching) return
+    isFetchingRef.current = true
+    hasFetchedRef.current = true
     setIsFetching(true)
     setError(null)
     
-    // Safety timeout (increased to 30s)
-    const timeoutId = setTimeout(() => {
-        setIsFetching(false)
+    // Clear any existing timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current)
+    }
+    
+    // Safety timeout (30s)
+    timeoutRef.current = setTimeout(() => {
+      if (isFetchingRef.current) {
         console.warn('useCourses: forced timeout')
+        isFetchingRef.current = false
+        setIsFetching(false)
         setError('Connection timed out. Please check your internet or try again.')
+      }
     }, 30000)
     
     try {
@@ -47,24 +67,34 @@ export function useCourses() {
       console.error('useCourses: caught error', message)
       setError(message)
     } finally {
-      clearTimeout(timeoutId)
+      // Clear timeout
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
+      isFetchingRef.current = false
       setIsFetching(false)
     }
-  }, [store.setCourses])
+  }, [store])
 
-  // Initial fetch
+  // Initial fetch - run once on mount
   useEffect(() => {
-    // Always fetch on mount to ensure freshness, store handles diffing.
-    // This fixes the issue where navigating back might show stale/empty state if store was reset or dehydrated.
     fetchCourses()
-  }, [fetchCourses])
+    
+    // Cleanup on unmount
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+      }
+    }
+  }, [])
 
   const refetch = useCallback(() => fetchCourses(true), [fetchCourses])
 
   return { 
     courses: store.courses, 
-    isLoading: !isLoaded && isFetching, // Only show FULL loading spinner if we have NO data
-    isFetching, // Allow showing subtle "syncing" indicator
+    isLoading: !isLoaded && isFetching,
+    isFetching,
     error, 
     refetch 
   }
