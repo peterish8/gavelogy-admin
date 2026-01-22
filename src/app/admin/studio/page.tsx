@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 
 import { 
   Filter as FilterIcon, 
@@ -94,9 +94,9 @@ export default function StudioPage() {
     })
   )
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
       refetch()
-  }
+  }, [refetch])
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
@@ -114,7 +114,7 @@ export default function StudioPage() {
     }
   }
 
-  const handleCreateCourse = async () => {
+  const handleCreateCourse = useCallback(async () => {
     try {
       const supabase = createClient()
       const newCourseId = crypto.randomUUID()
@@ -157,7 +157,7 @@ export default function StudioPage() {
       toast.error('Failed to create course: ' + (error.message || 'Unknown error'))
       refetch() // Revert 
     }
-  }
+  }, [localCourses.length, refetch])
 
   const handleDeleteCourse = async (id: string) => {
     if (confirm('Are you sure you want to delete this course? This action cannot be undone.')) {
