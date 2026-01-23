@@ -53,11 +53,15 @@ export function useCourses() {
     try {
       console.log('useCourses: invoking supabase client')
       const supabase = createClient()
+      console.log('useCourses: supabase client created, querying...')
+      
       const { data, error: fetchError } = await supabase
         .from('courses')
         .select('*')
         .order('order_index', { ascending: true })
 
+      console.log('useCourses: query completed', { dataLength: data?.length, error: fetchError?.message })
+      
       if (fetchError) throw fetchError
       
       console.log('useCourses: fetch success', data?.length)
@@ -77,8 +81,9 @@ export function useCourses() {
     }
   }, [store])
 
-  // Initial fetch - run once on mount
+  // Initial fetch - always fetch on mount
   useEffect(() => {
+    console.log('useCourses: mount, fetching...')
     fetchCourses()
     
     // Cleanup on unmount

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { Course } from '@/types/course-builder'
 import { StructureItem } from '@/types/structure'
+import { persist } from 'zustand/middleware'
 
 interface CourseStore {
   // Course List Cache
@@ -19,9 +20,11 @@ interface CourseStore {
   
   // Invalidate
   invalidate: () => void
+  
+  // Hydration tracking
+  _hasHydrated: boolean
+  setHasHydrated: (state: boolean) => void
 }
-
-import { persist } from 'zustand/middleware'
 
 export const useCourseStore = create<CourseStore>()(
   persist(
@@ -31,6 +34,7 @@ export const useCourseStore = create<CourseStore>()(
       lastCoursesFetch: 0,
       courseDetails: {},
       structures: {},
+      _hasHydrated: false,
 
       setCourses: (courses) => set({ 
         courses, 
@@ -49,7 +53,9 @@ export const useCourseStore = create<CourseStore>()(
       invalidate: () => set({ 
         coursesLoaded: false, 
         lastCoursesFetch: 0 
-      })
+      }),
+      
+      setHasHydrated: (state) => set({ _hasHydrated: state }),
     }),
     {
       name: 'gavelogy-courses-cache',
@@ -59,6 +65,9 @@ export const useCourseStore = create<CourseStore>()(
         coursesLoaded: state.coursesLoaded,
         lastCoursesFetch: state.lastCoursesFetch
       }),
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true)
+      },
     }
   )
 )
