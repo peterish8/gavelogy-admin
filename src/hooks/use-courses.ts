@@ -6,6 +6,14 @@ import type { Course, CourseWithSubjects } from '@/types/course-builder'
 import { useDraftStore } from '@/lib/stores/draft-store'
 import { useCourseStore } from '@/lib/stores/course-store'
 
+// Global lock that persists across HMR
+declare global {
+  interface Window {
+    __gavelogy_courses_fetching?: boolean
+    __gavelogy_courses_fetched?: boolean
+  }
+}
+
 export function useCourses() {
   const store = useCourseStore()
   const [error, setError] = useState<string | null>(null)
@@ -20,6 +28,18 @@ export function useCourses() {
   const hasFetchedRef = useRef(false)
 
   const fetchCourses = useCallback(async (force = false) => {
+    // Check global lock (survives HMR)
+    if (typeof window !== 'undefined') {
+      if (window.__gavelogy_courses_fetching) {
+        console.log('useCourses: skipping, global fetch in progress')
+        return
+      }
+      if (window.__gavelogy_courses_fetched && !force) {
+        console.log('useCourses: skipping, already fetched globally')
+        return
+      }
+    }
+    
     // Skip if already fetching or already fetched (unless forced)
     if (isFetchingRef.current) {
       console.log('useCourses: skipping, already fetching')
@@ -32,6 +52,9 @@ export function useCourses() {
     
     isFetchingRef.current = true
     hasFetchedRef.current = true
+    if (typeof window !== 'undefined') {
+      window.__gavelogy_courses_fetching = true
+    }
     setIsFetching(true)
     setError(null)
     
@@ -55,10 +78,26 @@ export function useCourses() {
       const supabase = createClient()
       console.log('useCourses: supabase client created, querying...')
       
-      const { data, error: fetchError } = await supabase
+      // Create abort controller for 10s timeout
+      const controller = new AbortController()
+      const queryTimeout = setTimeout(() => {
+        console.warn('useCourses: aborting query due to timeout')
+        controller.abort()
+      }, 10000)
+      
+      // Race between the query and a timeout promise
+      const queryPromise = supabase
         .from('courses')
         .select('*')
         .order('order_index', { ascending: true })
+        .abortSignal(controller.signal)
+      
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Query timed out after 10 seconds')), 10000)
+      })
+      
+      const { data, error: fetchError } = await Promise.race([queryPromise, timeoutPromise])
+      clearTimeout(queryTimeout)
 
       console.log('useCourses: query completed', { dataLength: data?.length, error: fetchError?.message })
       
@@ -77,6 +116,10 @@ export function useCourses() {
         timeoutRef.current = null
       }
       isFetchingRef.current = false
+      if (typeof window !== 'undefined') {
+        window.__gavelogy_courses_fetching = false
+        window.__gavelogy_courses_fetched = true
+      }
       setIsFetching(false)
     }
   }, [store])
