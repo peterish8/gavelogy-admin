@@ -190,7 +190,7 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
     }
   }
 
-  const handleEditCourse = (id: string, updates: Partial<typeof courses[0]>) => {
+  const handleEditCourse = (id: string, updates: Partial<Course>) => {
     if (Object.keys(updates).length > 0) {
       updateCourse(id, updates)
       setLocalCourses((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)))
