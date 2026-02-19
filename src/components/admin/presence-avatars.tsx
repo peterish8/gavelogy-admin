@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
  * Displays avatars of all currently online admins with native title tooltips
  */
 export function PresenceAvatars() {
-  const { activeAdmins, otherAdmins, currentUserId } = useActiveAdmins()
+  const { otherAdmins } = useActiveAdmins()
 
   if (otherAdmins.length === 0) {
     return null

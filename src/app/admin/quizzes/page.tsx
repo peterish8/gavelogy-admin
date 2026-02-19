@@ -1,27 +1,19 @@
-'use client'
-
-import { useState, useEffect, useMemo } from 'react'
+import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Search, HelpCircle, Loader2, ChevronRight, FolderOpen } from 'lucide-react'
+import { Search, HelpCircle, ChevronRight, FolderOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface QuizItem {
   id: string
   title?: string
-  content: string | null
+  hasQuestions: boolean
   item_id: string
-  structure_items: {
+  itemTitle: string
+  course: {
     id: string
-    title: string
-    course_id: string
-    courses: {
-      id: string
-      name: string
-      icon: string
-    }
+    name: string
+    icon: string
   }
 }
 
@@ -34,126 +26,72 @@ interface GroupedQuizzes {
   quizzes: QuizItem[]
 }
 
-export default function QuizzesPage() {
-  const [quizzes, setQuizzes] = useState<QuizItem[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState('')
+export default async function QuizzesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>
+}) {
+  const supabase = await createClient()
+  const query = (await searchParams).q || ''
 
-  useEffect(() => {
-    const fetchQuizzes = async () => {
-      try {
-        const supabase = createClient()
-        
-        // First get all attached_quizzes with their structure items
-        const { data: quizData, error: quizError } = await supabase
-          .from('attached_quizzes')
-          .select(`
-            id, title, note_item_id,
-            quiz_questions(id)
-          `)
+  // Fetch attached quizzes with question counts
+  const { data: quizData } = await supabase
+    .from('attached_quizzes')
+    .select(`
+      id, title, note_item_id,
+      quiz_questions(id)
+    `)
 
-        if (quizError) throw quizError
-        
-        // Get the structure items and courses for these quizzes
-        const itemIds = (quizData || []).map((q: any) => q.note_item_id).filter(Boolean)
-        
-        if (itemIds.length === 0) {
-          setQuizzes([])
-          setIsLoading(false)
-          return
+  // Get structure items and courses for these quizzes
+  const itemIds = (quizData || []).map((q: any) => q.note_item_id).filter(Boolean)
+
+  let quizzes: QuizItem[] = []
+
+  if (itemIds.length > 0) {
+    const { data: itemsData } = await supabase
+      .from('structure_items')
+      .select(`
+        id, title, course_id,
+        courses(id, name, icon)
+      `)
+      .in('id', itemIds)
+
+    const itemsMap = new Map<string, any>((itemsData || []).map((item: any) => [item.id, item]))
+
+    quizzes = (quizData || [])
+      .filter((quiz: any) => itemsMap.has(quiz.note_item_id))
+      .map((quiz: any) => {
+        const item = itemsMap.get(quiz.note_item_id)
+        return {
+          id: quiz.id,
+          title: quiz.title,
+          hasQuestions: quiz.quiz_questions?.length > 0,
+          item_id: quiz.note_item_id,
+          itemTitle: item.title,
+          course: item.courses as any
         }
-        
-        const { data: itemsData, error: itemsError } = await supabase
-          .from('structure_items')
-          .select(`
-            id, title, course_id,
-            courses(id, name, icon)
-          `)
-          .in('id', itemIds)
-        
-        if (itemsError) throw itemsError
-        
-        // Merge the data
-        const itemsMap = new Map<string, any>((itemsData || []).map((item: any) => [item.id, item]))
-        
-        const transformedData = (quizData || [])
-          .filter((quiz: any) => itemsMap.has(quiz.note_item_id))
-          .map((quiz: any) => {
-            const item = itemsMap.get(quiz.note_item_id)
-            return {
-              id: quiz.id,
-              title: quiz.title,
-              content: quiz.quiz_questions?.length > 0 ? 'has_questions' : null,
-              item_id: quiz.note_item_id,
-              structure_items: {
-                id: item.id,
-                title: item.title,
-                course_id: item.course_id,
-                courses: item.courses as any
-              }
-            }
-          })
-        setQuizzes(transformedData as QuizItem[])
-      } catch (err) {
-        console.error('Error fetching quizzes:', err)
-        setError('Failed to load quizzes')
-      } finally {
-        setIsLoading(false)
-      }
+      })
+  }
+
+  // Filter by search query
+  const filteredQuizzes = query
+    ? quizzes.filter(quiz =>
+        quiz.itemTitle?.toLowerCase().includes(query.toLowerCase()) ||
+        quiz.course?.name?.toLowerCase().includes(query.toLowerCase())
+      )
+    : quizzes
+
+  // Group by course
+  const groups: Map<string, GroupedQuizzes> = new Map()
+  filteredQuizzes.forEach(quiz => {
+    if (!quiz.course) return
+    const courseId = quiz.course.id
+    if (!groups.has(courseId)) {
+      groups.set(courseId, { course: quiz.course, quizzes: [] })
     }
-
-    fetchQuizzes()
-  }, [])
-
-  // Filter quizzes based on search query
-  const filteredQuizzes = useMemo(() => {
-    if (!searchQuery.trim()) return quizzes
-    const query = searchQuery.toLowerCase()
-    return quizzes.filter(quiz => 
-      quiz.structure_items?.title?.toLowerCase().includes(query) ||
-      quiz.structure_items?.courses?.name?.toLowerCase().includes(query)
-    )
-  }, [quizzes, searchQuery])
-
-  // Group quizzes by course
-  const groupedQuizzes = useMemo(() => {
-    const groups: Map<string, GroupedQuizzes> = new Map()
-    
-    filteredQuizzes.forEach(quiz => {
-      if (!quiz.structure_items?.courses) return
-      
-      const courseId = quiz.structure_items.course_id
-      if (!groups.has(courseId)) {
-        groups.set(courseId, {
-          course: quiz.structure_items.courses,
-          quizzes: []
-        })
-      }
-      groups.get(courseId)!.quizzes.push(quiz)
-    })
-
-    return Array.from(groups.values())
-  }, [filteredQuizzes])
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-[60vh]">
-        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center h-[60vh] text-center">
-        <p className="text-destructive mb-4">{error}</p>
-        <Button onClick={() => window.location.reload()} variant="outline">
-          Try Again
-        </Button>
-      </div>
-    )
-  }
+    groups.get(courseId)!.quizzes.push(quiz)
+  })
+  const groupedQuizzes = Array.from(groups.values())
 
   return (
     <div className="space-y-6">
@@ -169,12 +107,14 @@ export default function QuizzesPage() {
       <div className="bg-card p-4 rounded-lg border border-border">
         <div className="relative max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            placeholder="Search quizzes by title or course..."
-            className="pl-9"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+          <form>
+            <Input
+              name="q"
+              placeholder="Search quizzes by title or course..."
+              className="pl-9"
+              defaultValue={query}
+            />
+          </form>
         </div>
       </div>
 
@@ -184,7 +124,7 @@ export default function QuizzesPage() {
           <FolderOpen className="w-12 h-12 mx-auto mb-4 text-muted-foreground/30" />
           <h3 className="text-lg font-semibold text-muted-foreground mb-1">No quizzes found</h3>
           <p className="text-sm text-muted-foreground">
-            {searchQuery ? 'Try a different search term' : 'Create quizzes in Course Studio'}
+            {query ? 'Try a different search term' : 'Create quizzes in Course Studio'}
           </p>
         </div>
       ) : (
@@ -220,10 +160,10 @@ export default function QuizzesPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="font-medium text-foreground truncate group-hover:text-purple-600 transition-colors">
-                        {quiz.structure_items?.title || 'Untitled Quiz'}
+                        {quiz.itemTitle || 'Untitled Quiz'}
                       </h3>
                       <p className="text-xs text-muted-foreground">
-                        {quiz.content ? 'Has questions' : 'Empty'}
+                        {quiz.hasQuestions ? 'Has questions' : 'Empty'}
                       </p>
                     </div>
                     <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-purple-500 transition-colors" />

@@ -50,8 +50,10 @@ export const useLocalContentCache = create<LocalContentCache>()(
       },
 
       clearContent: (itemId) => set((state) => {
-        const { [itemId]: removedNote, ...restNote } = state.noteContent
-        const { [itemId]: removedQuiz, ...restQuiz } = state.quizContent
+        const restNote = { ...state.noteContent }
+        delete restNote[itemId]
+        const restQuiz = { ...state.quizContent }
+        delete restQuiz[itemId]
         return {
           noteContent: restNote,
           quizContent: restQuiz

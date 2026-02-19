@@ -1,6 +1,7 @@
 'use client'
 
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import { usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
@@ -13,22 +14,16 @@ export interface AdminPresence {
   admin_name: string
   admin_email: string
   current_page: string
-  current_item_id: string | null
-  cursor_position: { x: number; y: number } | null
   last_seen_at: string
 }
 
 export interface RealtimeContextValue {
-  // State
   isConnected: boolean
   activeAdmins: AdminPresence[]
   currentUserId: string | null
   
-  // Actions
   updatePresence: (data: Partial<AdminPresence>) => void
-  broadcastCursor: (position: { x: number; y: number }) => void
   
-  // Subscriptions
   subscribeToTable: (
     table: string, 
     callback: (payload: any) => void,
@@ -39,128 +34,86 @@ export interface RealtimeContextValue {
 const RealtimeContext = createContext<RealtimeContextValue | null>(null)
 
 // ============================================
-// PROVIDER COMPONENT
+// PROVIDER
 // ============================================
 
-export function RealtimeProvider({ children }: { children: React.ReactNode }) {
+interface RealtimeProviderProps {
+  children: React.ReactNode
+  userId: string | null
+  userName: string
+  userEmail: string
+}
+
+export function RealtimeProvider({ children, userId, userName, userEmail }: RealtimeProviderProps) {
   const supabase = createClient()
+  const pathname = usePathname()
   const [isConnected, setIsConnected] = useState(false)
   const [activeAdmins, setActiveAdmins] = useState<AdminPresence[]>([])
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   
   const presenceChannelRef = useRef<RealtimeChannel | null>(null)
   const subscriptionsRef = useRef<Map<string, RealtimeChannel>>(new Map())
 
-  // ============================================
-  // INITIALIZE CONNECTION & PRESENCE
-  // ============================================
+  // Initialize presence channel
   useEffect(() => {
-    const initializeRealtime = async () => {
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      
-      setCurrentUserId(user.id)
-      
-      // Get user details
-      const { data: userData } = await supabase
-        .from('users')
-        .select('full_name, email')
-        .eq('id', user.id)
-        .single()
+    if (!userId) return
 
-      // Create presence channel
-      const presenceChannel = supabase.channel('admin-presence', {
-        config: {
-          presence: {
-            key: user.id,
-          },
-        },
+    const presenceChannel = supabase.channel('admin-presence', {
+      config: { presence: { key: userId } },
+    })
+
+    presenceChannel
+      .on('presence', { event: 'sync' }, () => {
+        const state = presenceChannel.presenceState() as Record<string, AdminPresence[]>
+        const admins: AdminPresence[] = []
+        Object.values(state).forEach((presences) => {
+          if (presences?.[0]) admins.push(presences[0])
+        })
+        setActiveAdmins(admins)
       })
 
-      // Track presence state changes
-      presenceChannel
-        .on('presence', { event: 'sync' }, () => {
-          const state = presenceChannel.presenceState() as Record<string, AdminPresence[]>
-          const admins: AdminPresence[] = []
-          
-          Object.entries(state).forEach(([_userId, presences]) => {
-            if (presences && Array.isArray(presences) && presences.length > 0) {
-              admins.push(presences[0])
-            }
-          })
-          
-          setActiveAdmins(admins)
+    presenceChannel.subscribe(async (status: string) => {
+      if (status === 'SUBSCRIBED') {
+        setIsConnected(true)
+        await presenceChannel.track({
+          user_id: userId,
+          admin_name: userName,
+          admin_email: userEmail,
+          current_page: window.location.pathname,
+          last_seen_at: new Date().toISOString(),
         })
-        .on('presence', { event: 'join' }, ({ key, newPresences }: { key: string; newPresences: AdminPresence[] }) => {
-          console.log('Admin joined:', key, newPresences)
-        })
-        .on('presence', { event: 'leave' }, ({ key, leftPresences }: { key: string; leftPresences: AdminPresence[] }) => {
-          console.log('Admin left:', key, leftPresences)
-        })
-
-      await presenceChannel.subscribe(async (status: string) => {
-        if (status === 'SUBSCRIBED') {
-          setIsConnected(true)
-          
-          // Track our presence
-          await presenceChannel.track({
-            user_id: user.id,
-            admin_name: userData?.full_name || 'Admin',
-            admin_email: userData?.email || user.email,
-            current_page: window.location.pathname,
-            current_item_id: null,
-            cursor_position: null,
-            last_seen_at: new Date().toISOString(),
-          })
-        }
-      })
-
-      presenceChannelRef.current = presenceChannel
-    }
-
-    initializeRealtime()
-
-    return () => {
-      // Cleanup on unmount
-      if (presenceChannelRef.current) {
-        presenceChannelRef.current.unsubscribe()
       }
-      subscriptionsRef.current.forEach((channel) => {
-        channel.unsubscribe()
-      })
-    }
-  }, [supabase])
+    })
 
-  // ============================================
-  // UPDATE PRESENCE (page, item, etc.)
-  // ============================================
+    presenceChannelRef.current = presenceChannel
+
+    const subscriptions = subscriptionsRef.current
+    return () => {
+      presenceChannel.unsubscribe()
+      subscriptions.forEach((ch) => ch.unsubscribe())
+    }
+  }, [userId, userName, userEmail, supabase])
+
+  // Auto-track page changes
+  useEffect(() => {
+    if (!presenceChannelRef.current || !userId) return
+    presenceChannelRef.current.track({
+      user_id: userId,
+      admin_name: userName,
+      admin_email: userEmail,
+      current_page: pathname,
+      last_seen_at: new Date().toISOString(),
+    })
+  }, [pathname, userId, userName, userEmail])
+
   const updatePresence = useCallback(async (data: Partial<AdminPresence>) => {
-    if (!presenceChannelRef.current || !currentUserId) return
-    
+    if (!presenceChannelRef.current || !userId) return
     await presenceChannelRef.current.track({
-      user_id: currentUserId,
+      user_id: userId,
       ...data,
       last_seen_at: new Date().toISOString(),
     })
-  }, [currentUserId])
+  }, [userId])
 
-  // ============================================
-  // BROADCAST CURSOR POSITION (throttled)
-  // ============================================
-  const lastCursorBroadcast = useRef<number>(0)
-  const broadcastCursor = useCallback((position: { x: number; y: number }) => {
-    const now = Date.now()
-    // Throttle to max 20 updates per second (50ms)
-    if (now - lastCursorBroadcast.current < 50) return
-    lastCursorBroadcast.current = now
-    
-    updatePresence({ cursor_position: position } as any)
-  }, [updatePresence])
-
-  // ============================================
-  // SUBSCRIBE TO TABLE CHANGES
-  // ============================================
   const subscribeToTable = useCallback((
     table: string,
     callback: (payload: any) => void,
@@ -170,9 +123,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       ? `${table}-${filter.column}-${filter.value}`
       : `${table}-all`
     
-    // Check if already subscribed
     if (subscriptionsRef.current.has(channelName)) {
-      // Just return the unsubscribe function
       return () => {
         const channel = subscriptionsRef.current.get(channelName)
         if (channel) {
@@ -185,39 +136,30 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     const channelConfig: any = {
       event: '*',
       schema: 'public',
-      table: table,
+      table,
     }
-    
     if (filter) {
       channelConfig.filter = `${filter.column}=eq.${filter.value}`
     }
 
     const channel = supabase
       .channel(channelName)
-      .on('postgres_changes', channelConfig, (payload: any) => {
-        console.log(`[Realtime] ${table}:`, payload)
-        callback(payload)
-      })
+      .on('postgres_changes', channelConfig, callback)
       .subscribe()
 
     subscriptionsRef.current.set(channelName, channel)
 
-    // Return unsubscribe function
     return () => {
       channel.unsubscribe()
       subscriptionsRef.current.delete(channelName)
     }
   }, [supabase])
 
-  // ============================================
-  // CONTEXT VALUE
-  // ============================================
   const value: RealtimeContextValue = {
     isConnected,
     activeAdmins,
-    currentUserId,
+    currentUserId: userId,
     updatePresence,
-    broadcastCursor,
     subscribeToTable,
   }
 
@@ -249,9 +191,50 @@ export function useActiveAdmins() {
   }
 }
 
+/**
+ * Returns other admins currently viewing a specific course.
+ * Matches by checking if their current_page contains the courseId.
+ */
+export function useAdminsOnCourse(courseId: string) {
+  const { activeAdmins, currentUserId } = useRealtime()
+  
+  return useMemo(() => {
+    return activeAdmins.filter(admin => 
+      admin.user_id !== currentUserId && 
+      admin.current_page.includes(`/studio/${courseId}`)
+    )
+  }, [activeAdmins, currentUserId, courseId])
+}
+
+/**
+ * Returns other admins grouped by which courseId they're viewing.
+ * Useful for the course list view to show badges on each card.
+ */
+export function useAdminsByCourse() {
+  const { activeAdmins, currentUserId } = useRealtime()
+  
+  return useMemo(() => {
+    const map: Record<string, AdminPresence[]> = {}
+    
+    activeAdmins.forEach(admin => {
+      if (admin.user_id === currentUserId) return
+      
+      // Extract courseId from path like /admin/studio/{courseId} or /admin/studio/{courseId}/...
+      const match = admin.current_page.match(/\/studio\/([^/]+)/)
+      if (match) {
+        const courseId = match[1]
+        if (!map[courseId]) map[courseId] = []
+        map[courseId].push(admin)
+      }
+    })
+    
+    return map
+  }, [activeAdmins, currentUserId])
+}
+
 export function usePresence() {
-  const { updatePresence, broadcastCursor } = useRealtime()
-  return { updatePresence, broadcastCursor }
+  const { updatePresence } = useRealtime()
+  return { updatePresence }
 }
 
 export function useTableSubscription(

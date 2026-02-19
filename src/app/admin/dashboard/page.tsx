@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
-import { FileText, Folder, BookOpen, Sparkles, Plus, ArrowRight, TrendingUp } from 'lucide-react'
+import { FileText, Folder, BookOpen, Sparkles, Plus, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 export default async function DashboardPage() {

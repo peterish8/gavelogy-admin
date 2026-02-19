@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { useShallow } from 'zustand/react/shallow'
 import { createClient } from '@/lib/supabase/client'
 import type { DraftChange, EntityType } from '@/types/course-builder'
 import { useCourseStore } from './course-store'

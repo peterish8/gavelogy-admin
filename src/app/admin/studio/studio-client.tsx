@@ -5,7 +5,6 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { 
   Filter as FilterIcon, 
   ArrowUpDown, 
-  Calendar,
   Layers
 } from 'lucide-react'
 import {
@@ -33,14 +32,14 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy
 } from '@dnd-kit/sortable'
-import { Plus, Loader2, ArrowLeft, Sparkles } from 'lucide-react'
+import { Plus, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAdmin } from '@/contexts/admin-context'
 import { useCourseActions } from '@/hooks/use-courses'
 import { CourseCard } from '@/components/course/course-card'
+import { useAdminsByCourse } from '@/lib/realtime/realtime-provider'
 import { NewCourseDeclarationModal } from '@/components/course/new-course-declaration-modal'
 import { CrashCourseModal } from '@/components/course/crash-course-modal'
-import { useDraftStore } from '@/lib/stores/draft-store'
 import { useHeaderStore } from '@/lib/stores/header-store'
 import type { Course } from '@/types/course-builder'
 
@@ -49,15 +48,16 @@ interface StudioClientProps {
 }
 
 export default function StudioClient({ initialCourses }: StudioClientProps) {
-  const { isAdmin, isLoading: adminLoading } = useAdmin()
+  const { isAdmin } = useAdmin()
+  const adminsByCourse = useAdminsByCourse()
   
   // Organization State
   const [filterType, setFilterType] = useState<'all' | 'normal' | 'crash'>('all')
   const [sortOrder, setSortOrder] = useState<'custom' | 'newest' | 'oldest'>('custom')
   const [isFetching, setIsFetching] = useState(false)
 
-  const { createCourse, updateCourse, deleteCourse, reorderCourse } = useCourseActions()
-  const addChange = useDraftStore((state) => state.addChange)
+  const { updateCourse, reorderCourse } = useCourseActions()
+
   
   // Use server-provided initial courses (no client-side initial fetch needed!)
   const [localCourses, setLocalCourses] = useState(initialCourses)
@@ -155,7 +155,7 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
         }
       ])
 
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('courses')
         .insert(newCourse)
         .select()
@@ -259,14 +259,7 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
     return () => clearHeader()
   }, [isAdmin, displayCourses.length, setHeader, clearHeader])
 
-  if (adminLoading) {
-    return (
-      <div className="flex items-center justify-center h-[60vh]">
-        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-        <span className="sr-only">Loading...</span>
-      </div>
-    )
-  }
+
 
 
 
@@ -376,8 +369,7 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
                   isAdmin={isAdmin}
                   onEdit={handleEditCourse}
                   onDelete={handleDeleteCourse}
-                  // Maybe pass drag handle prop if needed to hide visual handles?
-                  // For now, SortableContext disable prevents drag.
+                  activeAdmins={adminsByCourse[course.id]}
                 />
               ))}
             </div>

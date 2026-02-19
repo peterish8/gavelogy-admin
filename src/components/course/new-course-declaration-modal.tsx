@@ -215,7 +215,7 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
       const newCourseId = courseData.id
 
       // 2. Prepare Structure Items for Batch Insert
-      toast.loading(`Preparing ${stats?.files! + stats?.folders!} items...`, { id: toastId })
+      toast.loading(`Preparing ${(stats?.files ?? 0) + (stats?.folders ?? 0)} items...`, { id: toastId })
       const itemsToInsert: any[] = []
 
       const processItems = (items: CourseDeclarationItem[], parentId: string | null, orderStart: number = 0) => {

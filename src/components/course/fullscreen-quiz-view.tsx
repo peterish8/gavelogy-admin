@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
-import { parseQuizText, QuizQuestion, ParsedQuiz } from '@/lib/quiz-parser'
+import { useState, useMemo } from 'react'
+import { parseQuizText } from '@/lib/quiz-parser'
 import { cn } from '@/lib/utils'
 import { ArrowLeft, RotateCcw, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'

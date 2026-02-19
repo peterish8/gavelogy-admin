@@ -29,7 +29,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { toast } from 'sonner'
-import { ArrowLeft, Loader2, Save, Trash2, Plus, GripVertical, Pencil } from 'lucide-react'
+import { ArrowLeft, Loader2, Save, Trash2, Plus, Pencil } from 'lucide-react'
 import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
 
@@ -109,7 +109,7 @@ export default function EditQuizPage({ params }: { params: Promise<{ quizId: str
         // Fetch questions
         await fetchQuestions()
 
-      } catch (error) {
+      } catch {
         toast.error('Failed to load quiz data')
         router.push('/admin/quizzes')
       } finally {
@@ -118,6 +118,7 @@ export default function EditQuizPage({ params }: { params: Promise<{ quizId: str
     }
 
     fetchData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quizId, supabase, router])
 
   const fetchQuestions = async () => {

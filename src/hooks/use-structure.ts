@@ -18,7 +18,7 @@ export function useStructure(courseId: string) {
   
   const { changes } = useDraftStore()
   
-  const fetchStructureFromDb = useCallback(async (force = false) => {
+  const fetchStructureFromDb = useCallback(async () => {
     if (!courseId) {
       console.log('useStructure: no courseId, skipping')
       setIsLoading(false)
@@ -70,7 +70,7 @@ export function useStructure(courseId: string) {
       setIsFetching(false)
       setIsLoading(false)
     }
-  }, [courseId, store.setStructure, storeData]) // storeData used for check? Actually we can check inside execution but dependency is okay if we want to validte against stale? 
+  }, [courseId, store, storeData, isFetching]) 
   // Wait, if I add storeData to dep here, fetching might loop if storeData changes?
   // Let's remove storeData from dependency and just use ref or trust the closure?
   // Actually, standard pattern:
@@ -206,16 +206,7 @@ export function useStructureActions() {
 
   const updateItem = useCallback(async (id: string, updates: Partial<StructureItem>) => {
      // 1. Optimistic Update
-     // We need courseId to update store. Currently not passed? 
-     // We'd have to search all stores or assume active course?
-     // StructureItem doesn't strictly have course_id in partial updates usually.
-     // Let's rely on finding it in the store. 
-     // Iterate all courses in store? Or just rely on the fact we usually stick to one course context.
-     // Ideally pass courseId, but signature is fixed. 
-     // We can scan store.structures values.
-     
      let foundCourseId: string | null = null
-     let foundItem: any = null
      
      // Find courseId for this item
      Object.entries(store.structures).forEach(([cId, items]) => {
@@ -225,9 +216,6 @@ export function useStructureActions() {
      
      if (foundCourseId) {
          const currentItems = store.structures[foundCourseId!]
-         // We need a deep update helper or simpler: just refetch? 
-         // Refetch defeats "Instant". 
-         // Let's implementation a recursive updater.
          const updatedItems = deepUpdate(currentItems, id, updates)
          store.setStructure(foundCourseId!, updatedItems)
      }
@@ -274,7 +262,6 @@ export function useStructureActions() {
      })
 
      if (foundCourseId) {
-         const currentItems = store.structures[foundCourseId!]
          // simplified: we'll wait for refetch/subscription for complex moves 
          // UNLESS we want to write a tree mover now.
          // Given complexity, let's do a basic update:

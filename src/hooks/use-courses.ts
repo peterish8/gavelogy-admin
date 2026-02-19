@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { Course, CourseWithSubjects } from '@/types/course-builder'
+import type { Course } from '@/types/course-builder'
 import { useDraftStore } from '@/lib/stores/draft-store'
 import { useCourseStore } from '@/lib/stores/course-store'
 
@@ -135,7 +135,7 @@ export function useCourses() {
         clearTimeout(timeoutRef.current)
       }
     }
-  }, [])
+  }, [fetchCourses])
 
   const refetch = useCallback(() => fetchCourses(true), [fetchCourses])
 
@@ -178,11 +178,6 @@ export function useCourse(courseId: string) {
     // 1. Check drafts (unchanged logic)
     const draftChange = getChangeForEntity(courseId)
     if (draftChange && draftChange.entityType === 'course' && draftChange.action === 'create') {
-        const draftCourse = {
-            ...draftChange.data as Course,
-            subjects: []
-        }
-        // Maybe update store? No, draft is volatile.
         setIsFetching(false)
         clearTimeout(timeoutId)
         return // We return specialized logic below
@@ -209,7 +204,7 @@ export function useCourse(courseId: string) {
       clearTimeout(timeoutId)
       setIsFetching(false)
     }
-  }, [courseId, getChangeForEntity, store.setCourseDetail])
+  }, [courseId, getChangeForEntity, store])
 
   useEffect(() => {
       // If not in cache, strictly fetch. 
@@ -220,7 +215,7 @@ export function useCourse(courseId: string) {
           // Silent re-validate
           fetchCourse()
       }
-  }, [courseId, fetchCourse]) // Remove cachedCourse dependency to avoid loops if object splits
+  }, [courseId, fetchCourse, cachedCourse])
 
   // Logic to return: Cache + Draft Overrides
   const mergedCourse = useMemo(() => {

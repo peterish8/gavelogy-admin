@@ -2,10 +2,9 @@
 
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronRight, ChevronDown, Check, FileText, HelpCircle, BookOpen } from 'lucide-react'
+import { ChevronRight, ChevronDown, Check, HelpCircle, BookOpen } from 'lucide-react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
 
 export interface CaseItem {
   case_number: string
@@ -147,7 +146,7 @@ function YearSection({ year, cases, styles }: { year: string, cases: CaseItem[],
                             "w-6 h-6 rounded-full flex items-center justify-center border-2",
                              item.has_notes ? "bg-green-500 border-green-500" : "border-slate-200"
                         )}>
-                            {item.has_notes && <Check className="w-3.5 h-3.5 text-white stroke-[3]" />}
+                            {item.has_notes && <Check className="w-3.5 h-3.5 text-white stroke-3" />}
                         </div>
 
                         {/* Notes Button */}
@@ -158,12 +157,10 @@ function YearSection({ year, cases, styles }: { year: string, cases: CaseItem[],
                             </div>
                         </Link>
 
-                        {/* Quiz Button */}
-                        <Link href={`/admin/case-quizzes/${item.case_number}`}>
-                            <div className="w-10 h-10 rounded-full bg-yellow-400 hover:bg-yellow-500 text-white flex items-center justify-center shadow-sm shadow-yellow-200 transition-all cursor-pointer">
-                                <span className="font-bold text-lg font-serif">Q</span>
-                            </div>
-                        </Link>
+                        {/* Quiz Button - placeholder for future feature */}
+                        <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center">
+                            <HelpCircle className="w-4 h-4" />
+                        </div>
                     </div>
                   </div>
                 ))}

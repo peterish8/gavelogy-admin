@@ -1,7 +1,7 @@
 'use client'
 
-import { createContext, useContext, useEffect, useCallback } from 'react'
-import { useDraftStore, useHasUnsavedChanges } from '@/lib/stores/draft-store'
+import { createContext, useContext, useEffect } from 'react'
+import { useHasUnsavedChanges } from '@/lib/stores/draft-store'
 
 interface DraftContextType {
   hasUnsavedChanges: boolean

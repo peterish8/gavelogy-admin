@@ -23,7 +23,7 @@ import { Button } from '@/components/ui/button'
 import { useAdmin } from '@/contexts/admin-context'
 import { useSubject } from '@/hooks/use-subjects'
 import { useContentActions } from '@/hooks/use-content'
-import { ContentCard, ContentList } from '@/components/course/content-card'
+import { ContentCard } from '@/components/course/content-card'
 import { AddContentButton } from '@/components/admin/add-button'
 import type { ContentItem } from '@/types/course-builder'
 
@@ -32,7 +32,7 @@ export default function SubjectDetailPage() {
   const courseId = params.courseId as string
   const subjectId = params.subjectId as string
   
-  const { isAdmin, isLoading: adminLoading } = useAdmin()
+  const { isAdmin } = useAdmin()
   const { subject, isLoading, error, refetch } = useSubject(subjectId)
   const { createContentItem, updateContentItem, deleteContentItem, reorderContentItem } = useContentActions()
   
@@ -123,7 +123,7 @@ export default function SubjectDetailPage() {
     }
   }
 
-  if (adminLoading || isLoading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
         <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
@@ -235,7 +235,7 @@ export default function SubjectDetailPage() {
                 />
               )}
               
-              {localContent.map((content, index) => (
+              {localContent.map((content) => (
                 <div key={content.id}>
                   <ContentCard
                     content={content}
