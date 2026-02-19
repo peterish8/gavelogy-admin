@@ -127,8 +127,7 @@ function TreePreview({
 export function CourseDeclarationModal({ 
   courseId, 
   nextOrderIndex = 0,
-  onStructureCreated,
-  createItem 
+  onStructureCreated, 
 }: CourseDeclarationModalProps) {
   const [open, setOpen] = useState(false)
   const [jsonInput, setJsonInput] = useState('')

@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { ChevronRight, BookOpen, Eye, EyeOff } from 'lucide-react'
+import { ChevronRight, Eye, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AdminControls, DragHandle } from '@/components/admin/admin-controls'
 import { InlineEditor } from '@/components/admin/inline-editor'
@@ -19,15 +19,18 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import type { Course } from '@/types/course-builder'
+import type { AdminPresence } from '@/lib/realtime/realtime-provider'
+import { PresenceBadgeStack } from '@/components/admin/presence-badge'
 
 interface CourseCardProps {
   course: Course
   isAdmin: boolean
   onEdit?: (id: string, updates: Partial<Course>) => void
   onDelete?: (id: string) => void
+  activeAdmins?: AdminPresence[]
 }
 
-export function CourseCard({ course, isAdmin, onEdit, onDelete }: CourseCardProps) {
+export function CourseCard({ course, isAdmin, onEdit, onDelete, activeAdmins }: CourseCardProps) {
   const [editingField, setEditingField] = useState<'name' | 'description' | 'icon' | null>(null)
 
   const {
@@ -63,7 +66,7 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete }: CourseCardProp
   }
 
   const [showDisableDialog, setShowDisableDialog] = useState(false)
-  const [isTogglingActive, setIsTogglingActive] = useState(false)
+  // const [isTogglingActive, setIsTogglingActive] = useState(false)
 
   const handleToggleActive = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -72,7 +75,7 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete }: CourseCardProp
   }
 
   const confirmToggle = async () => {
-    setIsTogglingActive(true)
+    // setIsTogglingActive(true) // Unused
     setShowDisableDialog(false)
     
     try {
@@ -94,7 +97,7 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete }: CourseCardProp
       const { toast } = await import('sonner')
       toast.error('Failed to update course visibility')
     } finally {
-      setIsTogglingActive(false)
+      // setIsTogglingActive(false) // Unused
     }
   }
 
@@ -228,8 +231,13 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete }: CourseCardProp
                   Draft
                 </span>
              )
-           )}
-        </div>
+            )}
+
+            {/* Presence badges - other admins working on this course */}
+            {activeAdmins && activeAdmins.length > 0 && (
+              <PresenceBadgeStack admins={activeAdmins} />
+            )}
+         </div>
         
         <div className="flex items-center gap-3">
             {course.price > 0 && (

@@ -7,9 +7,8 @@ import {
   Folder, 
   FileText, 
   MoreHorizontal, 
-  Plus, 
-  Trash2, 
   Edit2,
+  Trash2,
   GripVertical
 } from 'lucide-react'
 import { cn } from '@/lib/utils'

@@ -7,7 +7,7 @@ import { TextStyle } from '@tiptap/extension-text-style'
 import { Color } from '@tiptap/extension-color'
 import Underline from '@tiptap/extension-underline'
 import TextAlign from '@tiptap/extension-text-align'
-import { Toggle } from '@/components/ui/toggle'
+
 import {
   Bold,
   Italic,

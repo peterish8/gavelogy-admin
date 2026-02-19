@@ -18,12 +18,10 @@ import { Node, mergeAttributes } from '@tiptap/core'
 import { htmlToCustom, customToHtml } from '@/lib/content-converter'
 import {
     Bold, Italic, Underline as UnderlineIcon,
-    AlignLeft, AlignCenter, AlignRight, AlignJustify,
-    List, ListOrdered, Image as ImageIcon, Link as LinkIcon,
-    Undo, Redo, Save, X, RotateCcw, CheckCircle, AlertTriangle,
-    Maximize2, Minimize2, ChevronRight, ChevronsRight, StickyNote, FileText,
-    Highlighter, Type, Box as BoxIcon, Upload, Braces,
-    GripVertical, ChevronLeft, Loader2, MessageSquare, Minus, ArrowLeft, Eye, Edit3
+    List, ListOrdered, Save, X, RotateCcw, CheckCircle, AlertTriangle,
+    Maximize2, Minimize2, ChevronRight, StickyNote, FileText,
+    Highlighter, Braces,
+    GripVertical, ChevronLeft, Loader2, MessageSquare, Minus
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
@@ -164,7 +162,6 @@ export const FontSize = Extension.create({
 // Define extensions outside component to prevent re-creation on render (fixes duplicate extension warnings)
 const EDITOR_EXTENSIONS = [
   StarterKit.configure({
-    // @ts-ignore
     underline: false,
   }),
   Underline,
@@ -188,7 +185,7 @@ interface EditorPanelProps {
   onExpandChange?: (expanded: boolean) => void
 }
 
-export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitleChange, mode = 'all', isExpandedControlled, onExpandChange }: EditorPanelProps) {
+export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, mode = 'all', isExpandedControlled, onExpandChange }: EditorPanelProps) {
   const [loading, setLoading] = useState(false)
   const [saveLoading, setSaveLoading] = useState(false)
   const [saveQuizLoading, setSaveQuizLoading] = useState(false)
@@ -251,12 +248,12 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
 
   // Draft System State
   const [hasDraft, setHasDraft] = useState(false)
-  const [draftId, setDraftId] = useState<string | null>(null)
+  const [, setDraftId] = useState<string | null>(null) // draftId unused, kept for logic potential
   const [publishedContent, setPublishedContent] = useState('') // Content from note_contents (what users see)
 
   // Auto-save state
-  const [lastSaved, setLastSaved] = useState<Date | null>(null)
-  const [isAutoSaving, setIsAutoSaving] = useState(false)
+  const [, setLastSaved] = useState<Date | null>(null) // lastSaved unused
+  const [, setIsAutoSaving] = useState(false) // isAutoSaving unused
 
   // Quiz State
   const [quizContent, setQuizContent] = useState('')
@@ -350,6 +347,8 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
         if (quizContent) localCache.setQuizContent(id, quizContent)
         console.log('Autosave: Saved to localStorage')
      }, 1000) // 1 second debounce
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quizContent])
   
   // Cleanup timer
@@ -357,6 +356,7 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
       return () => {
           if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
       }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Close expanded mode on Escape
@@ -369,7 +369,7 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isExpanded])
+  }, [isExpanded, onExpandChange])
 
   const [quizSplit, setQuizSplit] = useState(50) // Percentage width of left panel
   const [isDragging, setIsDragging] = useState(false)
@@ -440,6 +440,7 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
         }
     }
     prevItemIdRef.current = itemId
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemId, editor, initialContent, quizContent, originalQuizContent])
 
   // Effect B: Fetch Content (Independent of Editor)
@@ -474,7 +475,7 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
             const supabase = createClient()
             
             // Checks for draft content
-            let localDraft = null; // Add draft logic if needed
+            // localDraft logic removed as unused
 
             // Check Local Cache First
             const cachedNote = localCache.getNoteContent(itemId!)
@@ -523,7 +524,9 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
     return () => { 
         isMounted = false 
         clearTimeout(safetyTimeout)
+        clearTimeout(safetyTimeout)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemId, itemType, isStructureDraft])
 
   // Effect C: Apply Content (When Editor & Data are Ready)
@@ -1327,8 +1330,7 @@ export function EditorPanel({ itemId, itemType, courseId, title, onClose, onTitl
                             "flex-1 overflow-y-auto p-6 pb-20 relative flex flex-col items-center",
                             isExpanded ? "bg-slate-100" : "bg-slate-50/30"
                         )}>
-                            {editor && (
-                            // @ts-ignore - tippyOptions is valid but types might be mismatching
+                                {editor && (
                             <BubbleMenu editor={editor} className="flex flex-col gap-1 items-center" options={{ placement: 'bottom' }}>
                                 {/* Bottom Row: Main Toolbar (Now Top Row visually) */}
                                 <div className="flex items-center gap-1 p-1 bg-white rounded-lg shadow-xl border border-slate-200 animate-in zoom-in-95 duration-200">

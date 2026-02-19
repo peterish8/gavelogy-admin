@@ -45,7 +45,7 @@ export default function EditNotePage({ params }: { params: Promise<{ caseNumber:
         if (data) {
           setContent(data.overall_content)
         }
-      } catch (error) {
+      } catch {
         toast.error('Failed to load note')
         router.push('/admin/notes')
       } finally {
