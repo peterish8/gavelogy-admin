@@ -228,17 +228,23 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
   }, [isResizing, resize, stopResizing])
 
   // 1. Init from URL on Mount
+  const hydratedRef = useRef(false)
+  
   useEffect(() => {
+    if (hydratedRef.current) return
+    
     const urlItemId = searchParams.get('itemId')
     const urlFullscreen = searchParams.get('fullscreen') === 'true'
 
-    if (urlItemId && urlItemId !== selectedId) {
+    if (urlItemId) {
         setSelectedId(urlItemId)
     }
     if (urlFullscreen) {
         setFullscreen(true)
     }
-  }, [searchParams, selectedId]) // Run once on mount to hydrate state from URL
+    
+    hydratedRef.current = true
+  }, [searchParams]) // Read-only on mount/URL change
 
   // 2. Sync State to URL
   useEffect(() => {
@@ -272,7 +278,8 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
     if (needsUpdate) {
         router.replace(`${pathname}?${currentParams.toString()}`, { scroll: false })
     }
-  }, [selectedId, fullscreen, pathname, router, searchParams])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, fullscreen, pathname, router]) // Removed searchParams to break cycle
 
   // Helper to find item in tree
   const findItem = useCallback((items: StructureItem[], id: string): StructureItem | null => {
@@ -682,67 +689,67 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
             <div 
                 ref={sidebarRef}
                 style={{ width: sidebarWidth, flexShrink: 0 }}
-                className="hidden lg:flex bg-white border border-border rounded-xl flex-col overflow-hidden shadow-sm h-full z-10"
+                className="hidden lg:flex bg-card border border-border rounded-xl flex-col overflow-hidden shadow-sm h-full z-10"
             >
-            <div className="p-4 border-b border-border bg-slate-50/50 flex flex-col gap-4 shrink-0 transition-all">
+            <div className="p-4 border-b border-border bg-muted/50 flex flex-col gap-4 shrink-0 transition-all">
                
                 {/* Cute Stats Dashboard */}
                 <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-white border border-blue-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
+                    <div className="bg-card border border-blue-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
                         <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
                              <Folder className="w-4 h-4" />
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-sm font-bold text-slate-700">{stats.folders}</span>
-                            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Modules</span>
+                            <span className="text-sm font-bold text-foreground/90">{stats.folders}</span>
+                            <span className="text-[10px] uppercase font-bold text-muted-foreground/70 tracking-wider">Modules</span>
                         </div>
                     </div>
                     
-                    <div className="bg-white border border-purple-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
+                    <div className="bg-card border border-purple-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
                         <div className="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center text-purple-600">
                              <FileText className="w-4 h-4" />
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-sm font-bold text-slate-700">{stats.files}</span>
-                            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Files</span>
+                            <span className="text-sm font-bold text-foreground/90">{stats.files}</span>
+                            <span className="text-[10px] uppercase font-bold text-muted-foreground/70 tracking-wider">Files</span>
                         </div>
                     </div>
 
-                    <div className="bg-white border border-amber-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
+                    <div className="bg-card border border-amber-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
                         <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600">
                              <StickyNote className="w-4 h-4" />
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-sm font-bold text-slate-700">{stats.notes}</span>
-                            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Content</span>
+                            <span className="text-sm font-bold text-foreground/90">{stats.notes}</span>
+                            <span className="text-[10px] uppercase font-bold text-muted-foreground/70 tracking-wider">Content</span>
                         </div>
                     </div>
 
-                    <div className="bg-white border border-rose-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
+                    <div className="bg-card border border-rose-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
                         <div className="w-8 h-8 rounded-lg bg-rose-50 flex items-center justify-center text-rose-600">
                              <HelpCircle className="w-4 h-4" />
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-sm font-bold text-slate-700">{stats.quizzes}</span>
-                            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Quizzes</span>
+                            <span className="text-sm font-bold text-foreground/90">{stats.quizzes}</span>
+                            <span className="text-[10px] uppercase font-bold text-muted-foreground/70 tracking-wider">Quizzes</span>
                         </div>
                     </div>
                 </div>
                 
                 {/* Search Bar */}
                 <div className="relative group">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-primary transition-colors" />
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/70 group-focus-within:text-primary transition-colors" />
                     <input 
                         type="text" 
                         placeholder="Filter course structure..." 
-                        className="w-full pl-9 pr-8 h-10 text-sm rounded-xl border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-slate-400"
+                        className="w-full pl-9 pr-8 h-10 text-sm rounded-xl border border-border bg-card shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-muted-foreground/70"
                         value={searchQuery}
                         onChange={(e) => handleSearch(e.target.value)}
                     />
                      {searchQuery && (
                         <button 
                             onClick={() => handleSearch('')}
-                            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full hover:bg-muted/80 text-muted-foreground/70 hover:text-muted-foreground transition-colors"
                         >
                             <X className="w-3 h-3" />
                         </button>
@@ -782,13 +789,13 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
         {/* Drag Handle */}
         <div
             className={cn(
-                "hidden lg:flex w-4 -ml-2 z-20 cursor-col-resize items-center justify-center group hover:bg-slate-100/50 transition-colors select-none",
+                "hidden lg:flex w-4 -ml-2 z-20 cursor-col-resize items-center justify-center group hover:bg-muted/80/50 transition-colors select-none",
                 isResizing && "bg-blue-100/50 w-6 -ml-3"
             )}
             onMouseDown={startResizing}
         >
             <div className={cn(
-                "w-1 h-8 rounded-full bg-slate-200 group-hover:bg-blue-400 transition-colors",
+                "w-1 h-8 rounded-full bg-muted group-hover:bg-blue-400 transition-colors",
                 isResizing && "bg-blue-500 h-full w-0.5"
             )} />
         </div>
@@ -797,8 +804,8 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
         <div className={cn(
             "flex-1 flex flex-col overflow-hidden transition-all duration-300",
             fullscreen 
-                ? "fixed inset-0 z-50 bg-slate-50 p-0" 
-                : "bg-white border border-border rounded-xl shadow-sm h-full"
+                ? "fixed inset-0 z-50 bg-muted p-0" 
+                : "bg-card border border-border rounded-xl shadow-sm h-full"
         )}>
           {selectedItem ? (
              <EditorPanel 
@@ -816,7 +823,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
                 }}
              />
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
+            <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground/70">
               <FileText className="w-16 h-16 mb-4 opacity-20" />
               <p>Select a note or quiz to edit</p>
             </div>

@@ -62,8 +62,8 @@ function TreePreview({
           <div key={item.id}>
             <div 
               className={cn(
-                "flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-100 transition-colors cursor-pointer",
-                depth === 0 && "bg-slate-50"
+                "flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted/80 transition-colors cursor-pointer",
+                depth === 0 && "bg-muted"
               )}
               style={{ paddingLeft: `${depth * 16 + 8}px` }}
               onClick={() => hasChildren && toggle(item.id)}
@@ -71,9 +71,9 @@ function TreePreview({
               {/* Expand Icon */}
               {hasChildren ? (
                 isExpanded ? (
-                  <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+                  <ChevronDown className="w-4 h-4 text-muted-foreground/70 shrink-0" />
                 ) : (
-                  <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+                  <ChevronRight className="w-4 h-4 text-muted-foreground/70 shrink-0" />
                 )
               ) : (
                 <span className="w-4" />
@@ -87,12 +87,12 @@ function TreePreview({
               )}
 
               {/* Title */}
-              <span className="text-sm font-medium text-slate-700 line-clamp-2 wrap-break-word">
+              <span className="text-sm font-medium text-foreground/90 line-clamp-2 wrap-break-word">
                 {item.title}
               </span>
 
               {/* ID Badge Hidden */}
-              {/* <span className="text-xs text-slate-400 ml-auto shrink-0">
+              {/* <span className="text-xs text-muted-foreground/70 ml-auto shrink-0">
                 {item.id}
               </span> */}
 
@@ -100,12 +100,12 @@ function TreePreview({
               {item.type === 'file' && (
                 <div className="flex gap-1 shrink-0">
                   {item.hasNotes && (
-                    <span className="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">
+                    <span className="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-white rounded">
                       Notes
                     </span>
                   )}
                   {item.hasQuiz && (
-                    <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">
+                    <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-white rounded">
                       Quiz
                     </span>
                   )}
@@ -406,7 +406,7 @@ Here are the topics to convert into this JSON structure:
         ) : (
           <div className="flex-1 flex flex-col gap-4 min-h-0">
             {/* Stats */}
-            <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-lg shrink-0">
+            <div className="flex items-center gap-4 p-3 bg-muted rounded-lg shrink-0">
               <div className="flex items-center gap-2">
                 <Folder className="w-4 h-4 text-amber-500" />
                 <span className="text-sm font-medium">{stats?.folders} Folders</span>
@@ -419,8 +419,8 @@ Here are the topics to convert into this JSON structure:
                 <span className={cn(
                   "text-xs px-2 py-1 rounded-full",
                   parsedData?.isPublic 
-                    ? "bg-green-100 text-green-700" 
-                    : "bg-slate-200 text-slate-600"
+                    ? "bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-white" 
+                    : "bg-muted text-muted-foreground dark:bg-muted/50 dark:text-white"
                 )}>
                   {parsedData?.isPublic ? 'Public' : 'Private'}
                 </span>

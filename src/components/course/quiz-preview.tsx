@@ -109,7 +109,7 @@ export function QuizPreview({ content, onContentChange }: QuizPreviewProps) {
 
   if (questions.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-400">
+      <div className="flex flex-col items-center justify-center h-full p-8 text-center text-muted-foreground/70">
         <div className="text-4xl mb-4 opacity-50">📝</div>
         <p>No quiz questions found.</p>
       </div>
@@ -121,17 +121,17 @@ export function QuizPreview({ content, onContentChange }: QuizPreviewProps) {
   return (
     <div className="flex flex-col h-full bg-linear-to-br from-slate-50 to-slate-100 overflow-hidden">
       {/* Header */}
-      <div className="px-6 py-4 bg-white/80 backdrop-blur-sm border-b flex items-center justify-between shrink-0">
+      <div className="px-6 py-4 bg-card/80 backdrop-blur-sm border-b flex items-center justify-between shrink-0">
         <div>
-          <h2 className="font-bold text-lg text-slate-800">Quiz Preview</h2>
-          <p className="text-xs text-slate-500 font-medium tracking-wide uppercase">Question {currentIndex + 1} of {totalQuestions}</p>
+          <h2 className="font-bold text-lg text-foreground">Quiz Preview</h2>
+          <p className="text-xs text-muted-foreground font-medium tracking-wide uppercase">Question {currentIndex + 1} of {totalQuestions}</p>
         </div>
         <div className="flex items-center gap-3">
            {/* Edit Button (Admin Only) */}
            {onContentChange && (
                isEditing ? (
                    <div className="flex items-center gap-2">
-                       <Button size="sm" variant="ghost" onClick={handleEditToggle} className="text-slate-500">
+                       <Button size="sm" variant="ghost" onClick={handleEditToggle} className="text-muted-foreground">
                            <X className="w-4 h-4 mr-2" /> Cancel
                        </Button>
                        <Button size="sm" onClick={handleSaveEdit} className="bg-green-600 hover:bg-green-700 text-white">
@@ -139,7 +139,7 @@ export function QuizPreview({ content, onContentChange }: QuizPreviewProps) {
                        </Button>
                    </div>
                ) : (
-                   <Button size="sm" variant="outline" onClick={handleEditToggle} className="h-8 border-slate-200 text-slate-600 hover:text-blue-600 hover:border-blue-200">
+                   <Button size="sm" variant="outline" onClick={handleEditToggle} className="h-8 border-border text-muted-foreground hover:text-blue-600 hover:border-blue-200">
                        <Edit2 className="w-3.5 h-3.5 mr-2" /> Edit Question
                    </Button>
                )
@@ -148,13 +148,13 @@ export function QuizPreview({ content, onContentChange }: QuizPreviewProps) {
            {!isEditing && (
                 <>
                     {/* Progress Bar */}
-                    <div className="hidden sm:block w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="hidden sm:block w-24 h-1.5 bg-muted/80 rounded-full overflow-hidden">
                         <div 
                         className="h-full bg-blue-500 transition-all duration-300"
                         style={{ width: `${((currentIndex + 1) / totalQuestions) * 100}%` }}
                         />
                     </div>
-                    <Button variant="ghost" size="icon" onClick={handleRestart} title="Restart Quiz" className="h-8 w-8 text-slate-400 hover:text-slate-600">
+                    <Button variant="ghost" size="icon" onClick={handleRestart} title="Restart Quiz" className="h-8 w-8 text-muted-foreground/70 hover:text-muted-foreground">
                         <RotateCcw className="w-4 h-4" />
                     </Button>
                 </>
@@ -169,25 +169,25 @@ export function QuizPreview({ content, onContentChange }: QuizPreviewProps) {
           {/* Persistent Title (if exists) */}
           {(localQuiz.title) && (
              <div className="text-center mb-6">
-                 <h1 className="text-2xl font-bold text-slate-800">{localQuiz.title}</h1>
+                 <h1 className="text-2xl font-bold text-foreground">{localQuiz.title}</h1>
              </div>
           )}
 
           {/* Passage (if exists) */}
           {passage && (
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Passage</h3>
-              <p className="text-slate-600 leading-relaxed text-sm">{passage}</p>
+            <div className="bg-card rounded-xl p-6 shadow-sm border border-border/50">
+              <h3 className="text-xs font-bold text-muted-foreground/70 uppercase tracking-wider mb-3">Passage</h3>
+              <p className="text-muted-foreground leading-relaxed text-sm">{passage}</p>
             </div>
           )}
 
           {/* Question Card */}
-          <div className={cn("bg-white rounded-xl p-6 shadow-sm border border-slate-100", isEditing && "ring-2 ring-blue-500/20 border-blue-500")}>
+          <div className={cn("bg-card rounded-xl p-6 shadow-sm border border-border/50", isEditing && "ring-2 ring-blue-500/20 border-blue-500")}>
             {isEditing ? (
                 <div className="space-y-4">
                      {/* Title Edit (Only visible if title exists or creating one) */}
                      <div className="space-y-2">
-                         <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Quiz Title (Optional)</label>
+                         <label className="text-xs font-bold text-muted-foreground/70 uppercase tracking-wider">Quiz Title (Optional)</label>
                          <Input 
                             value={localQuiz.title || ''}
                             onChange={(e) => setLocalQuiz(prev => ({ ...prev, title: e.target.value }))}
@@ -201,12 +201,12 @@ export function QuizPreview({ content, onContentChange }: QuizPreviewProps) {
                         <Textarea 
                             value={currentQuestion.questionText}
                             onChange={(e) => updateCurrentQuestion({ questionText: e.target.value })}
-                            className="text-lg font-medium text-slate-800 min-h-[80px] resize-none border-0 bg-slate-50 focus:bg-white focus:ring-0 p-0"
+                            className="text-lg font-medium text-foreground min-h-[80px] resize-none border-0 bg-muted focus:bg-card focus:ring-0 p-0"
                         />
                     </div>
                 </div>
             ) : (
-                <p className="text-lg font-medium text-slate-800 leading-relaxed">
+                <p className="text-lg font-medium text-foreground leading-relaxed">
                 {currentQuestion.questionText}
                 </p>
             )}
@@ -217,16 +217,14 @@ export function QuizPreview({ content, onContentChange }: QuizPreviewProps) {
             {currentQuestion.options.map((option) => {
               const isSelected = selectedAnswer === option.letter
               const isCorrectOption = option.letter === currentQuestion.correctAnswer
-              
-              let optionStyles = 'bg-white border-slate-200 hover:border-blue-300 hover:bg-blue-50/50'
-              
+              let optionStyles = 'bg-card border-border hover:border-primary/50 hover:bg-accent text-foreground'
               if (!isEditing && showResult) {
                 if (isCorrectOption) {
                   optionStyles = 'bg-emerald-50 border-emerald-500/50 text-emerald-900 shadow-sm'
                 } else if (isSelected && !isCorrectOption) {
                   optionStyles = 'bg-rose-50 border-rose-500/50 text-rose-900'
                 } else {
-                  optionStyles = 'bg-slate-50 border-transparent text-slate-400 opacity-50 cursor-not-allowed'
+                  optionStyles = 'bg-muted border-transparent text-muted-foreground/70 opacity-50 cursor-not-allowed'
                 }
               }
 
@@ -238,15 +236,15 @@ export function QuizPreview({ content, onContentChange }: QuizPreviewProps) {
                         className={cn(
                             'w-full p-4 rounded-xl border text-left transition-all duration-200',
                             'flex items-start gap-4',
-                            isEditing ? 'bg-white border-slate-200' : optionStyles
+                            isEditing ? 'bg-card border-border' : optionStyles
                         )}
                     >
                         <span className={cn(
                             'w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 border transition-colors',
-                            isEditing ? (option.letter === currentQuestion.correctAnswer ? 'bg-green-100 text-green-700 border-green-200' : 'bg-slate-100 text-slate-500 border-slate-200') :
+                            isEditing ? (option.letter === currentQuestion.correctAnswer ? 'bg-green-100 text-green-700 border-green-200' : 'bg-muted/80 text-muted-foreground border-border') :
                             showResult && isCorrectOption ? 'bg-emerald-500 border-emerald-500 text-white' : 
                             showResult && isSelected && !isCorrectOption ? 'bg-rose-500 border-rose-500 text-white' :
-                            'bg-slate-50 border-slate-200 text-slate-500 group-hover:bg-white'
+                            'bg-muted border-border text-muted-foreground group-hover:bg-primary group-hover:text-primary-foreground group-hover:border-primary'
                         )}>
                             {option.letter}
                         </span>
@@ -274,7 +272,7 @@ export function QuizPreview({ content, onContentChange }: QuizPreviewProps) {
                                     "text-xs px-2 py-1 rounded font-medium transition-colors border",
                                     option.letter === currentQuestion.correctAnswer 
                                         ? "bg-green-100 text-green-700 border-green-200" 
-                                        : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
+                                        : "bg-muted text-muted-foreground/70 border-border hover:bg-muted/80"
                                 )}
                             >
                                 {option.letter === currentQuestion.correctAnswer ? "Correct Answer" : "Mark Correct"}
@@ -290,18 +288,18 @@ export function QuizPreview({ content, onContentChange }: QuizPreviewProps) {
           {(showResult || isEditing) && (
             <div className={cn(
               'rounded-xl p-6 border animate-in slide-in-from-bottom-2 duration-300',
-              isEditing ? 'bg-slate-50 border-slate-200 border-dashed' :
+              isEditing ? 'bg-muted border-border border-dashed' :
               isCorrect 
                 ? 'bg-emerald-50/50 border-emerald-100' 
                 : 'bg-rose-50/50 border-rose-100'
             )}>
                {isEditing ? (
                    <div className="space-y-2">
-                       <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Explanation</label>
+                       <label className="text-xs font-bold text-muted-foreground/70 uppercase tracking-wider">Explanation</label>
                         <Textarea 
                             value={currentQuestion.explanation}
                             onChange={(e) => updateCurrentQuestion({ explanation: e.target.value })}
-                            className="min-h-[60px] resize-none bg-white font-normal" 
+                            className="min-h-[60px] resize-none bg-card font-normal" 
                             placeholder="Add an explanation..."
                         />
                    </div>
@@ -322,14 +320,14 @@ export function QuizPreview({ content, onContentChange }: QuizPreviewProps) {
                         </div>
                         
                         {!isCorrect && (
-                            <p className="text-slate-700 mb-2">
+                            <p className="text-foreground/90 mb-2">
                             The correct answer is <span className="font-bold">{currentQuestion.correctAnswer}</span>.
                             </p>
                         )}
                         
                         {currentQuestion.explanation && (
-                            <div className="text-slate-600 text-sm leading-relaxed border-t border-slate-200/50 pt-3 mt-3">
-                                <span className="font-semibold text-slate-900 mr-1">Explanation:</span>
+                            <div className="text-muted-foreground text-sm leading-relaxed border-t border-border/50 pt-3 mt-3">
+                                <span className="font-semibold text-foreground mr-1">Explanation:</span>
                                 {currentQuestion.explanation}
                             </div>
                         )}
@@ -342,7 +340,7 @@ export function QuizPreview({ content, onContentChange }: QuizPreviewProps) {
 
       {/* Footer */}
       {(showResult && !isEditing) && (
-        <div className="px-6 py-4 bg-white/80 backdrop-blur-sm border-t flex justify-center shrink-0">
+        <div className="px-6 py-4 bg-card/80 backdrop-blur-sm border-t flex justify-center shrink-0">
           {currentIndex < totalQuestions - 1 ? (
             <Button onClick={handleContinue} className="px-8 bg-slate-900 hover:bg-slate-800 text-white rounded-full">
               Continue

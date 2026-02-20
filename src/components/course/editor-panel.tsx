@@ -20,7 +20,7 @@ import {
     Bold, Italic, Underline as UnderlineIcon,
     List, ListOrdered, Save, X, RotateCcw, CheckCircle, AlertTriangle,
     Maximize2, Minimize2, ChevronRight, StickyNote, FileText,
-    Highlighter, Braces,
+    Highlighter, Braces, Sun, Moon,
     GripVertical, ChevronLeft, Loader2, MessageSquare, Minus
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -232,6 +232,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   
   // UI State
   const [internalIsExpanded, setInternalIsExpanded] = useState(false)
+  const [forceLightMode, setForceLightMode] = useState(false)
   const isExpanded = isExpandedControlled ?? internalIsExpanded
 
   const handleToggleExpand = () => {
@@ -244,7 +245,157 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   }
   
   // Active Tab - set default based on mode
-  const [activeTab, setActiveTab] = useState(mode === 'quiz-only' ? 'quiz' : 'note')
+    const [activeTab, setActiveTab] = useState(mode === 'quiz-only' ? 'quiz' : 'note')
+
+    // -------------------------------------------------------------------------
+    // REUSABLE EDITOR TOOLBAR
+    // -------------------------------------------------------------------------
+    const renderEditorToolbar = () => {
+        if (!editor) return null;
+        return (
+            <div className="flex items-center gap-1 p-1 bg-card rounded-lg shadow-sm border border-border">
+                {/* Text Styling Group */}
+                <div className="flex items-center gap-0.5 border-r border-border pr-1 mr-1">
+                    <button 
+                        onClick={() => editor.chain().focus().toggleBold().run()}
+                        className={cn(
+                            "p-1.5 rounded hover:bg-muted/80 text-muted-foreground transition-colors",
+                            editor.isActive('bold') && "bg-muted/80 text-blue-600 font-bold"
+                        )}
+                        title="Bold"
+                    >
+                        <Bold className="w-4 h-4" />
+                    </button>
+                    <button 
+                        onClick={() => editor.chain().focus().toggleItalic().run()}
+                        className={cn(
+                            "p-1.5 rounded hover:bg-muted/80 text-muted-foreground transition-colors",
+                            editor.isActive('italic') && "bg-muted/80 text-blue-600 italic"
+                        )}
+                        title="Italic"
+                    >
+                        <Italic className="w-4 h-4" />
+                    </button>
+                    <button 
+                        onClick={() => editor.chain().focus().toggleUnderline().run()}
+                        className={cn(
+                            "p-1.5 rounded hover:bg-muted/80 text-muted-foreground transition-colors",
+                            editor.isActive('underline') && "bg-muted/80 text-blue-600 underline"
+                        )}
+                        title="Underline"
+                    >
+                        <UnderlineIcon className="w-4 h-4" />
+                    </button>
+                </div>
+
+                {/* Lists & Code */}
+                <div className="flex items-center gap-0.5 border-r border-border pr-1 mr-1">
+                    <button 
+                        onClick={() => editor.chain().focus().toggleBulletList().run()}
+                        className={cn(
+                            "p-1.5 rounded hover:bg-muted/80 text-muted-foreground transition-colors",
+                            editor.isActive('bulletList') && "bg-muted/80 text-blue-600"
+                        )}
+                        title="Bullet List"
+                    >
+                        <List className="w-4 h-4" />
+                    </button>
+                    <button 
+                        onClick={() => editor.chain().focus().toggleCode().run()}
+                        className={cn(
+                            "p-1.5 rounded hover:bg-muted/80 text-muted-foreground transition-colors",
+                            editor.isActive('code') && "bg-muted/80 text-blue-600"
+                        )}
+                        title="Inline Code"
+                    >
+                        <Braces className="w-4 h-4" />
+                    </button>
+                </div>
+
+                {/* Font Size Selector */}
+                <div className="flex items-center border-r border-border pr-1 mr-1">
+                    <button
+                        onClick={() => {
+                            setShowFontSizePalette(!showFontSizePalette)
+                            setShowHighlightPalette(false)
+                        }}
+                        className={cn(
+                            "flex items-center gap-1 h-7 px-2 text-xs font-medium rounded hover:bg-muted/80 text-muted-foreground transition-colors",
+                            showFontSizePalette && "bg-muted/80 text-primary"
+                        )}
+                        title="Font Size"
+                    >
+                        {(() => {
+                            const size = editor.getAttributes('textStyle')?.fontSize
+                            if (size === '12px') return 'Small'
+                            if (size === '14px') return 'Normal'
+                            if (size === '18px') return 'Medium'
+                            if (size === '20px') return 'Large'
+                            if (size === '24px') return 'Ex-Lg'
+                            if (size === '30px') return 'H1'
+                            return 'Default'
+                        })()}
+                        <ChevronRight className={cn("w-3 h-3 text-muted-foreground/70 transition-transform", showFontSizePalette && "rotate-90")} />
+                    </button>
+                </div>
+
+                {/* Highlight & Note Boxes */}
+                <div className="flex items-center gap-1.5">
+                    <button
+                        onClick={() => {
+                            setShowHighlightPalette(!showHighlightPalette)
+                            setShowFontSizePalette(false)
+                        }}
+                        className={cn(
+                            "p-1.5 rounded hover:bg-muted/80 text-muted-foreground flex items-center gap-1 transition-colors",
+                            (editor.isActive('highlight') || showHighlightPalette) && "bg-yellow-100 text-yellow-700"
+                        )}
+                        title="Highlight Colors"
+                    >
+                        <Highlighter className="w-4 h-4" />
+                        <ChevronRight className={cn("w-3 h-3 text-muted-foreground/70 transition-transform", showHighlightPalette && "rotate-90")} />
+                    </button>
+
+                    <div className="w-px h-4 bg-muted" />
+
+                    <div className="flex items-center gap-1">
+                        {['red', 'green', 'blue', 'amber', 'violet'].map(color => (
+                            <button 
+                                key={color}
+                                onClick={() => editor.chain().focus().toggleNoteBox({ color }).run()}
+                                className={cn(
+                                    "w-4 h-4 rounded-full hover:scale-125 transition-transform border",
+                                    color === 'red' && "bg-red-100 border-red-400",
+                                    color === 'green' && "bg-green-100 border-green-400",
+                                    color === 'blue' && "bg-blue-100 border-blue-400",
+                                    color === 'amber' && "bg-amber-100 border-amber-400",
+                                    color === 'violet' && "bg-violet-100 border-violet-400",
+                                    editor.isActive('noteBox', { color }) && "ring-2 ring-offset-1 ring-slate-400 scale-110"
+                                )}
+                                title={`${color.charAt(0).toUpperCase() + color.slice(1)} Box`}
+                            />
+                        ))}
+                    </div>
+                </div>
+                
+                <div className="w-px h-4 bg-muted mx-1" />
+
+                {/* Clear Format */}
+                <button 
+                    onClick={() => {
+                        editor.chain().focus().unsetAllMarks().run()
+                        if (editor.isActive('noteBox')) {
+                            (editor.commands as any).unsetNoteBox()
+                        }
+                    }}
+                    className="p-1.5 rounded hover:bg-muted/80 text-muted-foreground/70 hover:text-red-500 transition-colors"
+                    title="Clear Formatting"
+                >
+                    <X className="w-4 h-4" />
+                </button>
+            </div>
+        )
+    }
 
   // Draft System State
   const [hasDraft, setHasDraft] = useState(false)
@@ -252,6 +403,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   const [publishedContent, setPublishedContent] = useState('') // Content from note_contents (what users see)
 
   // Auto-save state
+  const autoSaveTimerRef = useState<{ current: NodeJS.Timeout | null }>({ current: null })[0]
   const [, setLastSaved] = useState<Date | null>(null) // lastSaved unused
   const [, setIsAutoSaving] = useState(false) // isAutoSaving unused
 
@@ -277,16 +429,18 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
     extensions: EDITOR_EXTENSIONS,
     content: '',
     editorProps: {
-      attributes: {
+        attributes: {
         class: cn(
             // STRICT USER SITE MIRRORING
             // Single Card Concept: This inner div is THE card.
-            'prose prose-lg max-w-none mx-auto focus:outline-none px-[72px] py-12 text-lg leading-relaxed outline-none text-justify font-sans',
-            'text-slate-700', // Body Color #334155
-            'prose-headings:font-bold prose-headings:text-slate-900', // Headings #0f172a
+            'prose prose-lg w-full max-w-5xl mx-auto focus:outline-none px-[72px] py-12 text-lg leading-relaxed outline-none text-justify font-sans',
+            'text-foreground', // Body Color respects theme
+            'prose-headings:font-bold prose-headings:text-foreground', // Headings respect theme
             'prose-h1:text-4xl prose-h2:text-3xl', // Specific sizes
-            'prose-li:text-slate-700 prose-li:marker:text-slate-700',
-            'min-h-[900px] bg-white shadow-sm border border-slate-200 rounded-xl my-8'
+            'prose-li:text-foreground prose-li:marker:text-foreground',
+            'min-h-[900px] bg-card shadow-sm border border-border rounded-xl my-8',
+            // Ensure inputs inside prose inherit correct color
+            '[&_input]:text-foreground [&_textarea]:text-foreground'
         ),
       },
       handlePaste: (view, event) => {
@@ -794,10 +948,6 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
         setSaveQuizLoading(false)
     }
   }
-
-  // Ref for auto-save debounce (Notes only)
-  const autoSaveTimerRef = useState<{ current: NodeJS.Timeout | null }>({ current: null })[0]
-  
   // Clipboard Handler for Custom Keywords
   useEffect(() => {
       if (!editor) return
@@ -940,9 +1090,9 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
 
   if (!itemId) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-muted-foreground bg-slate-50/50 rounded-xl border border-dashed border-slate-200 m-4">
-        <div className="bg-white p-4 rounded-full shadow-sm mb-4">
-            <FileText className="w-8 h-8 text-slate-300" />
+      <div className="h-full flex flex-col items-center justify-center text-muted-foreground bg-muted/50 rounded-xl border border-dashed border-border m-4">
+        <div className="bg-card p-4 rounded-full shadow-sm mb-4">
+            <FileText className="w-8 h-8 text-muted-foreground/50" />
         </div>
         <p className="font-medium">Select a note to edit content</p>
       </div>
@@ -951,9 +1101,9 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
 
   if (itemType === 'folder') {
      return (
-      <div className="h-full flex flex-col items-center justify-center text-muted-foreground bg-slate-50/50 rounded-xl border border-dashed border-slate-200 m-4">
-        <div className="bg-white p-4 rounded-full shadow-sm mb-4">
-            <GripVertical className="w-8 h-8 text-slate-300" />
+      <div className="h-full flex flex-col items-center justify-center text-muted-foreground bg-muted/50 rounded-xl border border-dashed border-border m-4">
+        <div className="bg-card p-4 rounded-full shadow-sm mb-4">
+            <GripVertical className="w-8 h-8 text-muted-foreground/50" />
         </div>
         <p className="font-medium">Folder Selected</p>
         <p className="text-sm mt-2 max-w-xs text-center">You can rename folders in the tree. Select a file inside to edit its content.</p>
@@ -964,12 +1114,12 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   return (
     <div 
         className={cn(
-            "h-full flex flex-col bg-white rounded-xl shadow-sm border border-border overflow-hidden transition-all duration-300",
+            "h-full flex flex-col bg-card rounded-xl shadow-sm border border-border overflow-hidden transition-all duration-300",
             isExpanded && "fixed inset-0 z-50 rounded-none border-0"
         )}
     >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-white z-10 relative">
+        <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-card z-10 relative">
             <Button variant="ghost" size="sm" onClick={onClose} className="mr-2">
                 <ChevronLeft className="w-4 h-4 mr-1" />
                 Back
@@ -1031,12 +1181,23 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
 
             
             <div className="flex items-center gap-2">
+                {/* Light Mode Override Toggle */}
+                <Button
+                     size="sm"
+                     variant="ghost"
+                     onClick={() => setForceLightMode(!forceLightMode)}
+                     className={cn("text-muted-foreground mr-1", forceLightMode && "text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400")}
+                     title={forceLightMode ? "Disable Light Mode Override" : "Force Light Mode for Editor"}
+                >
+                    {forceLightMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                </Button>
+
                 {/* Fullscreen Toggle */}
                 <Button
                      size="sm"
                      variant="ghost"
                      onClick={handleToggleExpand}
-                     className="text-slate-500 mr-2"
+                     className="text-muted-foreground mr-2"
                      title={isExpanded ? "Exit Full Screen" : "Fill Screen"}
                 >
                     {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -1076,7 +1237,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                             onClick={handlePublish} 
                             disabled={publishLoading || isStructureDraft || !hasDraft || (initialContent === publishedContent)}
                             className={!hasDraft || (initialContent === publishedContent) 
-                                ? "bg-gray-300 text-gray-500 cursor-not-allowed" 
+                                ? "bg-muted text-muted-foreground cursor-not-allowed" 
                                 : "bg-green-600 hover:bg-green-700 text-white"}
                             title={!hasDraft 
                                 ? "Save to draft first before publishing" 
@@ -1101,52 +1262,60 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                     </Button>
                 )}
             </div>
+            </div>
         </div>
-        </div>
-
-        {/* Tabs & Content */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-            <div className="px-6 border-b bg-slate-50/50">
+            <div className="px-6 border-b bg-muted/50">
             {mode === 'all' ? (
                 <TabsList className="bg-transparent p-0 h-10 w-full justify-start space-x-2">
                     <TabsTrigger 
                         value="note"
-                        className="data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-blue-500 data-[state=active]:shadow-none rounded-none px-4 h-10 border-b-2 border-transparent transition-all"
+                        className="data-[state=active]:bg-card data-[state=active]:border-b-2 data-[state=active]:border-blue-500 data-[state=active]:shadow-none rounded-none px-4 h-10 border-b-2 border-transparent transition-all"
                     >
                         <StickyNote className="w-4 h-4 mr-2" />
                         Note Content
                     </TabsTrigger>
                     <TabsTrigger 
                         value="quiz" 
-                        className="data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-purple-500 data-[state=active]:shadow-none rounded-none px-4 h-10 border-b-2 border-transparent transition-all"
+                        className="data-[state=active]:bg-card data-[state=active]:border-b-2 data-[state=active]:border-purple-500 data-[state=active]:shadow-none rounded-none px-4 h-10 border-b-2 border-transparent transition-all"
                     >
                         <MessageSquare className="w-4 h-4 mr-2" />
                         Quiz
                     </TabsTrigger>
                 </TabsList>
             ) : (
-                <div className="flex items-center gap-2 h-10 px-2">
+                <div className="flex items-center gap-2 h-10 px-2 w-full">
                     {mode === 'notes-only' && (
-                        <>
+                        <div className="flex items-center gap-2">
                             <StickyNote className="w-4 h-4 text-blue-500" />
                             <span className="font-medium text-sm">Note Editor</span>
-                        </>
+                        </div>
                     )}
                     {mode === 'quiz-only' && (
-                        <>
+                        <div className="flex items-center gap-2">
                             <MessageSquare className="w-4 h-4 text-purple-500" />
                             <span className="font-medium text-sm">Quiz Editor</span>
-                        </>
+                        </div>
                     )}
+
+                    {/* FULL SCREEN TOOLBAR INTEGRATION */}
+                    {isExpanded && activeTab === 'note' && (
+                        <div className="flex-1 flex justify-center animate-in slide-in-from-top-2 duration-300">
+                            {renderEditorToolbar()}
+                        </div>
+                    )}
+                    
+                    {/* Placeholder to keep header height consistent or for balanced flex */}
+                    {isExpanded && activeTab === 'note' && <div className="w-[200px]" />}
                 </div>
             )}
             </div>
 
             <TabsContent value="note" className="flex-1 overflow-hidden flex flex-col relative m-0 p-0">
                  {/* Editor Area */}
-                <div className="flex-1 overflow-hidden flex flex-col relative bg-slate-50/30">
+                <div className="flex-1 overflow-hidden flex flex-col relative bg-muted/30">
                     {loading && (
-                        <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-50 flex items-center justify-center">
+                        <div className="absolute inset-0 bg-card/50 backdrop-blur-sm z-50 flex items-center justify-center">
                             <Loader2 className="w-8 h-8 animate-spin text-primary" />
                         </div>
                     )}
@@ -1155,19 +1324,19 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                     {editor && (
                         <div 
                             className={cn(
-                                "flex items-center gap-1 p-2 border-b border-gray-100 bg-white shadow-sm z-10 flex-wrap sticky top-0",
+                                "flex items-center gap-1 p-2 border-b border-border bg-card shadow-sm z-10 flex-wrap sticky top-0",
                                 isExpanded ? "justify-center" : ""
                             )}
                         >
                             {/* Toolbar Inner Container */}
                              <div className="flex items-center gap-1 flex-wrap"> 
                                 {/* Text Styling */}
-                                <div className="flex items-center border-r border-gray-200 pr-2 mr-2 gap-1">
+                                <div className="flex items-center border-r border-border pr-2 mr-2 gap-1">
                                     <Button 
                                         variant="ghost" 
                                         size="sm" 
                                         onClick={() => editor.chain().focus().toggleBold().run()}
-                                        className={cn("h-8 w-8 p-0", editor.isActive('bold') && "bg-slate-100 text-blue-600")}
+                                        className={cn("h-8 w-8 p-0", editor.isActive('bold') && "bg-muted/80 text-blue-600")}
                                         title="Bold"
                                     >
                                         <Bold className="w-4 h-4" />
@@ -1176,7 +1345,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                         variant="ghost" 
                                         size="sm" 
                                         onClick={() => editor.chain().focus().toggleItalic().run()}
-                                        className={cn("h-8 w-8 p-0", editor.isActive('italic') && "bg-slate-100 text-blue-600")}
+                                        className={cn("h-8 w-8 p-0", editor.isActive('italic') && "bg-muted/80 text-blue-600")}
                                         title="Italic"
                                     >
                                         <Italic className="w-4 h-4" />
@@ -1185,7 +1354,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                         variant="ghost" 
                                         size="sm" 
                                         onClick={() => editor.chain().focus().toggleUnderline().run()}
-                                        className={cn("h-8 w-8 p-0", editor.isActive('underline') && "bg-slate-100 text-blue-600")}
+                                        className={cn("h-8 w-8 p-0", editor.isActive('underline') && "bg-muted/80 text-blue-600")}
                                         title="Underline"
                                     >
                                         <UnderlineIcon className="w-4 h-4" />
@@ -1195,7 +1364,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                         variant="ghost" 
                                         size="sm" 
                                         onClick={() => editor.chain().focus().toggleBulletList().run()}
-                                        className={cn("h-8 w-8 p-0", editor.isActive('bulletList') && "bg-slate-100 text-blue-600")}
+                                        className={cn("h-8 w-8 p-0", editor.isActive('bulletList') && "bg-muted/80 text-blue-600")}
                                         title="Bullet List"
                                     >
                                         <List className="w-4 h-4" />
@@ -1204,7 +1373,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                         variant="ghost" 
                                         size="sm" 
                                         onClick={() => editor.chain().focus().toggleOrderedList().run()}
-                                        className={cn("h-8 w-8 p-0", editor.isActive('orderedList') && "bg-slate-100 text-blue-600")}
+                                        className={cn("h-8 w-8 p-0", editor.isActive('orderedList') && "bg-muted/80 text-blue-600")}
                                         title="Ordered List"
                                     >
                                         <ListOrdered className="w-4 h-4" />
@@ -1212,7 +1381,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                 </div>
 
                                 {/* Font Size */}
-                                <div className="flex items-center border-r border-gray-200 pr-2 mr-2 gap-1">
+                                <div className="flex items-center border-r border-border pr-2 mr-2 gap-1">
                                     <Select 
                                         value={editor.getAttributes('textStyle')?.fontSize || '16px'}
                                         onValueChange={(value) => editor.chain().focus().setFontSize(value).run()}
@@ -1242,7 +1411,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                 </div>
 
                                 {/* Highlighting */}
-                                <div className="flex items-center border-r border-gray-200 pr-2 mr-2 gap-1">
+                                <div className="flex items-center border-r border-border pr-2 mr-2 gap-1">
                                     <Popover>
                                         <PopoverTrigger asChild>
                                             <Button 
@@ -1260,14 +1429,14 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                                     <button
                                                         key={color}
                                                         onClick={() => editor.chain().focus().toggleHighlight({ color }).run()}
-                                                        className="w-6 h-6 rounded-full border border-slate-200"
+                                                        className="w-6 h-6 rounded-full border border-border"
                                                         style={{ backgroundColor: color }}
                                                         title="Highlight Color"
                                                     />
                                                 ))}
                                                 <button
                                                     onClick={() => editor.chain().focus().unsetHighlight().run()}
-                                                    className="w-6 h-6 rounded-full border border-slate-200 flex items-center justify-center bg-white text-slate-400"
+                                                    className="w-6 h-6 rounded-full border border-border flex items-center justify-center bg-card text-muted-foreground/70"
                                                     title="Remove Highlight"
                                                 >
                                                     <X className="w-3 h-3" />
@@ -1328,156 +1497,12 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                     {/* Editor Content Scroll Area */}
                     <div className={cn(
                             "flex-1 overflow-y-auto p-6 pb-20 relative flex flex-col items-center",
-                            isExpanded ? "bg-slate-100" : "bg-slate-50/30"
+                            isExpanded ? "bg-muted/80" : "bg-muted/30"
                         )}>
                                 {editor && (
                             <BubbleMenu editor={editor} className="flex flex-col gap-1 items-center" options={{ placement: 'bottom' }}>
-                                {/* Bottom Row: Main Toolbar (Now Top Row visually) */}
-                                <div className="flex items-center gap-1 p-1 bg-white rounded-lg shadow-xl border border-slate-200 animate-in zoom-in-95 duration-200">
-                                    
-                                    {/* Text Styling Group */}
-                                    <div className="flex items-center gap-0.5 border-r border-slate-200 pr-1 mr-1">
-                                        <button 
-                                            onClick={() => editor.chain().focus().toggleBold().run()}
-                                            className={cn(
-                                                "p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors",
-                                                editor.isActive('bold') && "bg-slate-100 text-blue-600 font-bold"
-                                            )}
-                                            title="Bold"
-                                        >
-                                            <Bold className="w-4 h-4" />
-                                        </button>
-                                        <button 
-                                            onClick={() => editor.chain().focus().toggleItalic().run()}
-                                            className={cn(
-                                                "p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors",
-                                                editor.isActive('italic') && "bg-slate-100 text-blue-600 italic"
-                                            )}
-                                            title="Italic"
-                                        >
-                                            <Italic className="w-4 h-4" />
-                                        </button>
-                                        <button 
-                                            onClick={() => editor.chain().focus().toggleUnderline().run()}
-                                            className={cn(
-                                                "p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors",
-                                                editor.isActive('underline') && "bg-slate-100 text-blue-600 underline"
-                                            )}
-                                            title="Underline"
-                                        >
-                                            <UnderlineIcon className="w-4 h-4" />
-                                        </button>
-                                    </div>
-
-                                        {/* Lists & Code */}
-                                        <div className="flex items-center gap-0.5 border-r border-slate-200 pr-1 mr-1">
-                                            <button 
-                                                onClick={() => editor.chain().focus().toggleBulletList().run()}
-                                                className={cn(
-                                                    "p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors",
-                                                    editor.isActive('bulletList') && "bg-slate-100 text-blue-600"
-                                                )}
-                                                title="Bullet List"
-                                            >
-                                                <List className="w-4 h-4" />
-                                            </button>
-                                            <button 
-                                                onClick={() => editor.chain().focus().toggleCode().run()}
-                                                className={cn(
-                                                    "p-1.5 rounded hover:bg-slate-100 text-slate-600 transition-colors",
-                                                    editor.isActive('code') && "bg-slate-100 text-blue-600"
-                                                )}
-                                                title="Inline Code"
-                                            >
-                                                <Braces className="w-4 h-4" />
-                                            </button>
-                                        </div>
-
-                                        {/* Font Size Selector (Stacked Toggle) */}
-                                        <div className="flex items-center border-r border-slate-200 pr-1 mr-1">
-                                            <button
-                                                onClick={() => {
-                                                    setShowFontSizePalette(!showFontSizePalette)
-                                                    setShowHighlightPalette(false) // Mutex
-                                                }}
-                                                className={cn(
-                                                    "flex items-center gap-1 h-7 px-2 text-xs font-medium rounded hover:bg-slate-100 text-slate-600 transition-colors",
-                                                    showFontSizePalette && "bg-slate-100 text-primary"
-                                                )}
-                                                title="Font Size"
-                                            >
-                                                {/* Display current size roughly */}
-                                                {(() => {
-                                                    const size = editor.getAttributes('textStyle')?.fontSize
-                                                    if (size === '12px') return 'Small'
-                                                    if (size === '14px') return 'Normal'
-                                                    if (size === '18px') return 'Medium'
-                                                    if (size === '20px') return 'Large'
-                                                    if (size === '24px') return 'Ex-Lg'
-                                                    if (size === '30px') return 'H1'
-                                                    return 'Default'
-                                                })()}
-                                                <ChevronRight className={cn("w-3 h-3 text-slate-400 transition-transform", showFontSizePalette && "rotate-90")} />
-                                            </button>
-                                        </div>
-
-                                        {/* Highlight & Note Boxes */}
-                                        <div className="flex items-center gap-1.5">
-                                            {/* Open Highlight Palette Button */}
-                                            <button
-                                                onClick={() => {
-                                                    setShowHighlightPalette(!showHighlightPalette)
-                                                    setShowFontSizePalette(false) // Mutex
-                                                }}
-                                                className={cn(
-                                                    "p-1.5 rounded hover:bg-slate-100 text-slate-600 flex items-center gap-1 transition-colors",
-                                                    (editor.isActive('highlight') || showHighlightPalette) && "bg-yellow-100 text-yellow-700"
-                                                )}
-                                                title="Highlight Colors"
-                                            >
-                                                <Highlighter className="w-4 h-4" />
-                                                <ChevronRight className={cn("w-3 h-3 text-slate-400 transition-transform", showHighlightPalette && "rotate-90")} />
-                                            </button>
-
-                                        <div className="w-px h-4 bg-slate-200" />
-
-                                        {/* Colored Note Containers */}
-                                        <div className="flex items-center gap-1">
-                                            {['red', 'green', 'blue', 'amber', 'violet'].map(color => (
-                                                <button 
-                                                    key={color}
-                                                    onClick={() => toggleNote(color)}
-                                                    className={cn(
-                                                        "w-4 h-4 rounded-full hover:scale-125 transition-transform border",
-                                                        color === 'red' && "bg-red-100 border-red-400",
-                                                        color === 'green' && "bg-green-100 border-green-400",
-                                                        color === 'blue' && "bg-blue-100 border-blue-400",
-                                                        color === 'amber' && "bg-amber-100 border-amber-400",
-                                                        color === 'violet' && "bg-violet-100 border-violet-400",
-                                                        editor.isActive('noteBox', { color }) && "ring-2 ring-offset-1 ring-slate-400 scale-110"
-                                                    )}
-                                                    title={`${color.charAt(0).toUpperCase() + color.slice(1)} Box`}
-                                                />
-                                            ))}
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="w-px h-4 bg-slate-200 mx-1" />
-
-                                    {/* Clear Format */}
-                                    <button 
-                                        onClick={() => {
-                                            editor.chain().focus().unsetAllMarks().run()
-                                            if (editor.isActive('noteBox')) {
-                                                (editor.commands as any).unsetNoteBox()
-                                            }
-                                        }}
-                                        className="p-1.5 rounded hover:bg-slate-100 text-slate-400 hover:text-red-500 transition-colors"
-                                        title="Clear Formatting"
-                                    >
-                                        <X className="w-4 h-4" />
-                                    </button>
-                                </div>
+                                {/* Hide BubbleMenu toolbar if already in header */}
+                                {!isExpanded && renderEditorToolbar()}
 
                                 {/* Top Row: Highlight Palette (Now Btm Check) */}
                                 {showHighlightPalette && ( // Swapped
@@ -1506,7 +1531,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                                 />
                                             ))}
                                             
-                                            <div className="w-px h-4 bg-white/20 mx-1" />
+                                            <div className="w-px h-4 bg-card/20 mx-1" />
                                             
                                             <button
                                                 onClick={() => {
@@ -1539,9 +1564,9 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                                     editor.chain().focus().setFontSize(item.size).run()
                                                 }}
                                                 className={cn(
-                                                    "px-2.5 py-1 text-xs font-medium rounded-full hover:bg-white/20 transition-colors whitespace-nowrap",
+                                                    "px-2.5 py-1 text-xs font-medium rounded-full hover:bg-card/20 transition-colors whitespace-nowrap",
                                                     editor.getAttributes('textStyle')?.fontSize === item.size 
-                                                        ? "bg-white text-slate-900 shadow-sm" 
+                                                        ? "bg-card text-foreground shadow-sm" 
                                                         : "text-white/80"
                                                 )}
                                             >
@@ -1549,7 +1574,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                             </button>
                                         ))}
 
-                                        <div className="w-px h-4 bg-white/20 mx-1" />
+                                        <div className="w-px h-4 bg-card/20 mx-1" />
                                             
                                         <button
                                             onClick={() => {
@@ -1570,10 +1595,11 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                             className={cn(
                                 // WRAPPER: Transparent, just layout positioning. No borders/backgrounds here.
                                 "transition-all duration-300 h-fit shrink-0 w-full flex justify-center",
-                                isExpanded ? "min-h-[900px] my-8" : "min-h-[600px]"
+                                isExpanded ? "min-h-[900px] my-8" : "min-h-[600px]",
+                                forceLightMode && "force-light"
                             )}
                         >
-                                <EditorContent editor={editor} className="w-full" />
+                                <EditorContent editor={editor} className="w-full max-w-5xl mx-auto" />
                         </div>
                     </div>
                 </div>
@@ -1582,15 +1608,18 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
             <TabsContent value="quiz" className="flex-1 overflow-hidden m-0 p-0 flex relative" id="quiz-split-container">
                 {/* Quiz Editor (Left) */}
                 <div 
-                    className="border-r bg-slate-50 flex flex-col shrink-0" 
+                    className={cn(
+                        "border-r bg-muted flex flex-col shrink-0",
+                        forceLightMode && "force-light"
+                    )}
                     style={{ width: `${quizSplit}%` }}
                 >
-                    <div className="px-4 py-3 border-b bg-white text-xs font-medium text-slate-500 uppercase tracking-widest flex justify-between">
+                    <div className="px-4 py-3 border-b bg-card text-xs font-medium text-muted-foreground uppercase tracking-widest flex justify-between">
                         <span>Quiz Editor</span>
-                        <span className="text-slate-300">Plain Text</span>
+                        <span className="text-muted-foreground/50">Plain Text</span>
                     </div>
                     <textarea 
-                        className="flex-1 w-full p-6 bg-slate-50 font-mono text-sm resize-none focus:outline-none focus:bg-white transition-colors"
+                        className="flex-1 w-full p-6 bg-muted font-mono text-sm resize-none focus:outline-none focus:bg-card transition-colors text-foreground"
                         value={quizContent}
                         onChange={(e) => setQuizContent(e.target.value)}
                         placeholder={`Title_display: My Quiz\nPassage: ...\n\nQ1. ...`}
@@ -1609,19 +1638,22 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                 >
                     <div className={cn(
                         "w-1 h-12 rounded-full transition-colors",
-                        isDragging ? "bg-blue-600" : "bg-slate-300 group-hover:bg-blue-400"
+                        isDragging ? "bg-blue-600" : "bg-muted group-hover:bg-blue-400"
                     )} />
                 </div>
                 
                 {/* Quiz Preview (Right) */}
-                <div className="flex flex-col bg-white flex-1 overflow-hidden">
-                     <div className="px-4 py-3 border-b bg-white text-xs font-medium text-slate-500 uppercase tracking-widest flex items-center justify-between">
+                <div className={cn(
+                    "flex flex-col bg-card flex-1 overflow-hidden",
+                    forceLightMode && "force-light"
+                )}>
+                     <div className="px-4 py-3 border-b bg-card text-xs font-medium text-muted-foreground uppercase tracking-widest flex items-center justify-between">
                         <span>Live Preview</span>
                             <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={handleToggleExpand}
-                                className="h-8 w-8 p-0 text-slate-500 hover:text-slate-900"
+                                className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
                                 title={isExpanded ? "Collapse View" : "Expand View"}
                             >
                                 {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -1636,7 +1668,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                 }}
                             />
                         ) : (
-                            <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center">
+                            <div className="flex flex-col items-center justify-center h-full text-muted-foreground/70 p-8 text-center">
                                 <MessageSquare className="w-12 h-12 mb-4 opacity-50" />
                                 <p>Start typing your quiz on the left to see the preview here.</p>
                             </div>

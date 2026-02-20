@@ -72,7 +72,7 @@ function YearSection({ year, cases, styles }: { year: string, cases: CaseItem[],
         )}
       >
         <div className="flex items-center gap-4">
-          <h2 className="text-3xl font-bold tracking-tight text-slate-800">{year}</h2>
+          <h2 className="text-3xl font-bold tracking-tight text-foreground">{year}</h2>
           <span className={cn("px-3 py-1 rounded-full text-xs font-semibold", styles.countBg, styles.accent)}>
             {cases.length} Cases
           </span>
@@ -91,11 +91,11 @@ function YearSection({ year, cases, styles }: { year: string, cases: CaseItem[],
                     strokeLinecap="round"
                    />
                 </svg>
-                <span className="absolute text-[10px] font-bold text-slate-600">{styles.progress}</span>
+                <span className="absolute text-[10px] font-bold text-muted-foreground">{styles.progress}</span>
              </div>
           </div>
           
-          <div className={cn("p-1 rounded-full bg-white/20 text-slate-600 transition-transform duration-300", isOpen && "rotate-90")}>
+          <div className={cn("p-1 rounded-full bg-card/20 text-muted-foreground transition-transform duration-300", isOpen && "rotate-90")}>
             <ChevronRight className="w-5 h-5" />
           </div>
         </div>
@@ -110,32 +110,32 @@ function YearSection({ year, cases, styles }: { year: string, cases: CaseItem[],
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.3, ease: 'easeInOut' }}
           >
-            <div className="p-4 bg-slate-50/50 space-y-4">
+            <div className="p-4 bg-muted/50 space-y-4">
               
               {/* Category Header (Mocked for now as per screenshot) */}
-              <div className="bg-white/50 p-3 rounded-xl flex items-center justify-between cursor-pointer hover:bg-white/80 transition-colors">
+              <div className="bg-card/50 p-3 rounded-xl flex items-center justify-between cursor-pointer hover:bg-card/80 transition-colors">
                 <div className="flex items-center gap-2">
                    <div className="p-1.5 bg-orange-100 rounded-lg">
                       <div className="w-4 h-4 text-orange-500">⚖️</div>
                    </div>
-                   <span className="font-semibold text-slate-700">Constitutional & Administrative Law</span>
+                   <span className="font-semibold text-foreground/90">Constitutional & Administrative Law</span>
                    <span className="bg-purple-100 text-purple-600 px-2 py-0.5 rounded-md text-xs font-bold">{cases.length} cases</span>
                 </div>
-                <ChevronDown className="w-4 h-4 text-slate-400" />
+                <ChevronDown className="w-4 h-4 text-muted-foreground/70" />
               </div>
 
               {/* Case List */}
               <div className="space-y-3 pl-2">
                 {cases.map((item, i) => (
-                  <div key={item.case_number} className="group bg-white rounded-2xl p-4 shadow-sm border border-slate-100/60 hover:shadow-md transition-all flex items-center justify-between">
+                  <div key={item.case_number} className="group bg-card rounded-2xl p-4 shadow-sm border border-border/50/60 hover:shadow-md transition-all flex items-center justify-between">
                     <div className="flex items-center gap-4 flex-1">
-                      <span className="text-slate-400 font-bold w-6">{i + 1}.</span>
+                      <span className="text-muted-foreground/70 font-bold w-6">{i + 1}.</span>
                       <div className="flex flex-col">
-                        <span className="font-semibold text-slate-800 text-lg">
+                        <span className="font-semibold text-foreground text-lg">
                           {item.case_name || item.case_number}
                         </span>
                         {item.case_name && (
-                           <span className="text-xs text-slate-400 font-mono mt-0.5">{item.case_number}</span>
+                           <span className="text-xs text-muted-foreground/70 font-mono mt-0.5">{item.case_number}</span>
                         )}
                       </div>
                     </div>
@@ -144,7 +144,7 @@ function YearSection({ year, cases, styles }: { year: string, cases: CaseItem[],
                         {/* Status Check */}
                         <div className={cn(
                             "w-6 h-6 rounded-full flex items-center justify-center border-2",
-                             item.has_notes ? "bg-green-500 border-green-500" : "border-slate-200"
+                             item.has_notes ? "bg-green-500 border-green-500" : "border-border"
                         )}>
                             {item.has_notes && <Check className="w-3.5 h-3.5 text-white stroke-3" />}
                         </div>
@@ -158,7 +158,7 @@ function YearSection({ year, cases, styles }: { year: string, cases: CaseItem[],
                         </Link>
 
                         {/* Quiz Button - placeholder for future feature */}
-                        <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-full bg-muted/80 text-muted-foreground/70 flex items-center justify-center">
                             <HelpCircle className="w-4 h-4" />
                         </div>
                     </div>

@@ -109,6 +109,77 @@
   --destructive: #EF4444;
 }
 
+.dark {
+  /* Spotify-Inspired Dark Theme */
+  --primary: #1DB954; /* Spotify Green */
+  --primary-light: #1ED760;
+  --primary-dark: #1aa34a;
+  --primary-foreground: #000000;
+  
+  /* Background Colors */
+  --background: #121212; /* Spotify Dark Background */
+  --bg-main: #121212;
+  --bg-card: #181818; /* Spotify Elevated Card */
+  --bg-muted: #282828; /* Spotify Highlight Card */
+  --foreground: #FFFFFF;
+  
+  /* Card & Surfaces */
+  --card: #181818;
+  --card-foreground: #FFFFFF;
+  --popover: #282828;
+  --popover-foreground: #FFFFFF;
+  
+  /* Text Colors */
+  --text-primary: #FFFFFF;
+  --text-secondary: #B3B3B3; /* Spotify Subtitle text */
+  --text-muted: #A7A7A7;
+  --muted: #282828;
+  --muted-foreground: #A7A7A7;
+  
+  /* Secondary/Accent */
+  --secondary: #282828;
+  --secondary-foreground: #FFFFFF;
+  --accent: #333333;
+  --accent-foreground: #FFFFFF;
+  
+  /* Status Colors (Adjusted for dark mode) */
+  --success: #1ED760;
+  --warning: #FFA42B;
+  --error: #E57373;
+  --info: #29B6F6;
+  
+  /* Accent Colors */
+  --accent-green: #1ED760;
+  --accent-amber: #FFA42B;
+  --accent-red: #E57373;
+  --accent-purple: #B388FF;
+  --accent-cyan: #4DD0E1;
+  --accent-pink: #F06292;
+  
+  /* Borders & Inputs */
+  --border: #2A2A2A;
+  --input: #333333;
+  --ring: #1DB954;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 10px 20px -5px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 16px -4px rgba(0, 0, 0, 0.4), 0 20px 40px -10px rgba(0, 0, 0, 0.6);
+  
+  /* Sidebar */
+  --sidebar: #000000; /* Spotify Sidebar is often pitch black */
+  --sidebar-foreground: #FFFFFF;
+  --sidebar-primary: #1DB954;
+  --sidebar-primary-foreground: #000000;
+  --sidebar-accent: #282828;
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: #2A2A2A;
+  --sidebar-ring: #1DB954;
+  
+  /* Destructive */
+  --destructive: #EF4444;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -159,6 +230,79 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Base Prose Overrides for Dark Mode */
+.dark .prose strong,
+.dark .prose b {
+  color: #FFFFFF !important;
+}
+
+.dark .prose mark {
+  color: #000000 !important;
+  border-radius: 0.125rem;
+  padding: 0 0.125rem;
+}
+
+/* ========================================
+   FORCE LIGHT MODE OVERRIDE
+   Resets ALL theme variables to light mode
+   when the editor toggle is activated.
+   ======================================== */
+.force-light {
+  /* Background */
+  --background: #F8FAFC !important;
+  --bg-main: #F8FAFC !important;
+  --bg-card: #FFFFFF !important;
+  --bg-muted: #F1F5F9 !important;
+  --foreground: #0F172A !important;
+
+  /* Card & Surfaces */
+  --card: #FFFFFF !important;
+  --card-foreground: #0F172A !important;
+  --popover: #FFFFFF !important;
+  --popover-foreground: #0F172A !important;
+
+  /* Text Colors */
+  --text-primary: #0F172A !important;
+  --text-secondary: #64748B !important;
+  --text-muted: #94A3B8 !important;
+  --muted: #F1F5F9 !important;
+  --muted-foreground: #64748B !important;
+
+  /* Secondary/Accent */
+  --secondary: #F1F5F9 !important;
+  --secondary-foreground: #0F172A !important;
+  --accent: #F1F5F9 !important;
+  --accent-foreground: #0F172A !important;
+
+  /* Borders & Inputs */
+  --border: #E2E8F0 !important;
+  --input: #E2E8F0 !important;
+  --ring: #3B82F6 !important;
+
+  /* Primary */
+  --primary: #3B82F6 !important;
+  --primary-foreground: #FFFFFF !important;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 10px 20px -5px rgba(0, 0, 0, 0.05) !important;
+  --shadow-lg: 0 8px 16px -4px rgba(0, 0, 0, 0.1), 0 20px 40px -10px rgba(0, 0, 0, 0.1) !important;
+
+  /* Destructive */
+  --destructive: #EF4444 !important;
+
+}
+
+/* Force Light prose overrides */
+:root .force-light .prose strong,
+:root .force-light .prose b {
+  color: #0F172A !important;
+}
+
+:root .force-light .prose mark {
+  color: #000000 !important;
 }
 
 /* ========================================
@@ -267,26 +411,174 @@
     color: #1e293b; 
   }
 
+  /* Light Theme Notes */
   .note-blue { background: rgba(59, 130, 246, 0.1); border-color: #3B82F6; color: #1e293b; }
   .note-green { background: rgba(34, 197, 94, 0.1); border-color: #22C55E; color: #1e293b; }
   .note-red { background: rgba(239, 68, 68, 0.1); border-color: #EF4444; color: #1e293b; }
   .note-amber { background: rgba(245, 158, 11, 0.1); border-color: #F59E0B; color: #1e293b; }
   .note-purple { background: rgba(168, 85, 247, 0.1); border-color: #A855F7; color: #1e293b; }
-  
-  /* Violet - Beautiful indigo-inspired box (like Gemini's violet containers) */
   .note-violet { background: rgba(124, 58, 237, 0.1); border-color: #7C3AED; color: #1e293b; }
-  
-  /* Slate/Dark - Black-ish box with light text for emphasis */
   .note-slate { background: rgba(30, 41, 59, 0.95); border-color: #334155; color: #f1f5f9; }
   .note-dark { background: rgba(15, 23, 42, 0.95); border-color: #1e293b; color: #f8fafc; }
   .note-black { background: rgba(0, 0, 0, 0.9); border-color: #374151; color: #ffffff; }
-  
-  /* Cyan and Pink for variety */
   .note-cyan { background: rgba(6, 182, 212, 0.1); border-color: #06B6D4; color: #1e293b; }
   .note-pink { background: rgba(236, 72, 153, 0.1); border-color: #EC4899; color: #1e293b; }
-  
-  /* Map yellow to amber for compatibility */
   .note-yellow { background: rgba(245, 158, 11, 0.1); border-color: #F59E0B; color: #1e293b; }
+
+  /* Light Theme: Explicitly set bold text to dark inside note boxes (defeats prose overrides) */
+  .note-box strong, .note-box b,
+  .note-blue strong, .note-blue b,
+  .note-green strong, .note-green b,
+  .note-red strong, .note-red b,
+  .note-amber strong, .note-amber b,
+  .note-purple strong, .note-purple b,
+  .note-violet strong, .note-violet b,
+  .note-cyan strong, .note-cyan b,
+  .note-pink strong, .note-pink b,
+  .note-yellow strong, .note-yellow b {
+    color: #1e293b;
+  }
+
+  /* Extremely dark note boxes ALWAYS need white text even in light mode */
+  .note-slate strong, .note-slate b,
+  .note-dark strong, .note-dark b,
+  .note-black strong, .note-black b {
+    color: #FFFFFF !important;
+  }
+
+  /* Dark Theme Notes (Spotify Aesthetic) */
+  .dark .note-box,
+  .dark .note-blue,
+  .dark .note-green,
+  .dark .note-red,
+  .dark .note-amber,
+  .dark .note-purple,
+  .dark .note-violet,
+  .dark .note-cyan,
+  .dark .note-pink,
+  .dark .note-yellow {
+    color: #FFFFFF !important; 
+  }
+
+  /* Dark mode: Force ALL text inside note boxes to be white, including bold, italic, etc. */
+  .dark .note-box strong,
+  .dark .note-box b,
+  .dark .note-blue strong,
+  .dark .note-blue b,
+  .dark .note-green strong,
+  .dark .note-green b,
+  .dark .note-red strong,
+  .dark .note-red b,
+  .dark .note-amber strong,
+  .dark .note-amber b,
+  .dark .note-purple strong,
+  .dark .note-purple b,
+  .dark .note-violet strong,
+  .dark .note-violet b,
+  .dark .note-cyan strong,
+  .dark .note-cyan b,
+  .dark .note-pink strong,
+  .dark .note-pink b,
+  .dark .note-yellow strong,
+  .dark .note-yellow b,
+  .dark .prose .note-box strong,
+  .dark .prose .note-blue strong,
+  .dark .prose .note-green strong,
+  .dark .prose .note-red strong,
+  .dark .prose .note-amber strong,
+  .dark .prose .note-purple strong,
+  .dark .prose .note-violet strong,
+  .dark .prose .note-cyan strong,
+  .dark .prose .note-pink strong,
+  .dark .prose .note-yellow strong {
+    color: #FFFFFF !important;
+  }
+
+  .dark .note-box mark,
+  .dark .note-blue mark,
+  .dark .note-green mark,
+  .dark .note-red mark,
+  .dark .note-amber mark,
+  .dark .note-purple mark,
+  .dark .note-violet mark,
+  .dark .note-cyan mark,
+  .dark .note-pink mark,
+  .dark .note-yellow mark {
+    color: #000000 !important;
+  }
+  
+  .dark .note-blue { background: rgba(59, 130, 246, 0.15); border-color: #3B82F6; }
+  .dark .note-green { background: rgba(34, 197, 94, 0.15); border-color: #22C55E; }
+  .dark .note-red { background: rgba(239, 68, 68, 0.15); border-color: #EF4444; }
+  .dark .note-amber { background: rgba(245, 158, 11, 0.15); border-color: #F59E0B; }
+  .dark .note-purple { background: rgba(168, 85, 247, 0.15); border-color: #A855F7; }
+  .dark .note-violet { background: rgba(124, 58, 237, 0.15); border-color: #7C3AED; }
+  .dark .note-slate { background: rgba(51, 65, 85, 0.4); border-color: #475569; color: #FFFFFF !important; }
+  .dark .note-dark { background: rgba(40, 40, 40, 0.6); border-color: #333333; color: #FFFFFF !important; }
+  .dark .note-black { background: rgba(24, 24, 24, 0.8); border-color: #333333; color: #FFFFFF !important; }
+  .dark .note-cyan { background: rgba(6, 182, 212, 0.15); border-color: #06B6D4; }
+  .dark .note-pink { background: rgba(236, 72, 153, 0.15); border-color: #EC4899; }
+  .dark .note-yellow { background: rgba(245, 158, 11, 0.15); border-color: #F59E0B; }
+
+  /* Force Light Note Overrides (prevent html.dark from overriding force-light) */
+  :root .force-light .note-box,
+  :root .force-light .note-blue,
+  :root .force-light .note-green,
+  :root .force-light .note-red,
+  :root .force-light .note-amber,
+  :root .force-light .note-purple,
+  :root .force-light .note-violet,
+  :root .force-light .note-cyan,
+  :root .force-light .note-pink,
+  :root .force-light .note-yellow {
+    color: #1e293b !important; 
+  }
+  :root .force-light .note-blue { background: rgba(59, 130, 246, 0.1) !important; border-color: #3B82F6 !important; }
+  :root .force-light .note-green { background: rgba(34, 197, 94, 0.1) !important; border-color: #22C55E !important; }
+  :root .force-light .note-red { background: rgba(239, 68, 68, 0.1) !important; border-color: #EF4444 !important; }
+  :root .force-light .note-amber { background: rgba(245, 158, 11, 0.1) !important; border-color: #F59E0B !important; }
+  :root .force-light .note-purple { background: rgba(168, 85, 247, 0.1) !important; border-color: #A855F7 !important; }
+  :root .force-light .note-violet { background: rgba(124, 58, 237, 0.1) !important; border-color: #7C3AED !important; }
+  :root .force-light .note-slate { background: rgba(30, 41, 59, 0.95) !important; border-color: #334155 !important; color: #f1f5f9 !important; }
+  :root .force-light .note-dark { background: rgba(15, 23, 42, 0.95) !important; border-color: #1e293b !important; color: #f8fafc !important; }
+  :root .force-light .note-black { background: rgba(0, 0, 0, 0.9) !important; border-color: #374151 !important; color: #ffffff !important; }
+  :root .force-light .note-cyan { background: rgba(6, 182, 212, 0.1) !important; border-color: #06B6D4 !important; }
+  :root .force-light .note-pink { background: rgba(236, 72, 153, 0.1) !important; border-color: #EC4899 !important; }
+  :root .force-light .note-yellow { background: rgba(245, 158, 11, 0.1) !important; border-color: #F59E0B !important; }
+
+  /* Force Light: Override dark mode bold text back to dark */
+  :root .force-light .note-box strong,
+  :root .force-light .note-box b,
+  :root .force-light .note-blue strong,
+  :root .force-light .note-blue b,
+  :root .force-light .note-green strong,
+  :root .force-light .note-green b,
+  :root .force-light .note-red strong,
+  :root .force-light .note-red b,
+  :root .force-light .note-amber strong,
+  :root .force-light .note-amber b,
+  :root .force-light .note-purple strong,
+  :root .force-light .note-purple b,
+  :root .force-light .note-violet strong,
+  :root .force-light .note-violet b,
+  :root .force-light .note-cyan strong,
+  :root .force-light .note-cyan b,
+  :root .force-light .note-pink strong,
+  :root .force-light .note-pink b,
+  :root .force-light .note-yellow strong,
+  :root .force-light .note-yellow b {
+    color: #1e293b !important;
+  }
+
+  /* Extremely dark note boxes ALWAYS need white text even when force-light is active */
+  :root .force-light .note-slate strong,
+  :root .force-light .note-slate b,
+  :root .force-light .note-dark strong,
+  :root .force-light .note-dark b,
+  :root .force-light .note-black strong,
+  :root .force-light .note-black b {
+    color: #FFFFFF !important;
+  }
 
   /* Horizontal Rule Styling */
   hr, .content-hr {

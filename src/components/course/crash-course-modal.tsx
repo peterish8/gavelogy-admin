@@ -263,17 +263,17 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
             <div className="flex-1 overflow-hidden flex flex-col py-4">
                 <div className="flex items-center justify-between mb-4 px-1 gap-4">
                     <div className="flex-1 relative group">
-                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/70 group-focus-within:text-blue-500 transition-colors" />
                         <Input 
                             placeholder="Search courses..." 
-                            className="pl-9 pr-8 h-9 text-xs rounded-lg border-slate-200 focus:ring-blue-500/20"
+                            className="pl-9 pr-8 h-9 text-xs rounded-lg border-border focus:ring-blue-500/20"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                         />
                         {searchQuery && (
                             <button 
                                 onClick={() => setSearchQuery('')}
-                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/70 hover:text-muted-foreground"
                             >
                                 <X className="w-3 h-3" />
                             </button>
@@ -292,8 +292,8 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
                     </div>
                     ) : filteredCourses?.length === 0 ? (
                     <div className="text-center py-12 px-4 border-2 border-dashed rounded-xl">
-                        <BookOpen className="w-12 h-12 mx-auto mb-3 text-slate-200" />
-                        <p className="text-slate-500 font-medium">
+                        <BookOpen className="w-12 h-12 mx-auto mb-3 text-muted-foreground/40" />
+                        <p className="text-muted-foreground font-medium">
                             {searchQuery ? `No results for "${searchQuery}"` : "No courses available to bundle"}
                         </p>
                     </div>
@@ -307,7 +307,7 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
                             "flex items-center px-4 py-3 rounded-xl border transition-all cursor-pointer group relative overflow-hidden",
                             isSelected 
                                 ? "bg-blue-50/80 border-blue-200 shadow-sm ring-1 ring-blue-100" 
-                                : "bg-white hover:bg-slate-50 border-slate-200 hover:border-slate-300 shadow-sm"
+                                : "bg-card hover:bg-muted border-border hover:border-border shadow-sm"
                             )}
                             onClick={() => toggleCourse(course.id)}
                         >
@@ -322,16 +322,16 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
                             <div className="flex-1 flex items-center gap-3">
                             <div className={cn(
                                 "w-10 h-10 rounded-lg flex items-center justify-center text-xl transition-colors",
-                                isSelected ? "bg-white text-blue-600" : "bg-slate-50 text-slate-600 group-hover:bg-white"
+                                isSelected ? "bg-card text-blue-600" : "bg-muted text-muted-foreground group-hover:bg-card"
                             )}>
                                 {course.icon || '📚'}
                             </div>
                             <div className="flex flex-col min-w-0">
                                 <span className={cn(
                                     "font-bold text-sm truncate",
-                                    isSelected ? "text-blue-900" : "text-slate-700"
+                                    isSelected ? "text-blue-900" : "text-foreground/90"
                                 )}>{course.name}</span>
-                                <span className="text-[11px] text-slate-400 line-clamp-1">
+                                <span className="text-[11px] text-muted-foreground/70 line-clamp-1">
                                 {course.description || 'No description'}
                                 </span>
                             </div>
@@ -343,7 +343,7 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
                 </div>
 
                 <div className="flex justify-between items-center mt-6 pt-4 border-t gap-3">
-                    <div className="text-xs font-medium text-slate-500">
+                    <div className="text-xs font-medium text-muted-foreground">
                         {selectedCourseIds.length} course{selectedCourseIds.length !== 1 ? 's' : ''} selected
                     </div>
                     <div className="flex gap-2">

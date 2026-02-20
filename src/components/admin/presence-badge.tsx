@@ -84,7 +84,7 @@ export function PresenceBadgeStack({
       {overflow > 0 && (
         <div 
           title={admins.slice(maxVisible).map(a => a.admin_name).join(', ')}
-          className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold bg-slate-200 text-slate-600 ring-2 ring-white"
+          className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold bg-muted text-muted-foreground ring-2 ring-white"
         >
           +{overflow}
         </div>
