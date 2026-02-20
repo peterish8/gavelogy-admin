@@ -269,15 +269,15 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
       <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <div className="flex-1">
-              <p className="text-slate-500 text-sm">
+              <p className="text-muted-foreground text-sm">
                 Manage your course worlds and content structure
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-border shrink-0 shadow-sm">
-                  <FilterIcon className="w-4 h-4 text-slate-400 ml-2" />
+              <div className="flex items-center gap-2 bg-card p-1 rounded-lg border border-border shrink-0 shadow-sm">
+                  <FilterIcon className="w-4 h-4 text-muted-foreground/70 ml-2" />
                   <Select value={filterType} onValueChange={(v: any) => setFilterType(v)}>
                       <SelectTrigger className="w-[140px] border-none shadow-none h-8 font-medium">
                           <SelectValue placeholder="Filter" />
@@ -290,8 +290,8 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
                   </Select>
               </div>
 
-              <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-border shrink-0 shadow-sm">
-                  <ArrowUpDown className="w-4 h-4 text-slate-400 ml-2" />
+              <div className="flex items-center gap-2 bg-card p-1 rounded-lg border border-border shrink-0 shadow-sm">
+                  <ArrowUpDown className="w-4 h-4 text-muted-foreground/70 ml-2" />
                   <Select value={sortOrder} onValueChange={(v: any) => setSortOrder(v)}>
                       <SelectTrigger className="w-[140px] border-none shadow-none h-8 font-medium">
                           <SelectValue placeholder="Sort" />
@@ -312,8 +312,8 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
               )}
 
               {isFetching && (
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-full text-[10px] font-bold text-slate-400 uppercase tracking-wider animate-pulse ml-auto">
-                  <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-muted border border-border/50 rounded-full text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider animate-pulse ml-auto">
+                  <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
                   Syncing
                 </div>
               )}
@@ -333,18 +333,18 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
 
       {/* Courses grid */}
       {displayCourses.length === 0 ? (
-        <div className="text-center py-24 bg-white rounded-3xl border border-dashed border-border/60">
-          <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
-            <Sparkles className="w-10 h-10 text-slate-300" />
+        <div className="text-center py-24 bg-card rounded-3xl border border-dashed border-border/60">
+          <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-6">
+            <Sparkles className="w-10 h-10 text-muted-foreground/50" />
           </div>
-          <h3 className="text-xl font-bold text-slate-900 mb-2">No courses found</h3>
-          <p className="text-slate-500 mb-8 max-w-sm mx-auto">
+          <h3 className="text-xl font-bold text-foreground mb-2">No courses found</h3>
+          <p className="text-muted-foreground mb-8 max-w-sm mx-auto">
              {filterType === 'all' 
                 ? "Get started by creating your first course world. It will appear here."
                 : "Try adjusting your filters to see more results."}
           </p>
           {isAdmin && filterType === 'all' && (
-            <Button onClick={handleCreateCourse} size="lg" variant="outline" className="border-slate-300 text-slate-700">
+            <Button onClick={handleCreateCourse} size="lg" variant="outline" className="border-border text-foreground/90">
               <Plus className="w-5 h-5 mr-2" />
               Create First Course
             </Button>

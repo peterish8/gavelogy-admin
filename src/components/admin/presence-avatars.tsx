@@ -91,7 +91,7 @@ export function PresenceAvatars() {
         {otherAdmins.length > 5 && (
           <div 
             title={otherAdmins.slice(5).map(a => a.admin_name).join(', ')}
-            className="relative w-8 h-8 rounded-full flex items-center justify-center text-slate-700 text-xs font-bold bg-slate-200 ring-2 ring-white shadow-sm"
+            className="relative w-8 h-8 rounded-full flex items-center justify-center text-foreground/90 text-xs font-bold bg-muted ring-2 ring-white shadow-sm"
           >
             +{otherAdmins.length - 5}
           </div>

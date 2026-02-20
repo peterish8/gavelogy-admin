@@ -250,7 +250,7 @@ function StructureItemRow({
            <div 
               {...attributes} 
               {...listeners} 
-              className="p-1 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="p-1 cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
               onClick={(e) => e.stopPropagation()} // Prevent row selection when clicking handle
            >
               <GripVertical className="w-4 h-4" />
@@ -277,7 +277,7 @@ function StructureItemRow({
           "w-8 h-8 flex items-center justify-center rounded-md shrink-0",
           isFolder 
             ? (isSelected ? "bg-primary/20 text-primary" : "bg-blue-50 text-blue-600") 
-            : (isSelected ? "bg-primary/20 text-primary" : "bg-gray-50 text-gray-600")
+            : (isSelected ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground")
         )}>
            {isFolder ? <Folder className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
         </div>
@@ -310,7 +310,7 @@ function StructureItemRow({
                 variant="ghost" 
                 size="icon" 
                 className={cn(
-                    "absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 transition-all z-20 hover:bg-slate-200", // Absolute position
+                    "absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 transition-all z-20 hover:bg-muted", // Absolute position
                     (isSelected || isOpen) ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                 )}
                 onClick={(e) => {

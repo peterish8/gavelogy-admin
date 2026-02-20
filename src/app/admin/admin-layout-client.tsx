@@ -22,6 +22,7 @@ import { RealtimeProvider } from '@/lib/realtime/realtime-provider'
 import { AdminProvider } from '@/contexts/admin-context'
 import { PresenceAvatars } from '@/components/admin/presence-avatars'
 import { useHeaderStore } from '@/lib/stores/header-store'
+import { ThemeToggle } from '@/components/theme-toggle'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -152,7 +153,7 @@ export default function AdminLayoutClient({
       {!isSidebarOpen && !isMobile && (
         <button
           onClick={() => setIsSidebarOpen(true)}
-          className="fixed top-4 left-4 z-60 p-2 bg-white/80 backdrop-blur-md border border-border rounded-lg text-slate-400 hover:text-slate-600 hover:bg-white shadow-sm transition-all duration-200"
+          className="fixed top-4 left-4 z-60 p-2 bg-card/80 backdrop-blur-md border border-border rounded-lg text-muted-foreground/70 hover:text-muted-foreground hover:bg-card shadow-sm transition-all duration-200"
           title="Expand Sidebar"
         >
           <Menu className="w-5 h-5" />
@@ -162,7 +163,7 @@ export default function AdminLayoutClient({
       {/* Sidebar */}
       <aside 
         className={cn(
-          "fixed lg:static inset-y-0 left-0 z-50 w-[240px] bg-white border-r border-border shadow-sm flex flex-col transition-all duration-300 ease-in-out overflow-hidden",
+          "fixed lg:static inset-y-0 left-0 z-50 w-[240px] bg-card border-r border-border shadow-sm flex flex-col transition-all duration-300 ease-in-out overflow-hidden",
           !isSidebarOpen && "-translate-x-full lg:translate-x-0 lg:w-0 lg:border-none"
         )}
       >
@@ -171,13 +172,13 @@ export default function AdminLayoutClient({
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white shrink-0">
               <Gavel className="w-5 h-5" />
             </div>
-            <span className="font-bold text-xl tracking-tight text-slate-900 truncate">
+            <span className="font-bold text-xl tracking-tight text-foreground truncate">
               Gavelogy
             </span>
           </div>
           <button 
             onClick={() => setIsSidebarOpen(false)}
-            className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"
+            className="p-1.5 hover:bg-muted/80 rounded-lg text-muted-foreground/70 hover:text-muted-foreground transition-colors"
             title="Collapse Sidebar"
           >
             <ChevronsLeft className="w-5 h-5" />
@@ -199,13 +200,13 @@ export default function AdminLayoutClient({
                     "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative overflow-hidden",
                     isActive 
                       ? "bg-primary/5 text-primary font-semibold" 
-                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
                     !isSidebarOpen && "lg:justify-center lg:px-2"
                   )}
                   title={!isSidebarOpen ? item.title : undefined}
                 >
                   {isActive && <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary rounded-r-full" />}
-                  <item.icon className={cn("w-5 h-5 shrink-0 transition-colors", isActive ? "text-primary" : "text-slate-400 group-hover:text-slate-600")} />
+                  <item.icon className={cn("w-5 h-5 shrink-0 transition-colors", isActive ? "text-primary" : "text-muted-foreground/70 group-hover:text-muted-foreground")} />
                   <span className={cn("truncate", !isSidebarOpen && "lg:hidden")}>
                     {item.title}
                   </span>
@@ -220,7 +221,7 @@ export default function AdminLayoutClient({
             <DropdownMenuTrigger asChild>
               <button
                 className={cn(
-                  "flex items-center gap-3 px-3 py-3 w-full rounded-xl hover:bg-slate-50 transition-all group",
+                  "flex items-center gap-3 px-3 py-3 w-full rounded-xl hover:bg-muted transition-all group",
                   !isSidebarOpen && "lg:justify-center lg:px-2"
                 )}
               >
@@ -229,33 +230,33 @@ export default function AdminLayoutClient({
                 </div>
                 {isSidebarOpen && (
                   <div className="flex-1 text-left min-w-0">
-                    <div className="text-sm font-bold text-slate-900 truncate">
+                    <div className="text-sm font-bold text-foreground truncate">
                       {adminUser.full_name || 'Admin User'}
                     </div>
-                    <div className="text-[11px] text-slate-500 truncate">
+                    <div className="text-[11px] text-muted-foreground truncate">
                       {adminUser.email}
                     </div>
                   </div>
                 )}
                 {isSidebarOpen && (
-                  <ChevronUp className="w-4 h-4 text-slate-400 group-hover:text-slate-600 shrink-0 transition-colors" />
+                  <ChevronUp className="w-4 h-4 text-muted-foreground/70 group-hover:text-muted-foreground shrink-0 transition-colors" />
                 )}
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64 mb-2 p-1" side="top" sideOffset={12}>
               <DropdownMenuLabel className="font-normal">
                 <div className="flex flex-col space-y-1 p-2">
-                  <p className="text-sm font-bold leading-none text-slate-900">{adminUser.full_name || 'Admin User'}</p>
-                  <p className="text-xs leading-none text-slate-500">{adminUser.email}</p>
+                  <p className="text-sm font-bold leading-none text-foreground">{adminUser.full_name || 'Admin User'}</p>
+                  <p className="text-xs leading-none text-muted-foreground">{adminUser.email}</p>
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem className="gap-2 rounded-lg py-2.5 cursor-pointer">
-                <User className="w-4 h-4 text-slate-500" />
+                <User className="w-4 h-4 text-muted-foreground" />
                 <span>My Profile</span>
               </DropdownMenuItem>
               <DropdownMenuItem className="gap-2 rounded-lg py-2.5 cursor-pointer">
-                <Settings className="w-4 h-4 text-slate-500" />
+                <Settings className="w-4 h-4 text-muted-foreground" />
                 <span>Account Settings</span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -273,21 +274,21 @@ export default function AdminLayoutClient({
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
-        <header className="h-16 bg-white/80 backdrop-blur-md border-b border-border/50 flex items-center justify-between px-4 lg:px-8 z-10 sticky top-0">
+        <header className="h-16 bg-card/80 backdrop-blur-md border-b border-border/50 flex items-center justify-between px-4 lg:px-8 z-10 sticky top-0">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="p-2 hover:bg-slate-100 rounded-lg lg:hidden"
+              className="p-2 hover:bg-muted/80 rounded-lg lg:hidden"
             >
-              <Menu className="w-5 h-5 text-slate-600" />
+              <Menu className="w-5 h-5 text-muted-foreground" />
             </button>
           </div>
           
           <div className="flex items-center gap-4 flex-1 px-4 lg:px-8">
             {headerTitle && (
               <div className="flex items-center gap-3">
-                <div className="h-6 w-px bg-slate-200 hidden md:block" />
-                <h2 className="text-lg font-bold text-slate-800 tracking-tight whitespace-nowrap">
+                <div className="h-6 w-px bg-muted hidden md:block" />
+                <h2 className="text-lg font-bold text-foreground tracking-tight whitespace-nowrap">
                   {headerTitle}
                 </h2>
               </div>
@@ -299,20 +300,23 @@ export default function AdminLayoutClient({
           </div>
           
           <div className="flex items-center gap-4 ml-auto shrink-0">
+            {/* Theme Toggle */}
+            <ThemeToggle />
+
             {/* Live presence avatars - shows other admins online */}
             <PresenceAvatars />
             
-            <div className="bg-slate-200 h-8 w-px mx-2 hidden sm:block" />
+            <div className="bg-muted h-8 w-px mx-2 hidden sm:block" />
             
             <div className="flex items-center gap-2">
                <div className="w-2 h-2 rounded-full bg-green-500 shadow-sm shadow-green-200" />
-               <span className="text-xs font-bold text-slate-500 uppercase tracking-widest whitespace-nowrap">Admin Portal</span>
+               <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest whitespace-nowrap">Admin Portal</span>
             </div>
           </div>
         </header>
 
         <main className={cn(
-          "flex-1 bg-slate-50/50",
+          "flex-1 bg-muted/50",
           // The main list page should scroll normally
           pathname === '/admin/studio' ? "p-6 lg:p-8 overflow-y-auto" : 
           // The IDE page handles its own scroll internally
@@ -329,13 +333,13 @@ export default function AdminLayoutClient({
         <AlertDialog open={isLogoutOpen} onOpenChange={setIsLogoutOpen}>
           <AlertDialogContent className="rounded-2xl max-w-[400px]">
             <AlertDialogHeader>
-              <AlertDialogTitle className="text-xl font-bold text-slate-900">Sign Out</AlertDialogTitle>
-              <AlertDialogDescription className="text-slate-600">
+              <AlertDialogTitle className="text-xl font-bold text-foreground">Sign Out</AlertDialogTitle>
+              <AlertDialogDescription className="text-muted-foreground">
                 Are you sure you want to sign out? You will need to log in again to access the admin features.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter className="gap-2 mt-4">
-              <AlertDialogCancel className="rounded-xl border-slate-200 text-slate-600 hover:bg-slate-50 font-medium">Cancel</AlertDialogCancel>
+              <AlertDialogCancel className="rounded-xl border-border text-muted-foreground hover:bg-muted font-medium">Cancel</AlertDialogCancel>
               <AlertDialogAction 
                 onClick={handleLogout}
                 className="bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium shadow-md shadow-red-100 border-none"

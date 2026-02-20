@@ -72,7 +72,7 @@ export default async function ContentEditorPage(props: PageProps) {
       </div>
 
       {/* Main Editor Area */}
-      <div className="flex-1 overflow-hidden bg-slate-50 relative">
+      <div className="flex-1 overflow-hidden bg-muted relative">
         <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
             <div className="text-center max-w-md">
                 <p className="text-xl font-semibold mb-2">Content Editor Placeholder</p>
@@ -81,8 +81,8 @@ export default async function ContentEditorPage(props: PageProps) {
                         ? "Rich Text Editor (Tiptap) will go here for Note content." 
                         : "Quiz Builder will go here."}
                 </p>
-                <div className="mt-8 p-4 bg-white border border-border rounded-lg text-left text-sm font-mono shadow-sm">
-                    <p className="font-bold text-xs text-slate-400 mb-2">DEBUG INFO:</p>
+                <div className="mt-8 p-4 bg-card border border-border rounded-lg text-left text-sm font-mono shadow-sm">
+                    <p className="font-bold text-xs text-muted-foreground/70 mb-2">DEBUG INFO:</p>
                     <p>Item ID: {item.id}</p>
                     <p>Type: {item.item_type}</p>
                     <p>Has Note: {item.note_content ? 'Yes' : 'No'}</p>

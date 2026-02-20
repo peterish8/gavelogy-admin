@@ -111,7 +111,7 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete, activeAdmins }: 
           <DragHandle
             listeners={listeners}
             attributes={attributes}
-            className="absolute left-4 top-4 transition-opacity z-50 text-slate-400 hover:text-slate-700"
+            className="absolute left-4 top-4 transition-opacity z-50 text-muted-foreground/70 hover:text-foreground/90"
           />
         )}
 
@@ -206,8 +206,8 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete, activeAdmins }: 
                className={cn(
                  "p-1.5 rounded-full transition-all border flex items-center gap-2",
                  course.is_active 
-                  ? "text-green-600 bg-green-50/50 hover:bg-green-100 border-green-200" 
-                  : "text-amber-600 bg-amber-50 hover:bg-amber-100 border-amber-200"
+                  ? "text-green-700 bg-green-100/50 hover:bg-green-200 border-green-200 dark:bg-green-500/20 dark:text-white dark:border-green-500/30 dark:hover:bg-green-500/30" 
+                  : "text-amber-700 bg-amber-100/50 hover:bg-amber-200 border-amber-200 dark:bg-amber-500/20 dark:text-white dark:border-amber-500/30 dark:hover:bg-amber-500/30"
                )}
                title={course.is_active ? "Live" : "Maintenance"}
              >
@@ -226,7 +226,7 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete, activeAdmins }: 
            ) : (
              /* Non-admin view or editing mode */
              !course.is_active && (
-                <span className="px-2 py-1 bg-amber-500/10 text-amber-600 rounded-md font-medium flex items-center gap-1.5">
+                <span className="px-2 py-1 bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-white rounded-md font-medium flex items-center gap-1.5 border border-amber-200 dark:border-amber-500/30">
                   <EyeOff className="w-3.5 h-3.5" />
                   Draft
                 </span>
@@ -283,7 +283,7 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete, activeAdmins }: 
           onEdit={() => setEditingField('name')}
           onDelete={() => onDelete?.(course.id)}
           showDragHandle={false}
-          className="bg-white/90 shadow-sm border-0 absolute top-4 right-4 z-50"
+          className="bg-card/90 shadow-sm border-0 absolute top-4 right-4 z-50"
         />
       )}
     </div>

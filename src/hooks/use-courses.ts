@@ -154,6 +154,7 @@ export function useCourse(courseId: string) {
   const [isFetching, setIsFetching] = useState(false)
   
   const getChangeForEntity = useDraftStore((state) => state.getChangeForEntity)
+  const setCourseDetail = store.setCourseDetail // Extract stable reference
 
   // 1. Try to find in cache (from list or details)
   const cachedCourse = store.courses.find(c => c.id === courseId) || store.courseDetails[courseId]
@@ -195,7 +196,7 @@ export function useCourse(courseId: string) {
       if (courseError) throw courseError
       
       if (courseData) {
-          store.setCourseDetail(courseData)
+          setCourseDetail(courseData)
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch course'
@@ -204,18 +205,13 @@ export function useCourse(courseId: string) {
       clearTimeout(timeoutId)
       setIsFetching(false)
     }
-  }, [courseId, getChangeForEntity, store])
+  }, [courseId, getChangeForEntity, setCourseDetail])
 
   useEffect(() => {
       // If not in cache, strictly fetch. 
       // Even if in cache, re-fetch for updates.
-      if (!cachedCourse) {
-          fetchCourse()
-      } else {
-          // Silent re-validate
-          fetchCourse()
-      }
-  }, [courseId, fetchCourse, cachedCourse])
+      fetchCourse()
+  }, [courseId, fetchCourse])
 
   // Logic to return: Cache + Draft Overrides
   const mergedCourse = useMemo(() => {

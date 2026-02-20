@@ -56,14 +56,14 @@ function TreePreview({
           <div key={item.id}>
             <div 
               className={cn(
-                "flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-100 transition-colors cursor-pointer group",
-                depth === 0 && "bg-slate-50"
+                "flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted/80 transition-colors cursor-pointer group",
+                depth === 0 && "bg-muted"
               )}
               style={{ paddingLeft: `${depth * 16 + 8}px` }}
               onClick={() => hasChildren && toggle(item.id)}
             >
               {hasChildren ? (
-                isExpanded ? <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+                isExpanded ? <ChevronDown className="w-4 h-4 text-muted-foreground/70 shrink-0" /> : <ChevronRight className="w-4 h-4 text-muted-foreground/70 shrink-0" />
               ) : (
                 <span className="w-4" />
               )}
@@ -72,13 +72,13 @@ function TreePreview({
               ) : (
                 <FileText className="w-4 h-4 text-blue-500 shrink-0" />
               )}
-              <span className="text-sm font-medium text-slate-700 line-clamp-2 wrap-break-word">{item.title}</span>
+              <span className="text-sm font-medium text-foreground/90 line-clamp-2 wrap-break-word">{item.title}</span>
               {/* ID Hidden as per request */}
-              {/* <span className="text-xs text-slate-400 ml-auto shrink-0">{item.id}</span> */}
+              {/* <span className="text-xs text-muted-foreground/70 ml-auto shrink-0">{item.id}</span> */}
               {item.type === 'file' && (
                 <div className="flex gap-1 shrink-0">
-                  {item.hasNotes && <span className="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">Notes</span>}
-                  {item.hasQuiz && <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">Quiz</span>}
+                  {item.hasNotes && <span className="text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-white rounded">Notes</span>}
+                  {item.hasQuiz && <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-white rounded">Quiz</span>}
                 </div>
               )}
               {onDelete && (
@@ -410,7 +410,7 @@ Here are the topics to convert into this JSON structure:
               )}
             </div>
 
-            <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-lg shrink-0">
+            <div className="flex items-center gap-4 p-3 bg-muted rounded-lg shrink-0">
               <div className="flex items-center gap-2">
                 <Folder className="w-4 h-4 text-amber-500" />
                 <span className="text-sm font-medium">{stats?.folders} Folders</span>
@@ -419,7 +419,7 @@ Here are the topics to convert into this JSON structure:
                 <FileText className="w-4 h-4 text-blue-500" />
                 <span className="text-sm font-medium">{stats?.files} Files</span>
               </div>
-              <span className={cn("text-xs px-2 py-1 rounded-full ml-auto", parsedData?.isPublic ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600")}>
+              <span className={cn("text-xs px-2 py-1 rounded-full ml-auto", parsedData?.isPublic ? "bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-white" : "bg-muted text-muted-foreground dark:bg-muted/50 dark:text-white")}>
                 {parsedData?.isPublic ? 'Public' : 'Private'}
               </span>
             </div>
