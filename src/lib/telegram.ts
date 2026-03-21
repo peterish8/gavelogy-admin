@@ -268,22 +268,23 @@ export function sid(id: string): string {
  * rather than silently operating on a truncated ID.
  */
 export async function expandId(table: string, shortId: string): Promise<string> {
-  // If it's already a full UUID (36 chars with dashes) return it directly —
-  // handles any legacy session data that stored the full UUID.
+  // Already a full UUID — return as-is
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(shortId)) {
     return shortId
   }
+  // UUID LIKE on a uuid column requires a text cast which PostgREST doesn't
+  // support in .like(). Fetch all IDs from the table and match by prefix in JS.
+  // Tables are small (courses: <50, structure_items: <500) so this is fine.
   const sb = getServiceSupabase()
-  const { data, error } = await sb
-    .from(table)
-    .select('id')
-    .like('id', shortId + '%')
-    .limit(1)
-    .single()
-  if (error || !data?.id) {
-    throw new Error(`[expandId] Could not resolve short ID "${shortId}" in table "${table}": ${error?.message ?? 'not found'}`)
+  const { data, error } = await sb.from(table).select('id')
+  if (error || !data) {
+    throw new Error(`[expandId] Could not query "${table}": ${error?.message}`)
   }
-  return data.id
+  const match = data.find((row: { id: string }) => row.id.startsWith(shortId))
+  if (!match) {
+    throw new Error(`[expandId] No match for "${shortId}" in "${table}"`)
+  }
+  return match.id
 }
 
 // ── Full course structure for AI navigation ───────────────────────────

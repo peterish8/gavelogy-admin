@@ -491,37 +491,74 @@ function buildCourseStructureText(structure: Awaited<ReturnType<typeof getCourse
   return lines.join('\n')
 }
 
-const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
-const GROQ_MODEL = 'llama-3.3-70b-versatile'
+// ── LLM helpers for natural language (NVIDIA → Groq → OpenRouter) ─────
 
-async function callGroq(systemPrompt: string, userMessage: string): Promise<string> {
-  const key = process.env.GROQ_API_KEY
-  if (!key) throw new Error('GROQ_API_KEY is not set in environment variables')
-
-  const res = await fetch(GROQ_API_URL, {
+async function callNvidiaNav(systemPrompt: string, userMessage: string): Promise<string> {
+  const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${key}`,
-    },
+    headers: { 'Authorization': `Bearer ${process.env.NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: GROQ_MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage },
-      ],
-      temperature: 0,
-      max_tokens: 512,
+      model: 'moonshotai/kimi-k2.5',
+      messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }],
+      temperature: 0, max_tokens: 512,
     }),
   })
-
-  if (!res.ok) {
-    const err = await res.text()
-    throw new Error(`Groq API error ${res.status}: ${err}`)
-  }
-
+  if (!res.ok) throw new Error(`NVIDIA ${res.status}: ${await res.text()}`)
   const data = await res.json()
   return data.choices?.[0]?.message?.content ?? ''
+}
+
+async function callGroqNav(systemPrompt: string, userMessage: string, apiKey: string): Promise<string> {
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }],
+      temperature: 0, max_tokens: 512,
+    }),
+  })
+  if (!res.ok) throw new Error(`Groq ${res.status}: ${await res.text()}`)
+  const data = await res.json()
+  return data.choices?.[0]?.message?.content ?? ''
+}
+
+async function callOpenRouterNav(systemPrompt: string, userMessage: string): Promise<string> {
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL ?? '',
+    },
+    body: JSON.stringify({
+      model: 'meta-llama/llama-3.3-70b-instruct:free',
+      messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }],
+      temperature: 0, max_tokens: 512,
+    }),
+  })
+  if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${await res.text()}`)
+  const data = await res.json()
+  return data.choices?.[0]?.message?.content ?? ''
+}
+
+async function callNavLLM(systemPrompt: string, userMessage: string): Promise<string> {
+  const errors: string[] = []
+
+  if (process.env.NVIDIA_API_KEY) {
+    try { return await callNvidiaNav(systemPrompt, userMessage) } catch (e: any) { errors.push(`NVIDIA: ${e.message}`) }
+  }
+  if (process.env.GROQ_API_KEY) {
+    try { return await callGroqNav(systemPrompt, userMessage, process.env.GROQ_API_KEY) } catch (e: any) { errors.push(`Groq: ${e.message}`) }
+  }
+  if (process.env.GROQ_API_KEY_2) {
+    try { return await callGroqNav(systemPrompt, userMessage, process.env.GROQ_API_KEY_2) } catch (e: any) { errors.push(`Groq2: ${e.message}`) }
+  }
+  if (process.env.OPENROUTER_API_KEY) {
+    try { return await callOpenRouterNav(systemPrompt, userMessage) } catch (e: any) { errors.push(`OpenRouter: ${e.message}`) }
+  }
+
+  throw new Error(`All AI providers failed: ${errors.join(' | ')}`)
 }
 
 async function handleNaturalLanguage(chatId: number, text: string) {
@@ -572,7 +609,7 @@ ${structureText}`
 
   let rawJson = ''
   try {
-    rawJson = await callGroq(systemPrompt, text)
+    rawJson = await callNavLLM(systemPrompt, text)
   } catch (e: any) {
     await editMessage(chatId, thinkMsgId, `❌ AI service error: ${e.message}\n\nPlease use the menu buttons to navigate.`, [
       [btn('📚 Browse Courses', 'nav_courses')],
