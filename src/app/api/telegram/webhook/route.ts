@@ -261,12 +261,26 @@ async function showPickCourseFor(chatId: number, action: 'gen' | 'upload' | 'mod
 // AI GENERATION
 // ═══════════════════════════════════════════════════════════════════════
 
+// Formats error messages to show which models failed
+// Input: "All providers failed — NVIDIA: 429 | Groq: rate limit | OpenRouter: 503"
+// Output: "📝 Notes ❌ NVIDIA·Groq·OpenRouter all failed"
+function formatProviderError(label: string, errMsg: string): string {
+  // Extract individual provider failures from the chain error
+  const chain = errMsg.match(/All providers failed[^:]*[:\-]\s*(.+)/i)?.[1]
+  if (chain) {
+    const models = chain.split('|').map(s => s.trim().split(':')[0].trim()).filter(Boolean)
+    return `${label} ❌ <code>${models.join(' → ')}</code> all failed`
+  }
+  // Single model error — show raw but truncated
+  return `${label} ❌ <code>${errMsg.slice(0, 60)}</code>`
+}
+
 async function handleGenerateAi(chatId: number, itemId: string) {
   const item = await getItem(itemId)
   if (!item) { await sendMessage(chatId, '❌ Note not found.'); return }
   if (!item.pdf_url) {
     await sendMessage(chatId, '❌ No PDF attached. Upload a PDF first (Tag Mode).', [
-      [btn('← Back to Note', `nav_i:${sid(itemId)}`)],
+      [btn('← Back to Note', `nav_i:${itemId}`)],
     ])
     return
   }
@@ -295,7 +309,7 @@ async function handleGenerateAi(chatId: number, itemId: string) {
   } catch (e: any) {
     log[log.length - 1] = `📥 PDF fetch ❌ — ${e.message}`
     await update()
-    await sendMessage(chatId, '❌ Could not fetch PDF. Please try again.', [[btn('← Back', `nav_i:${sid(itemId)}`)]])
+    await sendMessage(chatId, '❌ Could not fetch PDF. Please try again.', [[btn('← Back', `nav_i:${itemId}`)]])
     return
   }
 
@@ -312,7 +326,7 @@ async function handleGenerateAi(chatId: number, itemId: string) {
   } catch (e: any) {
     log[log.length - 1] = `📄 Text extraction ❌ — ${e.message}`
     await update()
-    await sendMessage(chatId, '❌ PDF may be scanned/image-based. Cannot extract text.', [[btn('← Back', `nav_i:${sid(itemId)}`)]])
+    await sendMessage(chatId, '❌ PDF may be scanned/image-based. Cannot extract text.', [[btn('← Back', `nav_i:${itemId}`)]])
     return
   }
 
@@ -334,12 +348,13 @@ async function handleGenerateAi(chatId: number, itemId: string) {
     if (!res.ok || data.error) throw new Error(data.error || 'failed')
     await saveNoteContent(itemId, data.formatted)
     notesText = stripTags(data.formatted)
-    log[log.length - 1] = `📝 <b>Notes</b> ✅ · <code>${data.provider ?? 'unknown'}</code> · ${elapsed(t)}`
+    log[log.length - 1] = `📝 <b>Notes</b> ✅ <code>${data.provider ?? 'unknown'}</code> · ${elapsed(t)}`
     await update()
   } catch (e: any) {
-    log[log.length - 1] = `📝 <b>Notes</b> ❌ — ${e.message}`
+    const failLine = formatProviderError('📝 <b>Notes</b>', e.message)
+    log[log.length - 1] = failLine
     await update()
-    await sendMessage(chatId, '❌ Notes generation failed. Cannot continue.', [[btn('← Back', `nav_i:${sid(itemId)}`)]])
+    await sendMessage(chatId, '❌ Notes generation failed. Cannot continue.', [[btn('← Back', `nav_i:${itemId}`)]])
     return
   }
 
@@ -356,10 +371,10 @@ async function handleGenerateAi(chatId: number, itemId: string) {
     const data = await res.json()
     if (!res.ok || data.error) throw new Error(data.error || 'failed')
     quizCount = (data.quiz as string).match(/^Q\d+\./gm)?.length ?? 10
-    log[log.length - 1] = `❓ <b>Quiz</b> ✅ · ${quizCount} questions · <code>${data.provider ?? 'unknown'}</code> · ${elapsed(t)}`
+    log[log.length - 1] = `❓ <b>Quiz</b> ✅ <code>${data.provider ?? 'unknown'}</code> · ${quizCount} Qs · ${elapsed(t)}`
     await update()
   } catch (e: any) {
-    log[log.length - 1] = `❓ <b>Quiz</b> ❌ — ${e.message} (non-fatal)`
+    log[log.length - 1] = formatProviderError('❓ <b>Quiz</b>', e.message) + ' (skipped)'
     await update()
   }
 
@@ -376,17 +391,17 @@ async function handleGenerateAi(chatId: number, itemId: string) {
     const data = await res.json()
     if (!res.ok || data.error) throw new Error(data.error || 'failed')
     cardCount = (data.flashcards ?? []).length
-    log[log.length - 1] = `🃏 <b>Flashcards</b> ✅ · ${cardCount} cards · <code>${data.provider ?? 'unknown'}</code> · ${elapsed(t)}`
+    log[log.length - 1] = `🃏 <b>Flashcards</b> ✅ <code>${data.provider ?? 'unknown'}</code> · ${cardCount} cards · ${elapsed(t)}`
     await update()
   } catch (e: any) {
-    log[log.length - 1] = `🃏 <b>Flashcards</b> ❌ — ${e.message} (non-fatal)`
+    log[log.length - 1] = formatProviderError('🃏 <b>Flashcards</b>', e.message) + ' (skipped)'
     await update()
   }
 
   // ── DONE ───────────────────────────────────────────────────────────
   log.push('\n✅ <b>All done!</b>')
   await editMessage(chatId, msgId, log.join('\n'), [
-    [btn('👁️ View Notes', `view_n:${sid(itemId)}`), btn('← Back to Note', `nav_i:${sid(itemId)}`)],
+    [btn('👁️ View Notes', `view_n:${sid(itemId)}`), btn('← Back to Note', `nav_i:${itemId}`)],
   ])
 }
 

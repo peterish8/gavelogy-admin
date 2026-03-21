@@ -304,19 +304,25 @@ export async function expandId(table: string, shortId: string): Promise<string> 
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(shortId)) {
     return shortId
   }
-  // UUID LIKE on a uuid column requires a text cast which PostgREST doesn't
-  // support in .like(). Fetch all IDs from the table and match by prefix in JS.
-  // Tables are small (courses: <50, structure_items: <500) so this is fine.
-  const sb = getServiceSupabase()
-  const { data, error } = await sb.from(table).select('id')
-  if (error || !data) {
-    throw new Error(`[expandId] Could not query "${table}": ${error?.message}`)
+  // Retry up to 3 times — Vercel cold-start can cause transient fetch failures
+  let lastError: string = 'unknown'
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const sb = getServiceSupabase()
+      const { data, error } = await sb.from(table).select('id')
+      if (error || !data) {
+        lastError = error?.message ?? 'no data'
+        continue
+      }
+      const match = data.find((row: { id: string }) => row.id.startsWith(shortId))
+      if (!match) throw new Error(`[expandId] No match for "${shortId}" in "${table}"`)
+      return match.id
+    } catch (e: any) {
+      lastError = e.message
+      if (attempt < 2) await new Promise(r => setTimeout(r, 300 * (attempt + 1)))
+    }
   }
-  const match = data.find((row: { id: string }) => row.id.startsWith(shortId))
-  if (!match) {
-    throw new Error(`[expandId] No match for "${shortId}" in "${table}"`)
-  }
-  return match.id
+  throw new Error(`[expandId] Could not query "${table}" after 3 attempts: ${lastError}`)
 }
 
 // ── Full course structure for AI navigation ───────────────────────────
