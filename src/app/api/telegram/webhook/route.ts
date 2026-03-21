@@ -809,12 +809,9 @@ async function handleTextInput(chatId: number, text: string) {
           itemType: 'folder',
           title: text.trim(),
         })
-        await sendMessage(chatId, `✅ <b>Module created!</b>\n\n📁 ${text.trim()}`, [
-          // nav_f:{8}:{8} = 23 bytes ✓
-          [btn('📂 Open Module', `nav_f:${sid(id)}:${sid(courseId)}`)],
-          // nav_c:{8} or nav_f:{8}:{8} ✓
-          [btn('← Back', parentId === 'root' ? `nav_c:${sid(courseId)}` : `nav_f:${sid(parentId)}:${sid(courseId)}`)],
-        ])
+        // Auto-navigate into the new module so user lands in the folder view
+        await sendMessage(chatId, `✅ <b>Module "${text.trim()}" created!</b>`)
+        await showFolder(chatId, id, courseId)
       } catch (e: any) {
         await sendMessage(chatId, `❌ Failed to create module: ${e.message}`)
       }
@@ -832,12 +829,9 @@ async function handleTextInput(chatId: number, text: string) {
           itemType: 'file',
           title: text.trim(),
         })
-        await sendMessage(chatId, `✅ <b>Note created!</b>\n\n📄 ${text.trim()}`, [
-          // nav_i:{8} = 14 bytes ✓
-          [btn('📄 Open Note', `nav_i:${sid(id)}`)],
-          // nav_c:{8} or nav_f:{8}:{8} ✓
-          [btn('← Back', parentId === 'root' ? `nav_c:${sid(courseId)}` : `nav_f:${sid(parentId)}:${sid(courseId)}`)],
-        ])
+        // Auto-navigate into the note so user sees Upload PDF / Generate AI directly
+        await sendMessage(chatId, `✅ <b>Note "${text.trim()}" created!</b>`)
+        await showNote(chatId, id)
       } catch (e: any) {
         await sendMessage(chatId, `❌ Failed to create note: ${e.message}`)
       }
