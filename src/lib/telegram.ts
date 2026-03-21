@@ -99,11 +99,18 @@ export function rows(buttons: InlineKeyboardButton[], perRow = 2): InlineKeyboar
   return out
 }
 
+// ── Admin name lookup ─────────────────────────────────────────────────
+const ADMIN_NAMES: Record<number, string> = {
+  1243366277: 'Aksh',
+  6256543340: 'Peter',
+}
+
 // ── Session state management (Supabase telegram_sessions) ─────────────
 export interface TelegramSession {
   chat_id: number
   state: string   // e.g. 'idle' | 'awaiting_pdf' | 'creating_course_name' | ...
   data: Record<string, any>
+  user_name?: string
 }
 
 export async function getSession(chatId: number): Promise<TelegramSession> {
@@ -118,8 +125,9 @@ export async function getSession(chatId: number): Promise<TelegramSession> {
 
 export async function setSession(chatId: number, state: string, data: Record<string, any> = {}) {
   const sb = getServiceSupabase()
+  const user_name = ADMIN_NAMES[chatId] ?? `user_${chatId}`
   await sb.from('telegram_sessions').upsert(
-    { chat_id: chatId, state, data, updated_at: new Date().toISOString() },
+    { chat_id: chatId, state, data, user_name, updated_at: new Date().toISOString() },
     { onConflict: 'chat_id' }
   )
 }
@@ -276,6 +284,82 @@ export async function expandId(table: string, shortId: string): Promise<string> 
     throw new Error(`[expandId] Could not resolve short ID "${shortId}" in table "${table}": ${error?.message ?? 'not found'}`)
   }
   return data.id
+}
+
+// ── Full course structure for AI navigation ───────────────────────────
+export interface CourseStructureNote {
+  id: string
+  title: string
+  item_type: 'file'
+}
+
+export interface CourseStructureFolder {
+  id: string
+  title: string
+  item_type: 'folder'
+  children: (CourseStructureFolder | CourseStructureNote)[]
+}
+
+export interface CourseStructureCourse {
+  id: string
+  name: string
+  icon: string | null
+  folders: (CourseStructureFolder | CourseStructureNote)[]
+}
+
+/**
+ * Fetches the full course tree (courses → top-level folders/notes → nested children)
+ * for use by the LLM-powered natural language navigation feature.
+ * Only goes two levels deep (top-level items + their direct children) to keep
+ * the prompt size manageable; deeper nesting is rare in practice.
+ */
+export async function getCourseStructure(): Promise<CourseStructureCourse[]> {
+  const sb = getServiceSupabase()
+
+  // Fetch all courses
+  const { data: courses, error: cErr } = await sb
+    .from('courses')
+    .select('id, name, icon')
+    .order('order_index', { ascending: true })
+  if (cErr) throw cErr
+
+  // Fetch ALL structure items in a single query (more efficient than N+1)
+  const { data: allItems, error: iErr } = await sb
+    .from('structure_items')
+    .select('id, title, item_type, course_id, parent_id')
+    .order('order_index', { ascending: true })
+  if (iErr) throw iErr
+
+  const items = allItems ?? []
+
+  // Build a lookup: parentId (or 'root:{courseId}') → children
+  function buildChildren(courseId: string, parentId: string | null): (CourseStructureFolder | CourseStructureNote)[] {
+    return items
+      .filter(i => i.course_id === courseId && (i.parent_id ?? null) === parentId)
+      .map(i => {
+        if (i.item_type === 'folder') {
+          return {
+            id: i.id,
+            title: i.title,
+            item_type: 'folder' as const,
+            children: buildChildren(courseId, i.id),
+          }
+        } else {
+          return {
+            id: i.id,
+            title: i.title,
+            item_type: 'file' as const,
+          }
+        }
+      })
+  }
+
+  return (courses ?? []).map(c => ({
+    id: c.id,
+    name: c.name,
+    icon: c.icon,
+    folders: buildChildren(c.id, null),
+  }))
 }
 
 // ── Strip custom tags from notes HTML for plain-text display ──────────
