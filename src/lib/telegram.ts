@@ -218,6 +218,22 @@ export async function createStructureItem(params: {
   return id
 }
 
+// ── Short ID helpers (Telegram 64-byte callback_data limit) ──────────
+// UUID first 8 chars are unique enough for navigation
+export function sid(id: string): string {
+  return id.slice(0, 8)
+}
+
+export async function expandId(table: string, shortId: string): Promise<string> {
+  const sb = getServiceSupabase()
+  const { data } = await sb
+    .from(table)
+    .select('id')
+    .like('id', shortId + '%')
+    .single()
+  return data?.id ?? shortId
+}
+
 // ── Strip custom tags from notes HTML for plain-text display ──────────
 export function stripTags(html: string): string {
   return html
