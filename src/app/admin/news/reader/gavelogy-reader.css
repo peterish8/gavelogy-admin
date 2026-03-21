@@ -1,0 +1,451 @@
+/*
+  gavelogy-reader.css
+  Full Gavelogy design system — scoped to .gr-* classes.
+  Fonts loaded from Google Fonts via next.config or layout.
+  Colours: navy (#0f2545), gold (#c8920a), paper (#fafaf9), cream (#f5f0e8)
+*/
+
+/* ─── Google Fonts ─────────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,400&family=DM+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;1,8..60,400&display=swap');
+
+/* ─── Shell ────────────────────────────────────────────────────────────────── */
+.gr-app {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  max-width: 680px;
+  margin: 0 auto;
+  background: #fafaf9;
+  overflow: hidden;
+  font-family: 'Source Serif 4', Georgia, serif;
+}
+
+/* ─── Dev bar (admin preview notice) ──────────────────────────────────────── */
+.gavelogy-devbar {
+  background: #f5f0e8;
+  border-bottom: 1px solid #d4d4d8;
+  padding: 5px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: #71717a;
+  flex-shrink: 0;
+  max-width: 680px;
+  margin: 0 auto;
+  width: 100%;
+}
+.gavelogy-devbar-link {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #1d4ed8;
+  text-decoration: none;
+}
+.gavelogy-devbar-link:hover { text-decoration: underline; }
+.gavelogy-devbar-sep { color: #d4d4d8; }
+.gavelogy-devbar-label { color: #71717a; }
+
+/* ─── Topbar ───────────────────────────────────────────────────────────────── */
+.gr-topbar {
+  flex-shrink: 0;
+  height: 52px;
+  background: #0f2545;
+  border-bottom: 2px solid #c8920a;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.gr-brand {
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: -0.3px;
+}
+.gr-brand-main {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 700;
+  color: #ffffff;
+  font-style: normal;
+}
+.gr-brand-ogy {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 400;
+  font-style: italic;
+  color: #c8920a;
+}
+
+.gr-topbar-meta {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.gr-topbar-paper {
+  font-family: 'DM Mono', monospace;
+  font-weight: 500;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.65);
+}
+.gr-topbar-date {
+  font-family: 'DM Mono', monospace;
+  font-weight: 400;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* ─── Progress bar ─────────────────────────────────────────────────────────── */
+.gr-progress {
+  flex-shrink: 0;
+  background: #0f2545;
+  padding: 0 20px 10px;
+  display: flex;
+  gap: 3px;
+}
+.gr-seg {
+  flex: 1;
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.12);
+  transition: background 0.3s;
+}
+.gr-seg--active { background: rgba(200, 146, 10, 0.5); }
+.gr-seg--done   { background: #c8920a; }
+
+/* ─── Stage ────────────────────────────────────────────────────────────────── */
+.gr-stage {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  position: relative;
+  background: #fafaf9;
+  /* thin scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: #d4d4d8 transparent;
+}
+.gr-stage::-webkit-scrollbar { width: 2px; }
+.gr-stage::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 2px; }
+.gr-stage::-webkit-scrollbar-track { background: transparent; }
+
+.gr-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  color: #71717a;
+}
+
+/* ─── Card transitions ─────────────────────────────────────────────────────── */
+@keyframes gr-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes gr-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-6px); }
+}
+.gr-card-in  { animation: gr-in  250ms ease forwards; }
+.gr-card-out { animation: gr-out 180ms ease forwards; }
+
+/* ─── Card ─────────────────────────────────────────────────────────────────── */
+.gr-card {
+  background: #ffffff;
+  min-height: 100%;
+}
+
+.gr-stripe {
+  height: 4px;
+  width: 100%;
+}
+
+.gr-inner {
+  padding: 18px 18px 24px;
+}
+
+/* ─── Badge row ────────────────────────────────────────────────────────────── */
+.gr-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 12px;
+}
+
+.gr-chip {
+  font-family: 'DM Mono', monospace;
+  font-weight: 500;
+  font-size: 9px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 3px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.gr-exam-badge {
+  font-family: 'DM Mono', monospace;
+  font-weight: 700;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 3px 9px;
+  border-radius: 3px;
+  background: #0f2545;
+  color: #c8920a;
+  white-space: nowrap;
+}
+
+/* ─── Headline ─────────────────────────────────────────────────────────────── */
+.gr-headline {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 700;
+  font-size: 18px;
+  line-height: 1.3;
+  color: #18181b;
+  margin: 0 0 6px 0;
+}
+
+/* ─── Source link ──────────────────────────────────────────────────────────── */
+.gr-source {
+  display: block;
+  font-family: 'DM Mono', monospace;
+  font-weight: 400;
+  font-size: 10px;
+  color: #1d4ed8;
+  text-decoration: none;
+  margin-bottom: 14px;
+  letter-spacing: 0.2px;
+}
+.gr-source:hover { text-decoration: underline; }
+.gr-source--plain { color: #a1a1aa; }
+
+/* ─── Rule ─────────────────────────────────────────────────────────────────── */
+.gr-rule {
+  height: 1px;
+  background: #e4e4e7;
+  margin: 0 0 14px 0;
+}
+
+/* ─── Fields ───────────────────────────────────────────────────────────────── */
+.gr-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.gr-field {
+  display: flex;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.gr-field-label {
+  font-family: 'DM Mono', monospace;
+  font-weight: 500;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: #a1a1aa;
+  min-width: 82px;
+  padding-top: 2px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.gr-field-value {
+  font-family: 'Source Serif 4', Georgia, serif;
+  font-size: 13px;
+  color: #3f3f46;
+  flex: 1;
+  line-height: 1.65;
+}
+
+/* ─── Placement box ────────────────────────────────────────────────────────── */
+.gr-placement {
+  margin-top: 14px;
+  background: #f5f0e8;
+  border-left: 3px solid #c8920a;
+  border-radius: 4px;
+  padding: 10px 13px;
+}
+.gr-placement-label {
+  font-family: 'DM Mono', monospace;
+  font-weight: 500;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #c8920a;
+  margin: 0 0 3px 0;
+}
+.gr-placement-text {
+  font-family: 'Source Serif 4', Georgia, serif;
+  font-size: 12px;
+  color: #3f3f46;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* ─── Read time ────────────────────────────────────────────────────────────── */
+.gr-readtime {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 11px;
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: #a1a1aa;
+}
+.gr-readtime-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #d4d4d8;
+  flex-shrink: 0;
+}
+
+/* ─── Navbar ───────────────────────────────────────────────────────────────── */
+.gr-navbar {
+  flex-shrink: 0;
+  background: #ffffff;
+  border-top: 1px solid #e4e4e7;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.gr-btn {
+  flex: 1;
+  font-family: 'DM Mono', monospace;
+  font-weight: 500;
+  font-size: 11px;
+  padding: 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+  border: none;
+  outline: none;
+}
+.gr-btn--prev {
+  background: #ffffff;
+  border: 1px solid #d4d4d8;
+  color: #18181b;
+}
+.gr-btn--prev:hover:not(:disabled) { background: #f5f0e8; }
+.gr-btn--prev:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.gr-btn--next {
+  background: #0f2545;
+  color: #c8920a;
+  border: 1px solid #0f2545;
+}
+.gr-btn--next:hover { background: #1a3a6b; }
+
+.gr-counter {
+  min-width: 40px;
+  text-align: center;
+  font-family: 'DM Mono', monospace;
+  font-weight: 400;
+  font-size: 10px;
+  color: #a1a1aa;
+}
+
+/* ─── Done screen ──────────────────────────────────────────────────────────── */
+.gr-done {
+  position: absolute;
+  inset: 0;
+  background: #0f2545;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 28px;
+  text-align: center;
+  animation: gr-in 250ms ease forwards;
+}
+.gr-done-ring {
+  width: 56px;
+  height: 56px;
+  border: 1.5px solid #c8920a;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: #c8920a;
+  margin-bottom: 18px;
+}
+.gr-done-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 700;
+  font-size: 22px;
+  color: #ffffff;
+  margin: 0 0 8px 0;
+}
+.gr-done-sub {
+  font-family: 'Source Serif 4', Georgia, serif;
+  font-size: 13px;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.45);
+  line-height: 1.6;
+  margin: 0 0 24px 0;
+  max-width: 300px;
+}
+.gr-done-stats {
+  display: flex;
+  gap: 28px;
+  margin-bottom: 24px;
+}
+.gr-done-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.gr-done-stat-val {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-weight: 700;
+  font-size: 34px;
+  color: #c8920a;
+  line-height: 1;
+}
+.gr-done-stat-val--dim { color: rgba(255, 255, 255, 0.35); }
+.gr-done-stat-lbl {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+.gr-done-restart {
+  font-family: 'DM Mono', monospace;
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  background: #c8920a;
+  color: #0f2545;
+  border: none;
+  padding: 11px 28px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.gr-done-restart:hover { opacity: 0.85; }
+
+/* ─── Responsive ───────────────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .gr-topbar { height: 48px; }
+  .gr-topbar-meta { display: none; }
+  .gr-brand { font-size: 17px; }
+  .gr-inner { padding: 14px 14px 20px; }
+  .gr-headline { font-size: 16px; }
+  .gr-field-label { min-width: 72px; }
+}

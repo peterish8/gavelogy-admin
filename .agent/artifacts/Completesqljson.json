@@ -191,7 +191,24 @@
         "nullable": "NO"
       }
     ],
-    "policies": []
+    "policies": [
+      {
+        "roles": [
+          "public"
+        ],
+        "command": "SELECT",
+        "permissive": "PERMISSIVE",
+        "policy_name": "Users can view own transactions"
+      },
+      {
+        "roles": [
+          "public"
+        ],
+        "command": "INSERT",
+        "permissive": "PERMISSIVE",
+        "policy_name": "Server can insert transactions"
+      }
+    ]
   },
   {
     "table_name": "courses",
@@ -324,6 +341,179 @@
         "command": "SELECT",
         "permissive": "PERMISSIVE",
         "policy_name": "Users can view own daily activity"
+      }
+    ]
+  },
+  {
+    "table_name": "daily_news",
+    "columns": [
+      {
+        "type": "ARRAY",
+        "column": "keywords",
+        "default": "'{}'::text[]",
+        "nullable": "YES"
+      },
+      {
+        "type": "date",
+        "column": "date",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "integer",
+        "column": "display_order",
+        "default": "0",
+        "nullable": "NO"
+      },
+      {
+        "type": "jsonb",
+        "column": "doctrine",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "jsonb",
+        "column": "facts",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "jsonb",
+        "column": "holdings",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "jsonb",
+        "column": "mcqs",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "jsonb",
+        "column": "provisions",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "capsule",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "category",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "content_custom",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "content_html",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "court",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "exam_probability",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "page_image",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "priority",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "source_paper",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "status",
+        "default": "'draft'::text",
+        "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "subject",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "summary",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "title",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "topic",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "timestamp with time zone",
+        "column": "created_at",
+        "default": "now()",
+        "nullable": "YES"
+      },
+      {
+        "type": "timestamp with time zone",
+        "column": "updated_at",
+        "default": "now()",
+        "nullable": "YES"
+      },
+      {
+        "type": "uuid",
+        "column": "id",
+        "default": "gen_random_uuid()",
+        "nullable": "NO"
+      }
+    ],
+    "policies": [
+      {
+        "roles": [
+          "public"
+        ],
+        "command": "ALL",
+        "permissive": "PERMISSIVE",
+        "policy_name": "Authenticated users full access"
+      },
+      {
+        "roles": [
+          "public"
+        ],
+        "command": "SELECT",
+        "permissive": "PERMISSIVE",
+        "policy_name": "Public can read published"
       }
     ]
   },
@@ -598,6 +788,12 @@
         "nullable": "NO"
       },
       {
+        "type": "text",
+        "column": "team",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
         "type": "timestamp with time zone",
         "column": "joined_at",
         "default": "now()",
@@ -847,6 +1043,402 @@
         "command": "SELECT",
         "permissive": "PERMISSIVE",
         "policy_name": "Everyone view notes"
+      }
+    ]
+  },
+  {
+    "table_name": "note_pdf_links",
+    "columns": [
+      {
+        "type": "double precision",
+        "column": "height",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "double precision",
+        "column": "width",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "double precision",
+        "column": "x",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "double precision",
+        "column": "y",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "integer",
+        "column": "pdf_page",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "label",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "link_id",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "timestamp with time zone",
+        "column": "created_at",
+        "default": "now()",
+        "nullable": "YES"
+      },
+      {
+        "type": "uuid",
+        "column": "id",
+        "default": "gen_random_uuid()",
+        "nullable": "NO"
+      },
+      {
+        "type": "uuid",
+        "column": "item_id",
+        "default": null,
+        "nullable": "NO"
+      }
+    ],
+    "policies": [
+      {
+        "roles": [
+          "public"
+        ],
+        "command": "SELECT",
+        "permissive": "PERMISSIVE",
+        "policy_name": "Anyone can read note_pdf_links"
+      },
+      {
+        "roles": [
+          "service_role"
+        ],
+        "command": "INSERT",
+        "permissive": "PERMISSIVE",
+        "policy_name": "Service role can insert note_pdf_links"
+      },
+      {
+        "roles": [
+          "service_role"
+        ],
+        "command": "DELETE",
+        "permissive": "PERMISSIVE",
+        "policy_name": "Service role can delete note_pdf_links"
+      }
+    ]
+  },
+  {
+    "table_name": "otps",
+    "columns": [
+      {
+        "type": "integer",
+        "column": "attempts",
+        "default": "0",
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "identifier",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "otp_hash",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "timestamp with time zone",
+        "column": "created_at",
+        "default": "now()",
+        "nullable": "YES"
+      },
+      {
+        "type": "timestamp with time zone",
+        "column": "expires_at",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "USER-DEFINED",
+        "column": "channel",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "uuid",
+        "column": "id",
+        "default": "gen_random_uuid()",
+        "nullable": "NO"
+      }
+    ],
+    "policies": []
+  },
+  {
+    "table_name": "profiles",
+    "columns": [
+      {
+        "type": "boolean",
+        "column": "email_marketing_consent",
+        "default": "false",
+        "nullable": "YES"
+      },
+      {
+        "type": "boolean",
+        "column": "email_verified",
+        "default": "false",
+        "nullable": "YES"
+      },
+      {
+        "type": "boolean",
+        "column": "phone_verified",
+        "default": "false",
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "avatar_url",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "consent_source",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "email",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "full_name",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "timestamp with time zone",
+        "column": "consent_timestamp",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "timestamp with time zone",
+        "column": "updated_at",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "uuid",
+        "column": "id",
+        "default": null,
+        "nullable": "NO"
+      }
+    ],
+    "policies": [
+      {
+        "roles": [
+          "public"
+        ],
+        "command": "SELECT",
+        "permissive": "PERMISSIVE",
+        "policy_name": "Users can view own profile"
+      },
+      {
+        "roles": [
+          "public"
+        ],
+        "command": "UPDATE",
+        "permissive": "PERMISSIVE",
+        "policy_name": "Users can update own profile"
+      }
+    ]
+  },
+  {
+    "table_name": "pyq_questions",
+    "columns": [
+      {
+        "type": "character",
+        "column": "correct_answer",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "integer",
+        "column": "marks",
+        "default": "1",
+        "nullable": "NO"
+      },
+      {
+        "type": "integer",
+        "column": "order_index",
+        "default": "0",
+        "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "explanation",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "option_a",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "option_b",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "option_c",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "option_d",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "passage",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "question_text",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "timestamp with time zone",
+        "column": "created_at",
+        "default": "now()",
+        "nullable": "NO"
+      },
+      {
+        "type": "uuid",
+        "column": "id",
+        "default": "gen_random_uuid()",
+        "nullable": "NO"
+      },
+      {
+        "type": "uuid",
+        "column": "test_id",
+        "default": null,
+        "nullable": "NO"
+      }
+    ],
+    "policies": [
+      {
+        "roles": [
+          "public"
+        ],
+        "command": "ALL",
+        "permissive": "PERMISSIVE",
+        "policy_name": "Admins full access pyq_questions"
+      }
+    ]
+  },
+  {
+    "table_name": "pyq_tests",
+    "columns": [
+      {
+        "type": "boolean",
+        "column": "is_published",
+        "default": "false",
+        "nullable": "NO"
+      },
+      {
+        "type": "integer",
+        "column": "duration_minutes",
+        "default": "120",
+        "nullable": "NO"
+      },
+      {
+        "type": "integer",
+        "column": "total_marks",
+        "default": "120",
+        "nullable": "NO"
+      },
+      {
+        "type": "integer",
+        "column": "year",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "numeric",
+        "column": "negative_marking",
+        "default": "0.25",
+        "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "exam_name",
+        "default": "'CLAT PG'::text",
+        "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "instructions",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "title",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "timestamp with time zone",
+        "column": "created_at",
+        "default": "now()",
+        "nullable": "NO"
+      },
+      {
+        "type": "timestamp with time zone",
+        "column": "updated_at",
+        "default": "now()",
+        "nullable": "NO"
+      },
+      {
+        "type": "uuid",
+        "column": "id",
+        "default": "gen_random_uuid()",
+        "nullable": "NO"
+      }
+    ],
+    "policies": [
+      {
+        "roles": [
+          "public"
+        ],
+        "command": "ALL",
+        "permissive": "PERMISSIVE",
+        "policy_name": "Admins full access pyq_tests"
       }
     ]
   },
@@ -1276,6 +1868,65 @@
     ]
   },
   {
+    "table_name": "speed_court_scores",
+    "columns": [
+      {
+        "type": "integer",
+        "column": "correct_count",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "integer",
+        "column": "score_points",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "integer",
+        "column": "total_attempted",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "timestamp with time zone",
+        "column": "created_at",
+        "default": "now()",
+        "nullable": "YES"
+      },
+      {
+        "type": "uuid",
+        "column": "id",
+        "default": "gen_random_uuid()",
+        "nullable": "NO"
+      },
+      {
+        "type": "uuid",
+        "column": "user_id",
+        "default": null,
+        "nullable": "YES"
+      }
+    ],
+    "policies": [
+      {
+        "roles": [
+          "public"
+        ],
+        "command": "SELECT",
+        "permissive": "PERMISSIVE",
+        "policy_name": "View all"
+      },
+      {
+        "roles": [
+          "public"
+        ],
+        "command": "INSERT",
+        "permissive": "PERMISSIVE",
+        "policy_name": "Insert own"
+      }
+    ]
+  },
+  {
     "table_name": "streak_bonuses",
     "columns": [
       {
@@ -1358,6 +2009,12 @@
         "column": "item_type",
         "default": null,
         "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "pdf_url",
+        "default": null,
+        "nullable": "YES"
       },
       {
         "type": "text",
@@ -1865,7 +2522,7 @@
       {
         "type": "integer",
         "column": "coins",
-        "default": "0",
+        "default": "500",
         "nullable": "YES"
       },
       {
@@ -1883,7 +2540,13 @@
       {
         "type": "integer",
         "column": "total_coins",
-        "default": "100",
+        "default": "500",
+        "nullable": "YES"
+      },
+      {
+        "type": "integer",
+        "column": "xp",
+        "default": "0",
         "nullable": "YES"
       },
       {
