@@ -205,6 +205,38 @@ export async function updateItemPdfUrl(itemId: string, pdfUrl: string) {
   await sb.from('structure_items').update({ pdf_url: pdfUrl }).eq('id', itemId)
 }
 
+export async function getCourse(courseId: string) {
+  const sb = getServiceSupabase()
+  const { data, error } = await sb
+    .from('courses')
+    .select('id, name, icon, price, is_active, description')
+    .eq('id', courseId)
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateCoursePrice(courseId: string, price: number) {
+  const sb = getServiceSupabase()
+  const { error } = await sb
+    .from('courses')
+    .update({ price, updated_at: new Date().toISOString() })
+    .eq('id', courseId)
+  if (error) throw error
+}
+
+export async function toggleCourseActive(courseId: string): Promise<boolean> {
+  const sb = getServiceSupabase()
+  const { data } = await sb.from('courses').select('is_active').eq('id', courseId).single()
+  const newState = !data?.is_active
+  const { error } = await sb
+    .from('courses')
+    .update({ is_active: newState, updated_at: new Date().toISOString() })
+    .eq('id', courseId)
+  if (error) throw error
+  return newState
+}
+
 export async function createCourse(name: string, description: string | null, price: number) {
   const sb = getServiceSupabase()
   const id = crypto.randomUUID()

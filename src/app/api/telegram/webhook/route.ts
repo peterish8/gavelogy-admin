@@ -8,6 +8,7 @@ import {
   getCourses, getTopLevelFolders, getFolderChildren,
   getItem, getNoteContent, saveNoteContent, updateItemPdfUrl,
   createCourse, createStructureItem,
+  getCourse, updateCoursePrice, toggleCourseActive,
   getCourseStructure,
   stripTags, truncate, btn, rows, sid, expandId,
   extractPdfText,
@@ -63,6 +64,21 @@ async function showCourses(chatId: number, msgId?: number) {
   msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
 }
 
+async function showCourseSettings(chatId: number, courseId: string, msgId?: number) {
+  const course = await getCourse(courseId)
+  if (!course) { await sendMessage(chatId, '❌ Course not found.'); return }
+
+  const status = course.is_active ? '🟢 Published' : '🔴 Hidden'
+  const text = `⚙️ <b>${course.name} — Settings</b>\n\n💰 Price: ₹${course.price ?? 0}\n📢 Status: ${status}`
+
+  const kb: ReturnType<typeof btn>[][] = [
+    [btn(course.is_active ? '🔴 Hide Course' : '🟢 Publish Course', `toggle_pub:${sid(courseId)}`)],
+    [btn('💰 Change Price', `edit_price:${sid(courseId)}`)],
+    [btn('← Back to Course', `nav_c:${sid(courseId)}`)],
+  ]
+  msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
+}
+
 async function showCourse(chatId: number, courseId: string, msgId?: number) {
   const items = await getTopLevelFolders(courseId)
   const folders = items.filter(i => i.item_type === 'folder')
@@ -74,15 +90,11 @@ async function showCourse(chatId: number, courseId: string, msgId?: number) {
     : `📁 <b>Modules</b> (${folders.length} folders, ${files.length} notes)`
 
   const kb: ReturnType<typeof btn>[][] = [
-    // nav_f:{8}:{8} = 6 + 8 + 1 + 8 = 23 bytes ✓
-    // nav_i:{8}     = 6 + 8         = 14 bytes ✓
     ...rows(all.map(i => btn(`${itemEmoji(i.item_type)} ${i.title}`,
       i.item_type === 'folder' ? `nav_f:${sid(i.id)}:${sid(courseId)}` : `nav_i:${sid(i.id)}`
     )), 1),
-    // new_mod:{8}:root = 8 + 8 + 1 + 4 = 21 bytes ✓
-    // new_note:{8}:root= 9 + 8 + 1 + 4 = 22 bytes ✓
     [btn('📁 New Module', `new_mod:${sid(courseId)}:root`), btn('📄 New Note', `new_note:${sid(courseId)}:root`)],
-    [btn('← Back to Courses', 'nav_courses')],
+    [btn('⚙️ Settings', `course_set:${sid(courseId)}`), btn('← Back', 'nav_courses')],
   ]
   msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
 }
@@ -782,7 +794,8 @@ async function handleTextInput(chatId: number, text: string) {
     }
     case 'creating_course_price': {
       const raw = text.trim().toLowerCase()
-      const price = raw === '/skip' ? 0 : parseInt(raw, 10) || 0
+      // Strip commas/spaces so "3,333" or "3 333" parses as 3333
+      const price = raw === '/skip' ? 0 : parseInt(raw.replace(/[,\s]/g, ''), 10) || 0
       const { name, desc } = session.data
       await clearSession(chatId)
       try {
@@ -839,11 +852,29 @@ async function handleTextInput(chatId: number, text: string) {
     }
 
     // ── IDLE: route free text through natural language AI ──────────
+    // ── EDIT COURSE PRICE ─────────────────────────────────────────
+    case 'editing_course_price': {
+      const { courseId } = session.data
+      await clearSession(chatId)
+      const raw = text.trim()
+      const price = raw === '/skip' ? null : parseInt(raw.replace(/[,\s]/g, ''), 10)
+      if (price === null || isNaN(price) || price < 0) {
+        await sendMessage(chatId, '❌ Invalid price. Enter a number like <code>3333</code> or <code>0</code> for free.')
+        await setSession(chatId, 'editing_course_price', { courseId })
+        return
+      }
+      try {
+        await updateCoursePrice(courseId, price)
+        await sendMessage(chatId, `✅ Price updated to ₹${price}`)
+        await showCourseSettings(chatId, courseId)
+      } catch (e: any) {
+        await sendMessage(chatId, `❌ Failed to update price: ${e.message}`)
+      }
+      break
+    }
+
     case 'idle':
     default:
-      // When session is idle and the user types free text, interpret it
-      // with the LLM-powered natural language handler instead of showing
-      // a generic "use buttons" message.
       await handleNaturalLanguage(chatId, text)
       break
   }
@@ -954,6 +985,29 @@ async function handleCallback(chatId: number, callbackId: string, data: string, 
   if (data.startsWith('view_f:')) {
     const itemId = await expandId('structure_items', data.slice(7))
     await handleViewFlashcards(chatId, itemId); return
+  }
+
+  // course_set:{shortCourseId} — open course settings
+  if (data.startsWith('course_set:')) {
+    const courseId = await expandId('courses', data.slice(11))
+    await showCourseSettings(chatId, courseId, msgId); return
+  }
+
+  // toggle_pub:{shortCourseId} — publish/unpublish
+  if (data.startsWith('toggle_pub:')) {
+    const courseId = await expandId('courses', data.slice(11))
+    const newState = await toggleCourseActive(courseId)
+    await editMessage(chatId, msgId, `${newState ? '🟢 Course published!' : '🔴 Course hidden!'}`)
+    await showCourseSettings(chatId, courseId)
+    return
+  }
+
+  // edit_price:{shortCourseId} — start price edit wizard
+  if (data.startsWith('edit_price:')) {
+    const courseId = await expandId('courses', data.slice(11))
+    await setSession(chatId, 'editing_course_price', { courseId })
+    await editMessage(chatId, msgId, '💰 Enter the new price in ₹ (e.g. <code>3333</code>) or <code>0</code> for free:')
+    return
   }
 }
 
