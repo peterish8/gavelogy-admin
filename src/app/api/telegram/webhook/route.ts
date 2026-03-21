@@ -8,6 +8,7 @@ import {
   getCourses, getTopLevelFolders, getFolderChildren,
   getItem, getNoteContent, saveNoteContent, updateItemPdfUrl,
   createCourse, createStructureItem,
+  getCourseStructure,
   stripTags, truncate, btn, rows, sid, expandId,
   extractPdfText,
 } from '@/lib/telegram'
@@ -442,6 +443,286 @@ async function downloadTelegramFile(filePath: string): Promise<Buffer> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// NATURAL LANGUAGE NAVIGATION  (Groq / llama-3.3-70b-versatile)
+// ═══════════════════════════════════════════════════════════════════════
+
+type AIAction =
+  | { action: 'navigate_course'; courseId: string }
+  | { action: 'navigate_folder'; folderId: string; courseId: string }
+  | { action: 'navigate_note'; itemId: string }
+  | { action: 'upload_pdf'; itemId: string }
+  | { action: 'generate_ai'; itemId: string }
+  | { action: 'view_notes'; itemId: string }
+  | { action: 'view_quiz'; itemId: string }
+  | { action: 'view_flashcards'; itemId: string }
+  | { action: 'create_course' }
+  | { action: 'create_module'; courseId: string; parentId: string }
+  | { action: 'create_note'; courseId: string; parentId: string }
+  | { action: 'ambiguous'; matches: { name: string; id: string; type: 'course' | 'folder' | 'note' }[]; question: string }
+  | { action: 'unknown'; message: string }
+
+/**
+ * Serialise the course tree into a compact text block for the LLM prompt.
+ * Format keeps token count low while giving enough context for matching.
+ */
+function buildCourseStructureText(structure: Awaited<ReturnType<typeof getCourseStructure>>): string {
+  const lines: string[] = []
+
+  function writeItems(
+    items: { id: string; title: string; item_type: string; children?: any[] }[],
+    indent: number
+  ) {
+    const pad = '  '.repeat(indent)
+    for (const item of items) {
+      if (item.item_type === 'folder') {
+        lines.push(`${pad}[FOLDER] "${item.title}" id=${item.id}`)
+        if (item.children?.length) writeItems(item.children, indent + 1)
+      } else {
+        lines.push(`${pad}[NOTE] "${item.title}" id=${item.id}`)
+      }
+    }
+  }
+
+  for (const course of structure) {
+    lines.push(`[COURSE] "${course.name}" id=${course.id}`)
+    writeItems(course.folders, 1)
+  }
+
+  return lines.join('\n')
+}
+
+const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
+const GROQ_MODEL = 'llama-3.3-70b-versatile'
+
+async function callGroq(systemPrompt: string, userMessage: string): Promise<string> {
+  const key = process.env.GROQ_API_KEY
+  if (!key) throw new Error('GROQ_API_KEY is not set in environment variables')
+
+  const res = await fetch(GROQ_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify({
+      model: GROQ_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      temperature: 0,
+      max_tokens: 512,
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`Groq API error ${res.status}: ${err}`)
+  }
+
+  const data = await res.json()
+  return data.choices?.[0]?.message?.content ?? ''
+}
+
+async function handleNaturalLanguage(chatId: number, text: string) {
+  // Show a thinking indicator so the user knows the bot is working
+  const thinkMsg = await sendMessage(chatId, '🤔 Thinking…')
+  const thinkMsgId = thinkMsg?.result?.message_id
+
+  let structure: Awaited<ReturnType<typeof getCourseStructure>>
+  try {
+    structure = await getCourseStructure()
+  } catch (e: any) {
+    await editMessage(chatId, thinkMsgId, `❌ Could not load course structure: ${e.message}`)
+    return
+  }
+
+  const structureText = buildCourseStructureText(structure)
+
+  const systemPrompt = `You are a navigation assistant for Gavelogy, a legal education platform admin bot.
+You are given the full course structure (courses, folders/modules, and notes) with their UUIDs.
+The user will tell you what they want to do in plain English.
+You must respond with ONLY a valid JSON object — no explanation, no markdown, no code block, just raw JSON.
+
+The JSON must match exactly one of these shapes:
+- Navigate to a course: {"action":"navigate_course","courseId":"<full-uuid>"}
+- Navigate to a folder/module: {"action":"navigate_folder","folderId":"<full-uuid>","courseId":"<full-uuid>"}
+- Navigate to a note: {"action":"navigate_note","itemId":"<full-uuid>"}
+- Upload PDF for a note: {"action":"upload_pdf","itemId":"<full-uuid>"}
+- Generate AI for a note: {"action":"generate_ai","itemId":"<full-uuid>"}
+- View notes for a note: {"action":"view_notes","itemId":"<full-uuid>"}
+- View quiz for a note: {"action":"view_quiz","itemId":"<full-uuid>"}
+- View flashcards for a note: {"action":"view_flashcards","itemId":"<full-uuid>"}
+- Create a new course: {"action":"create_course"}
+- Create a new module: {"action":"create_module","courseId":"<full-uuid>","parentId":"<full-uuid-or-root>"}
+- Create a new note: {"action":"create_note","courseId":"<full-uuid>","parentId":"<full-uuid-or-root>"}
+- When multiple items match the user's intent (ambiguous): {"action":"ambiguous","matches":[{"name":"<display name>","id":"<full-uuid>","type":"course|folder|note"}],"question":"<ask the user which one>"}
+- When you cannot understand or cannot find a match: {"action":"unknown","message":"<brief explanation>"}
+
+Rules:
+1. Use fuzzy/partial matching. "constitutional law" should match "Constitutional Law" or "Constitution Law".
+2. If two or more items could match (similar names), return the "ambiguous" action with all matches (max 5).
+3. For "create" requests, use "root" as parentId if no specific parent is mentioned.
+4. The action keywords: "open", "go to", "navigate", "show" → navigate. "upload pdf", "add pdf" → upload_pdf. "generate ai", "create ai", "ai generate" → generate_ai. "view notes", "show notes" → view_notes. "create", "new", "add" → create_*.
+5. Always return the FULL UUID from the course structure, not a truncated version.
+6. If the user says "this note" or "current note" and no context is available, return unknown.
+
+Course structure:
+${structureText}`
+
+  let rawJson = ''
+  try {
+    rawJson = await callGroq(systemPrompt, text)
+  } catch (e: any) {
+    await editMessage(chatId, thinkMsgId, `❌ AI service error: ${e.message}\n\nPlease use the menu buttons to navigate.`, [
+      [btn('📚 Browse Courses', 'nav_courses')],
+    ])
+    return
+  }
+
+  // Parse the LLM response
+  let aiAction: AIAction
+  try {
+    // Strip any accidental markdown code fences
+    const clean = rawJson.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+    aiAction = JSON.parse(clean) as AIAction
+  } catch {
+    console.error('[NL] Failed to parse LLM response:', rawJson)
+    await editMessage(chatId, thinkMsgId, `🤷 I couldn't understand that. Could you be more specific?\n\n<i>Tip: try "go to constitutional law course" or "upload pdf for rajeeb kalita note"</i>`, [
+      [btn('📚 Browse Courses', 'nav_courses')],
+    ])
+    return
+  }
+
+  // Execute the action
+  switch (aiAction.action) {
+
+    case 'navigate_course': {
+      // Delete the thinking message, then show the course screen
+      await editMessage(chatId, thinkMsgId, `📚 Opening course…`)
+      await showCourse(chatId, aiAction.courseId)
+      break
+    }
+
+    case 'navigate_folder': {
+      await editMessage(chatId, thinkMsgId, `📁 Opening folder…`)
+      await showFolder(chatId, aiAction.folderId, aiAction.courseId)
+      break
+    }
+
+    case 'navigate_note': {
+      await editMessage(chatId, thinkMsgId, `📄 Opening note…`)
+      await showNote(chatId, aiAction.itemId)
+      break
+    }
+
+    case 'upload_pdf': {
+      // Set session to awaiting_pdf, then prompt
+      await setSession(chatId, 'awaiting_pdf', { itemId: aiAction.itemId })
+      await editMessage(
+        chatId,
+        thinkMsgId,
+        '📎 <b>Send the PDF file now.</b>\n\nJust send it as a document in this chat. The file will replace any existing judgment for this note.'
+      )
+      break
+    }
+
+    case 'generate_ai': {
+      await editMessage(chatId, thinkMsgId, `🤖 Starting AI generation…`)
+      await handleGenerateAi(chatId, aiAction.itemId)
+      break
+    }
+
+    case 'view_notes': {
+      await editMessage(chatId, thinkMsgId, `📝 Loading notes…`)
+      await handleViewNotes(chatId, aiAction.itemId)
+      break
+    }
+
+    case 'view_quiz': {
+      await editMessage(chatId, thinkMsgId, `❓ Loading quiz…`)
+      await handleViewQuiz(chatId, aiAction.itemId)
+      break
+    }
+
+    case 'view_flashcards': {
+      await editMessage(chatId, thinkMsgId, `🃏 Loading flashcards…`)
+      await handleViewFlashcards(chatId, aiAction.itemId)
+      break
+    }
+
+    case 'create_course': {
+      await setSession(chatId, 'creating_course_name', {})
+      await editMessage(chatId, thinkMsgId, '➕ <b>New Course</b>\n\nEnter the course name:')
+      break
+    }
+
+    case 'create_module': {
+      // Store full UUIDs in session (parentId may be 'root' or a full UUID)
+      await setSession(chatId, 'creating_module_name', {
+        courseId: aiAction.courseId,
+        parentId: aiAction.parentId,
+      })
+      await editMessage(chatId, thinkMsgId, '📁 <b>New Module</b>\n\nEnter the module name:')
+      break
+    }
+
+    case 'create_note': {
+      await setSession(chatId, 'creating_note_title', {
+        courseId: aiAction.courseId,
+        parentId: aiAction.parentId,
+      })
+      await editMessage(chatId, thinkMsgId, '📄 <b>New Note</b>\n\nEnter the note title:')
+      break
+    }
+
+    case 'ambiguous': {
+      // Show disambiguation buttons using sid() to keep callback_data short
+      // Buttons: nav_c:{8}, nav_f:{8}:{8} (need courseId - approximate with nav_i for notes/folders)
+      const matches = (aiAction.matches ?? []).slice(0, 5)
+      const kb = matches.map(m => {
+        let callbackData: string
+        if (m.type === 'course') {
+          // nav_c:{8} = 14 bytes ✓
+          callbackData = `nav_c:${sid(m.id)}`
+        } else {
+          // For folders and notes, we only have the item id — use nav_i which
+          // will route to showNote (notes) or, for folders, we fall back to nav_i
+          // which loads a folder/note generically. The LLM should provide courseId
+          // in navigate_folder but here we have a simplified match object.
+          // nav_i:{8} = 14 bytes ✓
+          callbackData = `nav_i:${sid(m.id)}`
+        }
+        const emoji = m.type === 'course' ? '📚' : m.type === 'folder' ? '📁' : '📄'
+        return [btn(`${emoji} ${m.name}`, callbackData)]
+      })
+      kb.push([btn('📚 Browse All Courses', 'nav_courses')])
+      await editMessage(
+        chatId,
+        thinkMsgId,
+        `🤔 <b>${aiAction.question ?? 'Which one did you mean?'}</b>`,
+        kb
+      )
+      break
+    }
+
+    case 'unknown':
+    default: {
+      const msg = (aiAction as any).message ?? 'I could not understand that request.'
+      await editMessage(
+        chatId,
+        thinkMsgId,
+        `🤷 ${msg}\n\n<i>Tip: try "go to constitutional law course", "upload pdf for rajeeb kalita note", or "create a new module called tort law inside civil law course"</i>`,
+        [
+          [btn('📚 Browse Courses', 'nav_courses')],
+        ]
+      )
+      break
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // WIZARD: TEXT INPUT HANDLER
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -526,10 +807,14 @@ async function handleTextInput(chatId: number, text: string) {
       break
     }
 
+    // ── IDLE: route free text through natural language AI ──────────
+    case 'idle':
     default:
-      await sendMessage(chatId, 'Use the buttons to navigate, or type /start to begin.', [
-        [btn('📚 Browse Courses', 'nav_courses')],
-      ])
+      // When session is idle and the user types free text, interpret it
+      // with the LLM-powered natural language handler instead of showing
+      // a generic "use buttons" message.
+      await handleNaturalLanguage(chatId, text)
+      break
   }
 }
 
