@@ -9,10 +9,15 @@ import {
   getItem, getNoteContent, saveNoteContent, updateItemPdfUrl,
   createCourse, createStructureItem,
   getCourse, updateCoursePrice, toggleCourseActive,
-  getCourseStructure,
+  getCourseStructure, getLatestNoteWithContent, getStats,
   stripTags, truncate, btn, rows, sid, expandId,
   extractPdfText,
 } from '@/lib/telegram'
+
+const ADMIN_NAMES: Record<number, string> = {
+  1243366277: 'Aksh',
+  6256543340: 'Peter',
+}
 
 // Supports comma-separated list: e.g. "1243366277,6256543340"
 const ADMIN_CHAT_IDS = new Set(
@@ -169,6 +174,87 @@ async function showViewMenu(chatId: number, itemId: string, msgId?: number) {
     [btn('← Back', `nav_i:${sid(itemId)}`)],
   ]
   msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// SLASH COMMAND SCREENS
+// ═══════════════════════════════════════════════════════════════════════
+
+async function showHelp(chatId: number) {
+  await sendMessage(
+    chatId,
+    `📖 <b>Gavelogy Bot — Commands</b>\n\n` +
+    `/start — Home screen\n` +
+    `/help — This help message\n` +
+    `/courses — Browse all courses\n` +
+    `/new — Quick create menu\n` +
+    `/newcourse — Create a new course\n` +
+    `/newmodule — Create a module (picks course)\n` +
+    `/newnote — Create a note (picks course)\n` +
+    `/generate — Generate AI (picks course → note)\n` +
+    `/upload — Upload PDF (picks course → note)\n` +
+    `/publish — Publish/hide a course\n` +
+    `/price — Change a course price\n` +
+    `/status — Platform stats\n` +
+    `/me — Your admin info\n\n` +
+    `<i>Or just type naturally — "go to civil law", "upload pdf for rajeeb note"</i>`,
+    [[btn('📚 Browse Courses', 'nav_courses'), btn('➕ New Course', 'new_course')]]
+  )
+}
+
+async function showNewMenu(chatId: number) {
+  await sendMessage(
+    chatId,
+    '➕ <b>What would you like to create?</b>',
+    [
+      [btn('📚 New Course', 'new_course')],
+      [btn('📁 New Module', 'sc_pick:mod'), btn('📄 New Note', 'sc_pick:note')],
+    ]
+  )
+}
+
+async function showStatus(chatId: number) {
+  const stats = await getStats()
+  const pct = stats.notes > 0 ? Math.round((stats.notesWithContent / stats.notes) * 100) : 0
+  await sendMessage(
+    chatId,
+    `📊 <b>Platform Stats</b>\n\n` +
+    `📚 Courses: <b>${stats.courses}</b>\n` +
+    `📁 Modules: <b>${stats.folders}</b>\n` +
+    `📄 Notes: <b>${stats.notes}</b>\n` +
+    `📎 Notes with PDF: <b>${stats.notesWithPdf}</b>\n` +
+    `🤖 Notes with AI content: <b>${stats.notesWithContent}</b> (${pct}%)\n`,
+    [[btn('📚 Browse Courses', 'nav_courses')]]
+  )
+}
+
+async function showMe(chatId: number) {
+  const name = ADMIN_NAMES[chatId] ?? 'Admin'
+  await sendMessage(
+    chatId,
+    `👤 <b>Your Info</b>\n\nName: <b>${name}</b>\nChat ID: <code>${chatId}</code>\nRole: Admin`,
+    [[btn('🏠 Home', 'nav_home')]]
+  )
+}
+
+// ── Pick a course, then show all its notes for generate/upload ─────────
+async function showPickCourseFor(chatId: number, action: 'gen' | 'upload' | 'mod' | 'note') {
+  const courses = await getCourses()
+  if (courses.length === 0) {
+    await sendMessage(chatId, '📚 No courses yet. Create one first!', [[btn('➕ New Course', 'new_course')]])
+    return
+  }
+  const label =
+    action === 'gen' ? '🤖 Generate AI' :
+    action === 'upload' ? '📤 Upload PDF' :
+    action === 'mod' ? '📁 New Module' : '📄 New Note'
+  await sendMessage(
+    chatId,
+    `${label} — <b>Pick a course first:</b>`,
+    [
+      ...rows(courses.map(c => btn(`${c.icon ?? '📚'} ${c.name}`, `sc_pick_c:${action}:${sid(c.id)}`)), 1),
+    ]
+  )
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1041,6 +1127,51 @@ async function handleCallback(chatId: number, callbackId: string, data: string, 
     await editMessage(chatId, msgId, '💰 Enter the new price in ₹ (e.g. <code>3333</code>) or <code>0</code> for free:')
     return
   }
+
+  // nav_home — back to welcome
+  if (data === 'nav_home') { await showWelcome(chatId); return }
+
+  // sc_pick:mod|note|gen|upload — pick a course for slash command flow
+  if (data.startsWith('sc_pick:')) {
+    const action = data.slice(8) as 'gen' | 'upload' | 'mod' | 'note'
+    await showPickCourseFor(chatId, action)
+    return
+  }
+
+  // sc_pick_c:{action}:{shortCourseId} — course chosen, now show items or start wizard
+  if (data.startsWith('sc_pick_c:')) {
+    const parts = data.split(':')
+    const action = parts[1] as 'gen' | 'upload' | 'mod' | 'note'
+    const courseId = await expandId('courses', parts[2])
+    if (action === 'mod') {
+      await setSession(chatId, 'creating_module_name', { courseId, parentId: 'root' })
+      await editMessage(chatId, msgId, '📁 <b>New Module</b>\n\nEnter the module name:')
+    } else if (action === 'note') {
+      await setSession(chatId, 'creating_note_title', { courseId, parentId: 'root' })
+      await editMessage(chatId, msgId, '📄 <b>New Note</b>\n\nEnter the note title:')
+    } else {
+      // gen or upload: show the course so user can pick a note
+      const label = action === 'gen' ? '🤖 Tap a note to Generate AI' : '📤 Tap a note to Upload PDF'
+      await editMessage(chatId, msgId, label)
+      await showCourse(chatId, courseId)
+    }
+    return
+  }
+
+  // sc_pub:{shortCourseId} — publish/unpublish course (from /publish command)
+  if (data.startsWith('sc_pub:')) {
+    const courseId = await expandId('courses', data.slice(7))
+    await showCourseSettings(chatId, courseId, msgId)
+    return
+  }
+
+  // sc_price:{shortCourseId} — edit price (from /price command)
+  if (data.startsWith('sc_price:')) {
+    const courseId = await expandId('courses', data.slice(9))
+    await setSession(chatId, 'editing_course_price', { courseId })
+    await editMessage(chatId, msgId, '💰 Enter the new price in ₹ (e.g. <code>3333</code>) or <code>0</code> for free:')
+    return
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1081,11 +1212,64 @@ export async function POST(req: NextRequest) {
 
       // Commands
       if (text.startsWith('/')) {
-        const cmd = text.split(' ')[0].toLowerCase()
+        const cmd = text.split(' ')[0].toLowerCase().split('@')[0] // strip @botname suffix
         await clearSession(chatId)
-        if (cmd === '/start' || cmd === '/help') { await showWelcome(chatId); return NextResponse.json({ ok: true }) }
-        if (cmd === '/courses') { await showCourses(chatId); return NextResponse.json({ ok: true }) }
-        await showWelcome(chatId)
+        switch (cmd) {
+          case '/start':
+            await showWelcome(chatId); break
+          case '/help':
+            await showHelp(chatId); break
+          case '/courses':
+            await showCourses(chatId); break
+          case '/new':
+            await showNewMenu(chatId); break
+          case '/newcourse':
+            await setSession(chatId, 'creating_course_name', {})
+            await sendMessage(chatId, '➕ <b>New Course</b>\n\nEnter the course name:')
+            break
+          case '/newmodule':
+            await showPickCourseFor(chatId, 'mod'); break
+          case '/newnote':
+            await showPickCourseFor(chatId, 'note'); break
+          case '/generate':
+            await showPickCourseFor(chatId, 'gen'); break
+          case '/upload':
+            await showPickCourseFor(chatId, 'upload'); break
+          case '/publish': {
+            // Show list of courses to pick which to publish/hide
+            const courses = await getCourses()
+            if (courses.length === 0) {
+              await sendMessage(chatId, '📚 No courses yet.')
+            } else {
+              await sendMessage(
+                chatId,
+                '📢 <b>Publish / Hide — Pick a course:</b>',
+                rows(courses.map(c => btn(`${c.icon ?? '📚'} ${c.name}`, `sc_pub:${sid(c.id)}`)), 1)
+              )
+            }
+            break
+          }
+          case '/price': {
+            // Show list of courses to pick which to edit price
+            const courses = await getCourses()
+            if (courses.length === 0) {
+              await sendMessage(chatId, '📚 No courses yet.')
+            } else {
+              await sendMessage(
+                chatId,
+                '💰 <b>Change Price — Pick a course:</b>',
+                rows(courses.map(c => btn(`${c.icon ?? '📚'} ${c.name}`, `sc_price:${sid(c.id)}`)), 1)
+              )
+            }
+            break
+          }
+          case '/status':
+            await showStatus(chatId); break
+          case '/me':
+            await showMe(chatId); break
+          default:
+            await showHelp(chatId); break
+        }
         return NextResponse.json({ ok: true })
       }
 

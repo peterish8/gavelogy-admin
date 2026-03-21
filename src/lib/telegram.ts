@@ -395,6 +395,47 @@ export async function getCourseStructure(): Promise<CourseStructureCourse[]> {
   }))
 }
 
+// ── Latest note that has AI-generated content ─────────────────────────
+export async function getLatestNoteWithContent(): Promise<{
+  id: string; title: string; course_id: string; parent_id: string | null
+} | null> {
+  const sb = getServiceSupabase()
+  // Get all item_ids that have note content, ordered by update time
+  const { data: contents } = await sb
+    .from('note_contents')
+    .select('item_id, updated_at')
+    .order('updated_at', { ascending: false })
+    .limit(1)
+  if (!contents?.length) return null
+  const { data } = await sb
+    .from('structure_items')
+    .select('id, title, course_id, parent_id')
+    .eq('id', contents[0].item_id)
+    .single()
+  return data ?? null
+}
+
+// ── Count stats for /status ────────────────────────────────────────────
+export async function getStats(): Promise<{
+  courses: number; folders: number; notes: number; notesWithContent: number; notesWithPdf: number
+}> {
+  const sb = getServiceSupabase()
+  const [{ count: courses }, { count: folders }, { count: notes }, { count: notesWithContent }, { count: notesWithPdf }] = await Promise.all([
+    sb.from('courses').select('*', { count: 'exact', head: true }),
+    sb.from('structure_items').select('*', { count: 'exact', head: true }).eq('item_type', 'folder'),
+    sb.from('structure_items').select('*', { count: 'exact', head: true }).eq('item_type', 'file'),
+    sb.from('note_contents').select('*', { count: 'exact', head: true }),
+    sb.from('structure_items').select('*', { count: 'exact', head: true }).eq('item_type', 'file').not('pdf_url', 'is', null),
+  ])
+  return {
+    courses: courses ?? 0,
+    folders: folders ?? 0,
+    notes: notes ?? 0,
+    notesWithContent: notesWithContent ?? 0,
+    notesWithPdf: notesWithPdf ?? 0,
+  }
+}
+
 // ── Strip custom tags from notes HTML for plain-text display ──────────
 export function stripTags(html: string): string {
   return html
