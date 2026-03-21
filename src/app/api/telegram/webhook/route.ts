@@ -998,6 +998,15 @@ async function handleTextInput(chatId: number, text: string) {
 
 async function handleCallback(chatId: number, callbackId: string, data: string, msgId: number) {
   await answerCallback(callbackId)
+  try {
+    await handleCallbackInner(chatId, data, msgId)
+  } catch (e: any) {
+    console.error('[callback] Error:', data, e)
+    await sendMessage(chatId, `❌ Error: ${e.message}\n\n<code>${data}</code>`, [[btn('🏠 Home', 'nav_home')]])
+  }
+}
+
+async function handleCallbackInner(chatId: number, data: string, msgId: number) {
 
   // nav_courses
   if (data === 'nav_courses') { await showCourses(chatId, msgId); return }
@@ -1187,8 +1196,10 @@ export async function POST(req: NextRequest) {
       const cq = body.callback_query
       const chatId: number = cq.message?.chat?.id
       if (!isAdmin(chatId)) return NextResponse.json({ ok: true })
-      await handleCallback(chatId, cq.id, cq.data ?? '', cq.message?.message_id)
-      return NextResponse.json({ ok: true })
+      // Return immediately so Telegram doesn't retry; process in background
+      const res = NextResponse.json({ ok: true })
+      handleCallback(chatId, cq.id, cq.data ?? '', cq.message?.message_id).catch(console.error)
+      return res
     }
 
     // ── Regular message ───────────────────────────────────────────
@@ -1200,81 +1211,66 @@ export async function POST(req: NextRequest) {
       // PDF document upload
       if (msg.document) {
         const doc = msg.document
+        const res = NextResponse.json({ ok: true })
         if (doc.mime_type === 'application/pdf') {
-          await handlePdfUpload(chatId, doc.file_id, doc.file_name ?? 'judgment.pdf')
+          handlePdfUpload(chatId, doc.file_id, doc.file_name ?? 'judgment.pdf').catch(console.error)
         } else {
-          await sendMessage(chatId, '⚠️ Please send a PDF file only.')
+          sendMessage(chatId, '⚠️ Please send a PDF file only.').catch(console.error)
         }
-        return NextResponse.json({ ok: true })
+        return res
       }
 
       const text: string = msg.text ?? ''
 
-      // Commands
+      // Commands — fire and forget so Telegram doesn't retry on slow commands
       if (text.startsWith('/')) {
-        const cmd = text.split(' ')[0].toLowerCase().split('@')[0] // strip @botname suffix
-        await clearSession(chatId)
-        switch (cmd) {
-          case '/start':
-            await showWelcome(chatId); break
-          case '/help':
-            await showHelp(chatId); break
-          case '/courses':
-            await showCourses(chatId); break
-          case '/new':
-            await showNewMenu(chatId); break
-          case '/newcourse':
-            await setSession(chatId, 'creating_course_name', {})
-            await sendMessage(chatId, '➕ <b>New Course</b>\n\nEnter the course name:')
-            break
-          case '/newmodule':
-            await showPickCourseFor(chatId, 'mod'); break
-          case '/newnote':
-            await showPickCourseFor(chatId, 'note'); break
-          case '/generate':
-            await showPickCourseFor(chatId, 'gen'); break
-          case '/upload':
-            await showPickCourseFor(chatId, 'upload'); break
-          case '/publish': {
-            // Show list of courses to pick which to publish/hide
-            const courses = await getCourses()
-            if (courses.length === 0) {
-              await sendMessage(chatId, '📚 No courses yet.')
-            } else {
-              await sendMessage(
-                chatId,
-                '📢 <b>Publish / Hide — Pick a course:</b>',
-                rows(courses.map(c => btn(`${c.icon ?? '📚'} ${c.name}`, `sc_pub:${sid(c.id)}`)), 1)
-              )
+        const cmd = text.split(' ')[0].toLowerCase().split('@')[0]
+        ;(async () => {
+          await clearSession(chatId)
+          switch (cmd) {
+            case '/start':    await showWelcome(chatId); break
+            case '/help':     await showHelp(chatId); break
+            case '/courses':  await showCourses(chatId); break
+            case '/new':      await showNewMenu(chatId); break
+            case '/newcourse':
+              await setSession(chatId, 'creating_course_name', {})
+              await sendMessage(chatId, '➕ <b>New Course</b>\n\nEnter the course name:')
+              break
+            case '/newmodule': await showPickCourseFor(chatId, 'mod'); break
+            case '/newnote':   await showPickCourseFor(chatId, 'note'); break
+            case '/generate':  await showPickCourseFor(chatId, 'gen'); break
+            case '/upload':    await showPickCourseFor(chatId, 'upload'); break
+            case '/publish': {
+              const courses = await getCourses()
+              if (courses.length === 0) {
+                await sendMessage(chatId, '📚 No courses yet.')
+              } else {
+                await sendMessage(chatId, '📢 <b>Publish / Hide — Pick a course:</b>',
+                  rows(courses.map(c => btn(`${c.icon ?? '📚'} ${c.name}`, `sc_pub:${sid(c.id)}`)), 1))
+              }
+              break
             }
-            break
-          }
-          case '/price': {
-            // Show list of courses to pick which to edit price
-            const courses = await getCourses()
-            if (courses.length === 0) {
-              await sendMessage(chatId, '📚 No courses yet.')
-            } else {
-              await sendMessage(
-                chatId,
-                '💰 <b>Change Price — Pick a course:</b>',
-                rows(courses.map(c => btn(`${c.icon ?? '📚'} ${c.name}`, `sc_price:${sid(c.id)}`)), 1)
-              )
+            case '/price': {
+              const courses = await getCourses()
+              if (courses.length === 0) {
+                await sendMessage(chatId, '📚 No courses yet.')
+              } else {
+                await sendMessage(chatId, '💰 <b>Change Price — Pick a course:</b>',
+                  rows(courses.map(c => btn(`${c.icon ?? '📚'} ${c.name}`, `sc_price:${sid(c.id)}`)), 1))
+              }
+              break
             }
-            break
+            case '/status': await showStatus(chatId); break
+            case '/me':     await showMe(chatId); break
+            default:        await showHelp(chatId); break
           }
-          case '/status':
-            await showStatus(chatId); break
-          case '/me':
-            await showMe(chatId); break
-          default:
-            await showHelp(chatId); break
-        }
+        })().catch(console.error)
         return NextResponse.json({ ok: true })
       }
 
-      // Free text — feed to active wizard
-      await handleTextInput(chatId, text)
+      // Free text — fire and forget so Telegram doesn't retry
+      handleTextInput(chatId, text).catch(console.error)
+      return NextResponse.json({ ok: true })
     }
 
     return NextResponse.json({ ok: true })
