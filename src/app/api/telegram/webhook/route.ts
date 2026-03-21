@@ -280,7 +280,7 @@ async function handleGenerateAi(chatId: number, itemId: string) {
   if (!item) { await sendMessage(chatId, '❌ Note not found.'); return }
   if (!item.pdf_url) {
     await sendMessage(chatId, '❌ No PDF attached. Upload a PDF first (Tag Mode).', [
-      [btn('← Back to Note', `nav_i:${sid(itemId)}`)],
+      [btn('← Back to Note', `nav_i:${itemId}`)],
     ])
     return
   }
@@ -309,7 +309,7 @@ async function handleGenerateAi(chatId: number, itemId: string) {
   } catch (e: any) {
     log[log.length - 1] = `📥 PDF fetch ❌ — ${e.message}`
     await update()
-    await sendMessage(chatId, '❌ Could not fetch PDF. Please try again.', [[btn('← Back', `nav_i:${sid(itemId)}`)]])
+    await sendMessage(chatId, '❌ Could not fetch PDF. Please try again.', [[btn('← Back', `nav_i:${itemId}`)]])
     return
   }
 
@@ -326,7 +326,7 @@ async function handleGenerateAi(chatId: number, itemId: string) {
   } catch (e: any) {
     log[log.length - 1] = `📄 Text extraction ❌ — ${e.message}`
     await update()
-    await sendMessage(chatId, '❌ PDF may be scanned/image-based. Cannot extract text.', [[btn('← Back', `nav_i:${sid(itemId)}`)]])
+    await sendMessage(chatId, '❌ PDF may be scanned/image-based. Cannot extract text.', [[btn('← Back', `nav_i:${itemId}`)]])
     return
   }
 
@@ -354,7 +354,7 @@ async function handleGenerateAi(chatId: number, itemId: string) {
     const failLine = formatProviderError('📝 <b>Notes</b>', e.message)
     log[log.length - 1] = failLine
     await update()
-    await sendMessage(chatId, '❌ Notes generation failed. Cannot continue.', [[btn('← Back', `nav_i:${sid(itemId)}`)]])
+    await sendMessage(chatId, '❌ Notes generation failed. Cannot continue.', [[btn('← Back', `nav_i:${itemId}`)]])
     return
   }
 
@@ -401,7 +401,7 @@ async function handleGenerateAi(chatId: number, itemId: string) {
   // ── DONE ───────────────────────────────────────────────────────────
   log.push('\n✅ <b>All done!</b>')
   await editMessage(chatId, msgId, log.join('\n'), [
-    [btn('👁️ View Notes', `view_n:${sid(itemId)}`), btn('← Back to Note', `nav_i:${sid(itemId)}`)],
+    [btn('👁️ View Notes', `view_n:${sid(itemId)}`), btn('← Back to Note', `nav_i:${itemId}`)],
   ])
 }
 
