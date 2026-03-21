@@ -998,6 +998,15 @@ async function handleTextInput(chatId: number, text: string) {
 
 async function handleCallback(chatId: number, callbackId: string, data: string, msgId: number) {
   await answerCallback(callbackId)
+  try {
+    await handleCallbackInner(chatId, data, msgId)
+  } catch (e: any) {
+    console.error('[callback] Error:', data, e)
+    await sendMessage(chatId, `❌ Error: ${e.message}\n\n<code>${data}</code>`, [[btn('🏠 Home', 'nav_home')]])
+  }
+}
+
+async function handleCallbackInner(chatId: number, data: string, msgId: number) {
 
   // nav_courses
   if (data === 'nav_courses') { await showCourses(chatId, msgId); return }
