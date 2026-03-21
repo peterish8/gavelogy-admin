@@ -129,18 +129,30 @@ async function showNote(chatId: number, itemId: string, msgId?: number) {
   if (!item) { await sendMessage(chatId, '❌ Note not found.'); return }
 
   const hasPdf = !!item.pdf_url
-  const text = `📄 <b>${item.title}</b>\n\n${hasPdf ? '✅ Judgment PDF attached' : '⚠️ No judgment PDF yet'}`
+  const backBtn = btn('← Back', item.parent_id ? `nav_f:${sid(item.parent_id)}:${sid(item.course_id)}` : `nav_c:${sid(item.course_id)}`)
 
-  const kb: ReturnType<typeof btn>[][] = [
-    // act_upload:{8}   = 11 + 8 = 19 bytes ✓
-    [btn(hasPdf ? '🔄 Replace PDF' : '📄 Upload PDF', `act_upload:${sid(itemId)}`)],
-    // act_ai:{8}       = 7  + 8 = 15 bytes ✓
-    [btn('🤖 Generate AI (Notes+Quiz+Flashcards)', `act_ai:${sid(itemId)}`)],
-    // view_menu:{8}    = 10 + 8 = 18 bytes ✓
-    [btn('👁️ View Content', `view_menu:${sid(itemId)}`)],
-    // nav_f:{8}:{8} = 23 bytes ✓  or  nav_c:{8} = 14 bytes ✓
-    [btn('← Back', item.parent_id ? `nav_f:${sid(item.parent_id)}:${sid(item.course_id)}` : `nav_c:${sid(item.course_id)}`)],
-  ]
+  let text: string
+  let kb: ReturnType<typeof btn>[][]
+
+  if (hasPdf) {
+    // ── TAG MODE ── PDF attached, AI generation available
+    text = `📄 <b>${item.title}</b>\n\n🏷️ <b>Tag Mode</b> — Judgment PDF attached\n\nYou can generate AI notes, quiz and flashcards from the PDF.`
+    kb = [
+      [btn('🔄 Replace PDF', `act_upload:${sid(itemId)}`)],
+      [btn('🤖 Generate AI (Notes + Quiz + Flashcards)', `act_ai:${sid(itemId)}`)],
+      [btn('👁️ View Content', `view_menu:${sid(itemId)}`)],
+      [btn('📝 Switch to Notes Mode', `mode_notes:${sid(itemId)}`), backBtn],
+    ]
+  } else {
+    // ── NOTES MODE ── No PDF, text content only
+    text = `📄 <b>${item.title}</b>\n\n📝 <b>Notes Mode</b> — No judgment PDF\n\nUpload a PDF to switch to Tag Mode and enable AI generation.`
+    kb = [
+      [btn('📤 Upload PDF → switches to Tag Mode', `act_upload:${sid(itemId)}`)],
+      [btn('👁️ View Notes', `view_n:${sid(itemId)}`)],
+      [backBtn],
+    ]
+  }
+
   msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
 }
 
@@ -167,113 +179,127 @@ async function handleGenerateAi(chatId: number, itemId: string) {
   const item = await getItem(itemId)
   if (!item) { await sendMessage(chatId, '❌ Note not found.'); return }
   if (!item.pdf_url) {
-    await sendMessage(chatId, '❌ No judgment PDF attached to this note.\nUpload a PDF first, then try again.', [
-      // nav_i:{8} = 14 bytes ✓
+    await sendMessage(chatId, '❌ No PDF attached. Upload a PDF first (Tag Mode).', [
       [btn('← Back to Note', `nav_i:${sid(itemId)}`)],
     ])
     return
   }
 
-  const progressMsg = await sendMessage(chatId, `⏳ Fetching PDF for <b>${item.title}</b>…`)
-  const progressMsgId = progressMsg?.result?.message_id
+  // Live progress log — each line is appended and message is edited in real time
+  const log: string[] = [`🤖 <b>AI Generation — ${item.title}</b>\n`]
+  const progressMsg = await sendMessage(chatId, log.join('\n'))
+  const msgId = progressMsg?.result?.message_id
+  const update = async () => { if (msgId) await editMessage(chatId, msgId, log.join('\n')) }
 
-  // 1. Get signed URL and download PDF
+  const elapsed = (start: number) => `${Math.round((Date.now() - start) / 1000)}s`
+
+  // ── STEP 1: Fetch PDF ──────────────────────────────────────────────
+  log.push('📥 Fetching PDF from storage…')
+  await update()
   let pdfBuffer: Buffer
   try {
+    const t = Date.now()
     const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: item.pdf_url })
     const signedUrl = await getSignedUrl(b2Client, cmd, { expiresIn: 300 })
     const res = await fetch(signedUrl)
-    if (!res.ok) throw new Error(`Failed to download PDF: ${res.status}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     pdfBuffer = Buffer.from(await res.arrayBuffer())
+    log[log.length - 1] = `📥 PDF fetched ✅ · ${elapsed(t)}`
+    await update()
   } catch (e: any) {
-    await editMessage(chatId, progressMsgId, `❌ Could not fetch PDF: ${e.message}\n\nPlease generate from the admin panel instead.`, [
-      [btn('← Back', `nav_i:${sid(itemId)}`)],
-    ])
+    log[log.length - 1] = `📥 PDF fetch ❌ — ${e.message}`
+    await update()
+    await sendMessage(chatId, '❌ Could not fetch PDF. Please try again.', [[btn('← Back', `nav_i:${sid(itemId)}`)]])
     return
   }
 
-  // 2. Extract text with pdf-parse (Vercel-safe via extractPdfText helper)
+  // ── STEP 2: Extract text ───────────────────────────────────────────
+  log.push('📄 Extracting text from PDF…')
+  await update()
   let pdfText: string
   try {
-    if (progressMsgId) await editMessage(chatId, progressMsgId, '📄 Extracting PDF text…')
+    const t = Date.now()
     pdfText = await extractPdfText(pdfBuffer)
+    const words = pdfText.split(/\s+/).length
+    log[log.length - 1] = `📄 Text extracted ✅ · ${words.toLocaleString()} words · ${elapsed(t)}`
+    await update()
   } catch (e: any) {
-    await editMessage(chatId, progressMsgId, `❌ Could not extract PDF text: ${e.message}\n\nThe PDF may be scanned/image-based. Please generate from the admin panel.`, [
-      [btn('← Back', `nav_i:${sid(itemId)}`)],
-    ])
+    log[log.length - 1] = `📄 Text extraction ❌ — ${e.message}`
+    await update()
+    await sendMessage(chatId, '❌ PDF may be scanned/image-based. Cannot extract text.', [[btn('← Back', `nav_i:${sid(itemId)}`)]])
     return
   }
 
   const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
+  log.push('')
+  await update()
 
-  // 3. Generate Notes
-  if (progressMsgId) await editMessage(chatId, progressMsgId, '📝 Generating notes… (this may take 15–30s)')
+  // ── STEP 3: Notes ──────────────────────────────────────────────────
+  log.push('📝 <b>Notes</b> — generating…')
+  await update()
   let notesText = ''
-  let notesProvider = 'unknown'
   try {
+    const t = Date.now()
     const res = await fetch(`${baseUrl}/api/ai-summarize`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pdfText }),
     })
     const data = await res.json()
-    if (!res.ok || data.error) throw new Error(data.error || 'Notes generation failed')
+    if (!res.ok || data.error) throw new Error(data.error || 'failed')
     await saveNoteContent(itemId, data.formatted)
     notesText = stripTags(data.formatted)
-    notesProvider = data.provider ?? 'unknown'
+    log[log.length - 1] = `📝 <b>Notes</b> ✅ · <code>${data.provider ?? 'unknown'}</code> · ${elapsed(t)}`
+    await update()
   } catch (e: any) {
-    await editMessage(chatId, progressMsgId, `❌ Notes generation failed: ${e.message}`, [
-      [btn('← Back', `nav_i:${sid(itemId)}`)],
-    ])
+    log[log.length - 1] = `📝 <b>Notes</b> ❌ — ${e.message}`
+    await update()
+    await sendMessage(chatId, '❌ Notes generation failed. Cannot continue.', [[btn('← Back', `nav_i:${sid(itemId)}`)]])
     return
   }
 
-  // 4. Generate Quiz
-  if (progressMsgId) await editMessage(chatId, progressMsgId, '❓ Generating quiz…')
+  // ── STEP 4: Quiz ───────────────────────────────────────────────────
+  log.push('❓ <b>Quiz</b> — generating…')
+  await update()
   let quizCount = 0
-  let quizProvider = 'unknown'
   try {
+    const t = Date.now()
     const res = await fetch(`${baseUrl}/api/ai-quiz`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ notesText }),
     })
     const data = await res.json()
-    if (res.ok && data.quiz) {
-      const matches = data.quiz.match(/^Q\d+\./gm)
-      quizCount = matches?.length ?? 10
-      quizProvider = data.provider ?? 'unknown'
-    }
-  } catch { /* non-fatal */ }
+    if (!res.ok || data.error) throw new Error(data.error || 'failed')
+    quizCount = (data.quiz as string).match(/^Q\d+\./gm)?.length ?? 10
+    log[log.length - 1] = `❓ <b>Quiz</b> ✅ · ${quizCount} questions · <code>${data.provider ?? 'unknown'}</code> · ${elapsed(t)}`
+    await update()
+  } catch (e: any) {
+    log[log.length - 1] = `❓ <b>Quiz</b> ❌ — ${e.message} (non-fatal)`
+    await update()
+  }
 
-  // 5. Generate Flashcards
-  if (progressMsgId) await editMessage(chatId, progressMsgId, '🃏 Generating flashcards…')
+  // ── STEP 5: Flashcards ─────────────────────────────────────────────
+  log.push('🃏 <b>Flashcards</b> — generating…')
+  await update()
   let cardCount = 0
-  let flashProvider = 'unknown'
   try {
+    const t = Date.now()
     const res = await fetch(`${baseUrl}/api/ai-flashcards`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ notesText }),
     })
     const data = await res.json()
-    if (res.ok && data.flashcards) {
-      cardCount = data.flashcards.length
-      flashProvider = data.provider ?? 'unknown'
-    }
-  } catch { /* non-fatal */ }
+    if (!res.ok || data.error) throw new Error(data.error || 'failed')
+    cardCount = (data.flashcards ?? []).length
+    log[log.length - 1] = `🃏 <b>Flashcards</b> ✅ · ${cardCount} cards · <code>${data.provider ?? 'unknown'}</code> · ${elapsed(t)}`
+    await update()
+  } catch (e: any) {
+    log[log.length - 1] = `🃏 <b>Flashcards</b> ❌ — ${e.message} (non-fatal)`
+    await update()
+  }
 
-  // 6. Done
-  const summary = [
-    `✅ <b>AI Generation Complete</b> — <i>${item.title}</i>`,
-    '',
-    `📝 <b>Notes</b> saved  •  Model: <code>${notesProvider}</code>`,
-    `❓ <b>Quiz</b>: ${quizCount} questions  •  Model: <code>${quizProvider}</code>`,
-    `🃏 <b>Flashcards</b>: ${cardCount} cards  •  Model: <code>${flashProvider}</code>`,
-  ].join('\n')
-
-  await editMessage(chatId, progressMsgId, summary, [
-    // view_n:{8} = 15 bytes ✓   nav_i:{8} = 14 bytes ✓
+  // ── DONE ───────────────────────────────────────────────────────────
+  log.push('\n✅ <b>All done!</b>')
+  await editMessage(chatId, msgId, log.join('\n'), [
     [btn('👁️ View Notes', `view_n:${sid(itemId)}`), btn('← Back to Note', `nav_i:${sid(itemId)}`)],
   ])
 }
@@ -985,6 +1011,12 @@ async function handleCallback(chatId: number, callbackId: string, data: string, 
   if (data.startsWith('view_f:')) {
     const itemId = await expandId('structure_items', data.slice(7))
     await handleViewFlashcards(chatId, itemId); return
+  }
+
+  // mode_notes:{shortItemId} — switch to notes mode view (just re-shows note, mode is auto from pdf_url)
+  if (data.startsWith('mode_notes:')) {
+    const itemId = await expandId('structure_items', data.slice(11))
+    await showNote(chatId, itemId, msgId); return
   }
 
   // course_set:{shortCourseId} — open course settings
