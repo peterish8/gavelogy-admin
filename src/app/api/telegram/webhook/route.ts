@@ -9,6 +9,7 @@ import {
   getItem, getNoteContent, saveNoteContent, updateItemPdfUrl,
   createCourse, createStructureItem,
   stripTags, truncate, btn, rows, sid, expandId,
+  extractPdfText,
 } from '@/lib/telegram'
 
 // Supports comma-separated list: e.g. "1243366277,6256543340"
@@ -54,6 +55,7 @@ async function showCourses(chatId: number, msgId?: number) {
   }
   const text = '📚 <b>Select a Course</b>'
   const kb: ReturnType<typeof btn>[][] = [
+    // nav_c:{8} = 6 + 8 = 14 bytes ✓
     ...rows(courses.map(c => btn(`${c.icon ?? '📚'} ${c.name}`, `nav_c:${sid(c.id)}`)), 1),
     [btn('➕ New Course', 'new_course')],
   ]
@@ -71,9 +73,13 @@ async function showCourse(chatId: number, courseId: string, msgId?: number) {
     : `📁 <b>Modules</b> (${folders.length} folders, ${files.length} notes)`
 
   const kb: ReturnType<typeof btn>[][] = [
+    // nav_f:{8}:{8} = 6 + 8 + 1 + 8 = 23 bytes ✓
+    // nav_i:{8}     = 6 + 8         = 14 bytes ✓
     ...rows(all.map(i => btn(`${itemEmoji(i.item_type)} ${i.title}`,
       i.item_type === 'folder' ? `nav_f:${sid(i.id)}:${sid(courseId)}` : `nav_i:${sid(i.id)}`
     )), 1),
+    // new_mod:{8}:root = 8 + 8 + 1 + 4 = 21 bytes ✓
+    // new_note:{8}:root= 9 + 8 + 1 + 4 = 22 bytes ✓
     [btn('📁 New Module', `new_mod:${sid(courseId)}:root`), btn('📄 New Note', `new_note:${sid(courseId)}:root`)],
     [btn('← Back to Courses', 'nav_courses')],
   ]
@@ -91,10 +97,15 @@ async function showFolder(chatId: number, folderId: string, courseId: string, ms
     : `📁 <b>Contents</b> (${folders.length} folders, ${files.length} notes)`
 
   const kb: ReturnType<typeof btn>[][] = [
+    // nav_f:{8}:{8}  = 23 bytes ✓
+    // nav_i:{8}      = 14 bytes ✓
     ...rows(all.map(i => btn(`${itemEmoji(i.item_type)} ${i.title}`,
       i.item_type === 'folder' ? `nav_f:${sid(i.id)}:${sid(courseId)}` : `nav_i:${sid(i.id)}`
     )), 1),
+    // new_mod:{8}:{8}  = 8 + 8 + 1 + 8 = 25 bytes ✓
+    // new_note:{8}:{8} = 9 + 8 + 1 + 8 = 26 bytes ✓
     [btn('📁 New Module', `new_mod:${sid(courseId)}:${sid(folderId)}`), btn('📄 New Note', `new_note:${sid(courseId)}:${sid(folderId)}`)],
+    // nav_c:{8} = 14 bytes ✓
     [btn('← Back', `nav_c:${sid(courseId)}`)],
   ]
   msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
@@ -108,9 +119,13 @@ async function showNote(chatId: number, itemId: string, msgId?: number) {
   const text = `📄 <b>${item.title}</b>\n\n${hasPdf ? '✅ Judgment PDF attached' : '⚠️ No judgment PDF yet'}`
 
   const kb: ReturnType<typeof btn>[][] = [
+    // act_upload:{8}   = 11 + 8 = 19 bytes ✓
     [btn(hasPdf ? '🔄 Replace PDF' : '📄 Upload PDF', `act_upload:${sid(itemId)}`)],
+    // act_ai:{8}       = 7  + 8 = 15 bytes ✓
     [btn('🤖 Generate AI (Notes+Quiz+Flashcards)', `act_ai:${sid(itemId)}`)],
+    // view_menu:{8}    = 10 + 8 = 18 bytes ✓
     [btn('👁️ View Content', `view_menu:${sid(itemId)}`)],
+    // nav_f:{8}:{8} = 23 bytes ✓  or  nav_c:{8} = 14 bytes ✓
     [btn('← Back', item.parent_id ? `nav_f:${sid(item.parent_id)}:${sid(item.course_id)}` : `nav_c:${sid(item.course_id)}`)],
   ]
   msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
@@ -119,9 +134,13 @@ async function showNote(chatId: number, itemId: string, msgId?: number) {
 async function showViewMenu(chatId: number, itemId: string, msgId?: number) {
   const text = '👁️ <b>What would you like to view?</b>'
   const kb = [
+    // view_n:{8} = 7 + 8 = 15 bytes ✓
     [btn('📝 Notes', `view_n:${sid(itemId)}`)],
+    // view_q:{8} = 7 + 8 = 15 bytes ✓
     [btn('❓ Quiz (generate on demand)', `view_q:${sid(itemId)}`)],
+    // view_f:{8} = 7 + 8 = 15 bytes ✓
     [btn('🃏 Flashcards (generate on demand)', `view_f:${sid(itemId)}`)],
+    // nav_i:{8}  = 6 + 8 = 14 bytes ✓
     [btn('← Back', `nav_i:${sid(itemId)}`)],
   ]
   msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
@@ -136,7 +155,8 @@ async function handleGenerateAi(chatId: number, itemId: string) {
   if (!item) { await sendMessage(chatId, '❌ Note not found.'); return }
   if (!item.pdf_url) {
     await sendMessage(chatId, '❌ No judgment PDF attached to this note.\nUpload a PDF first, then try again.', [
-      [btn('← Back to Note', `nav_i:${itemId}`)],
+      // nav_i:{8} = 14 bytes ✓
+      [btn('← Back to Note', `nav_i:${sid(itemId)}`)],
     ])
     return
   }
@@ -154,22 +174,19 @@ async function handleGenerateAi(chatId: number, itemId: string) {
     pdfBuffer = Buffer.from(await res.arrayBuffer())
   } catch (e: any) {
     await editMessage(chatId, progressMsgId, `❌ Could not fetch PDF: ${e.message}\n\nPlease generate from the admin panel instead.`, [
-      [btn('← Back', `nav_i:${itemId}`)],
+      [btn('← Back', `nav_i:${sid(itemId)}`)],
     ])
     return
   }
 
-  // 2. Extract text with pdf-parse
+  // 2. Extract text with pdf-parse (Vercel-safe via extractPdfText helper)
   let pdfText: string
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string }>
-    const parsed = await pdfParse(pdfBuffer)
-    pdfText = parsed.text
-    if (!pdfText?.trim()) throw new Error('No text extracted from PDF')
+    if (progressMsgId) await editMessage(chatId, progressMsgId, '📄 Extracting PDF text…')
+    pdfText = await extractPdfText(pdfBuffer)
   } catch (e: any) {
     await editMessage(chatId, progressMsgId, `❌ Could not extract PDF text: ${e.message}\n\nThe PDF may be scanned/image-based. Please generate from the admin panel.`, [
-      [btn('← Back', `nav_i:${itemId}`)],
+      [btn('← Back', `nav_i:${sid(itemId)}`)],
     ])
     return
   }
@@ -193,7 +210,7 @@ async function handleGenerateAi(chatId: number, itemId: string) {
     notesProvider = data.provider ?? 'unknown'
   } catch (e: any) {
     await editMessage(chatId, progressMsgId, `❌ Notes generation failed: ${e.message}`, [
-      [btn('← Back', `nav_i:${itemId}`)],
+      [btn('← Back', `nav_i:${sid(itemId)}`)],
     ])
     return
   }
@@ -243,6 +260,7 @@ async function handleGenerateAi(chatId: number, itemId: string) {
   ].join('\n')
 
   await editMessage(chatId, progressMsgId, summary, [
+    // view_n:{8} = 15 bytes ✓   nav_i:{8} = 14 bytes ✓
     [btn('👁️ View Notes', `view_n:${sid(itemId)}`), btn('← Back to Note', `nav_i:${sid(itemId)}`)],
   ])
 }
@@ -256,13 +274,16 @@ async function handleViewNotes(chatId: number, itemId: string) {
   const html = await getNoteContent(itemId)
   if (!html) {
     await sendMessage(chatId, '📝 No notes found for this item. Generate AI notes first.', [
-      [btn('🤖 Generate AI', `act_ai:${itemId}`), btn('← Back', `view_menu:${itemId}`)],
+      // act_ai:{8}     = 15 bytes ✓
+      // view_menu:{8}  = 18 bytes ✓
+      [btn('🤖 Generate AI', `act_ai:${sid(itemId)}`), btn('← Back', `view_menu:${sid(itemId)}`)],
     ])
     return
   }
   const plain = stripTags(html)
   await sendMessage(chatId, `📝 <b>${item?.title ?? 'Notes'}</b>\n\n${truncate(plain)}`, [
-    [btn('← Back', `view_menu:${itemId}`)],
+    // view_menu:{8} = 18 bytes ✓
+    [btn('← Back', `view_menu:${sid(itemId)}`)],
   ])
 }
 
@@ -271,7 +292,8 @@ async function handleViewQuiz(chatId: number, itemId: string) {
   const html = await getNoteContent(itemId)
   if (!html) {
     await sendMessage(chatId, '❌ No notes found. Generate AI notes first.', [
-      [btn('🤖 Generate AI', `act_ai:${itemId}`)],
+      // act_ai:{8} = 15 bytes ✓
+      [btn('🤖 Generate AI', `act_ai:${sid(itemId)}`)],
     ])
     return
   }
@@ -297,14 +319,19 @@ async function handleViewQuiz(chatId: number, itemId: string) {
     await editMessage(chatId, genMsgId, `❓ <b>Quiz</b> (${item?.title ?? ''})\n<code>Model: ${data.provider}</code>\n\n${truncate(questions.slice(0, half).join('\n'))}`)
     if (questions.length > half) {
       await sendMessage(chatId, truncate(questions.slice(half).join('\n')), [
-        [btn('← Back', `view_menu:${itemId}`)],
+        // view_menu:{8} = 18 bytes ✓
+        [btn('← Back', `view_menu:${sid(itemId)}`)],
       ])
     } else {
-      await sendMessage(chatId, '— end of quiz —', [[btn('← Back', `view_menu:${itemId}`)]])
+      await sendMessage(chatId, '— end of quiz —', [
+        // view_menu:{8} = 18 bytes ✓
+        [btn('← Back', `view_menu:${sid(itemId)}`)],
+      ])
     }
   } catch (e: any) {
     await editMessage(chatId, genMsgId, `❌ Quiz generation failed: ${e.message}`, [
-      [btn('← Back', `view_menu:${itemId}`)],
+      // view_menu:{8} = 18 bytes ✓
+      [btn('← Back', `view_menu:${sid(itemId)}`)],
     ])
   }
 }
@@ -314,7 +341,8 @@ async function handleViewFlashcards(chatId: number, itemId: string) {
   const html = await getNoteContent(itemId)
   if (!html) {
     await sendMessage(chatId, '❌ No notes found. Generate AI notes first.', [
-      [btn('🤖 Generate AI', `act_ai:${itemId}`)],
+      // act_ai:{8} = 15 bytes ✓
+      [btn('🤖 Generate AI', `act_ai:${sid(itemId)}`)],
     ])
     return
   }
@@ -338,11 +366,13 @@ async function handleViewFlashcards(chatId: number, itemId: string) {
     ).join('\n\n')
 
     await editMessage(chatId, genMsgId, `🃏 <b>Flashcards</b> (${item?.title ?? ''})\n<code>Model: ${data.provider}</code>\n\n${truncate(cardText)}`, [
-      [btn('← Back', `view_menu:${itemId}`)],
+      // view_menu:{8} = 18 bytes ✓
+      [btn('← Back', `view_menu:${sid(itemId)}`)],
     ])
   } catch (e: any) {
     await editMessage(chatId, genMsgId, `❌ Flashcard generation failed: ${e.message}`, [
-      [btn('← Back', `view_menu:${itemId}`)],
+      // view_menu:{8} = 18 bytes ✓
+      [btn('← Back', `view_menu:${sid(itemId)}`)],
     ])
   }
 }
@@ -357,6 +387,7 @@ async function handlePdfUpload(chatId: number, fileId: string, fileName: string)
     await sendMessage(chatId, '⚠️ Not expecting a PDF right now. Navigate to a note and tap "Upload PDF" first.')
     return
   }
+  // itemId stored in session is always the full UUID (set via setSession)
   const itemId = session.data.itemId as string
   await clearSession(chatId)
 
@@ -385,11 +416,13 @@ async function handlePdfUpload(chatId: number, fileId: string, fileName: string)
     await updateItemPdfUrl(itemId, objectKey)
 
     await editMessage(chatId, processingMsgId, `✅ <b>PDF uploaded</b> for <i>${item.title}</i>\n\nFile: <code>${safeName}</code>`, [
-      [btn('🤖 Generate AI Now', `act_ai:${itemId}`), btn('← Back to Note', `nav_i:${itemId}`)],
+      // act_ai:{8} = 15 bytes ✓   nav_i:{8} = 14 bytes ✓
+      [btn('🤖 Generate AI Now', `act_ai:${sid(itemId)}`), btn('← Back to Note', `nav_i:${sid(itemId)}`)],
     ])
   } catch (e: any) {
     await editMessage(chatId, processingMsgId, `❌ Upload failed: ${e.message}`, [
-      [btn('← Back', `nav_i:${itemId}`)],
+      // nav_i:{8} = 14 bytes ✓
+      [btn('← Back', `nav_i:${sid(itemId)}`)],
     ])
   }
 }
@@ -437,7 +470,8 @@ async function handleTextInput(chatId: number, text: string) {
       try {
         const courseId = await createCourse(name, desc ?? null, price)
         await sendMessage(chatId, `✅ <b>Course created!</b>\n\n📚 ${name}\n💰 ₹${price}`, [
-          [btn('📁 Open Course', `nav_c:${courseId}`)],
+          // nav_c:{8} = 14 bytes ✓
+          [btn('📁 Open Course', `nav_c:${sid(courseId)}`)],
           [btn('← All Courses', 'nav_courses')],
         ])
       } catch (e: any) {
@@ -458,8 +492,10 @@ async function handleTextInput(chatId: number, text: string) {
           title: text.trim(),
         })
         await sendMessage(chatId, `✅ <b>Module created!</b>\n\n📁 ${text.trim()}`, [
-          [btn('📂 Open Module', `nav_f:${id}:${courseId}`)],
-          [btn('← Back', parentId === 'root' ? `nav_c:${courseId}` : `nav_f:${parentId}:${courseId}`)],
+          // nav_f:{8}:{8} = 23 bytes ✓
+          [btn('📂 Open Module', `nav_f:${sid(id)}:${sid(courseId)}`)],
+          // nav_c:{8} or nav_f:{8}:{8} ✓
+          [btn('← Back', parentId === 'root' ? `nav_c:${sid(courseId)}` : `nav_f:${sid(parentId)}:${sid(courseId)}`)],
         ])
       } catch (e: any) {
         await sendMessage(chatId, `❌ Failed to create module: ${e.message}`)
@@ -479,8 +515,10 @@ async function handleTextInput(chatId: number, text: string) {
           title: text.trim(),
         })
         await sendMessage(chatId, `✅ <b>Note created!</b>\n\n📄 ${text.trim()}`, [
-          [btn('📄 Open Note', `nav_i:${id}`)],
-          [btn('← Back', parentId === 'root' ? `nav_c:${courseId}` : `nav_f:${parentId}:${courseId}`)],
+          // nav_i:{8} = 14 bytes ✓
+          [btn('📄 Open Note', `nav_i:${sid(id)}`)],
+          // nav_c:{8} or nav_f:{8}:{8} ✓
+          [btn('← Back', parentId === 'root' ? `nav_c:${sid(courseId)}` : `nav_f:${sid(parentId)}:${sid(courseId)}`)],
         ])
       } catch (e: any) {
         await sendMessage(chatId, `❌ Failed to create note: ${e.message}`)
@@ -513,7 +551,10 @@ async function handleCallback(chatId: number, callbackId: string, data: string, 
 
   // nav_f:{shortFolderId}:{shortCourseId}
   if (data.startsWith('nav_f:')) {
-    const [, shortFolder, shortCourse] = data.split(':')
+    const parts = data.split(':')
+    // parts = ['nav_f', shortFolder, shortCourse]
+    const shortFolder = parts[1]
+    const shortCourse = parts[2]
     const [folderId, courseId] = await Promise.all([
       expandId('structure_items', shortFolder),
       expandId('courses', shortCourse),
@@ -536,9 +577,12 @@ async function handleCallback(chatId: number, callbackId: string, data: string, 
 
   // new_mod:{shortCourseId}:{shortParentId|root}
   if (data.startsWith('new_mod:')) {
-    const [, shortCourse, shortParent] = data.split(':')
+    const parts = data.split(':')
+    const shortCourse = parts[1]
+    const shortParent = parts[2]
     const courseId = await expandId('courses', shortCourse)
     const parentId = shortParent === 'root' ? 'root' : await expandId('structure_items', shortParent)
+    // Store full UUIDs in session so wizard handlers can use them directly
     await setSession(chatId, 'creating_module_name', { courseId, parentId })
     await editMessage(chatId, msgId, '📁 <b>New Module</b>\n\nEnter the module name:')
     return
@@ -546,9 +590,12 @@ async function handleCallback(chatId: number, callbackId: string, data: string, 
 
   // new_note:{shortCourseId}:{shortParentId|root}
   if (data.startsWith('new_note:')) {
-    const [, shortCourse, shortParent] = data.split(':')
+    const parts = data.split(':')
+    const shortCourse = parts[1]
+    const shortParent = parts[2]
     const courseId = await expandId('courses', shortCourse)
     const parentId = shortParent === 'root' ? 'root' : await expandId('structure_items', shortParent)
+    // Store full UUIDs in session so wizard handlers can use them directly
     await setSession(chatId, 'creating_note_title', { courseId, parentId })
     await editMessage(chatId, msgId, '📄 <b>New Note</b>\n\nEnter the note title:')
     return
@@ -557,6 +604,7 @@ async function handleCallback(chatId: number, callbackId: string, data: string, 
   // act_upload:{shortItemId}
   if (data.startsWith('act_upload:')) {
     const itemId = await expandId('structure_items', data.slice(11))
+    // Store full UUID in session for handlePdfUpload
     await setSession(chatId, 'awaiting_pdf', { itemId })
     await editMessage(chatId, msgId, '📎 <b>Send the PDF file now.</b>\n\nJust send it as a document in this chat. The file will replace any existing judgment for this note.')
     return
