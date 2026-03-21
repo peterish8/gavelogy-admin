@@ -28,10 +28,17 @@ export function htmlToCustom(html: string): string {
     const doc = parser.parseFromString(html, 'text/html')
 
     // Order matters! Process deepest/inline nodes first, then blocks, then containers.
-    // This ensures that when we replace a container's outerHTML, the children inside 
+    // This ensures that when we replace a container's outerHTML, the children inside
     // are already converted to strings and preserved.
 
     // ========== INLINE ELEMENTS ==========
+
+    // 0. Link spans (judgment connections) — process FIRST before other spans
+    const linkSpans = Array.from(doc.querySelectorAll('span.linked-text[data-link-id]'))
+    linkSpans.forEach(el => {
+        const id = (el as HTMLElement).dataset.linkId
+        el.outerHTML = `[link:${id}]${el.innerHTML}[/link]`
+    })
 
     // 1. Bold
     const bolds = Array.from(doc.querySelectorAll('strong, b'))
@@ -135,6 +142,10 @@ export function customToHtml(text: string): string {
 
     // ========== CONTAINERS ==========
 
+    // 0. Link spans (judgment connections)
+    html = html.replace(/\[link:([^\]]+)\]/g, '<span class="linked-text" data-link-id="$1" style="color:#c9922a;border-bottom:2px dashed #c9922a;cursor:pointer;padding-bottom:1px">')
+    html = html.replace(/\[\/link\]/g, '</span>')
+
     // 1. Note Boxes
     html = html.replace(/\[box:([a-z]+)\]/g, '<div class="note-box note-$1">')
     html = html.replace(/\[\/box\]/g, '</div>')
@@ -186,8 +197,213 @@ export function customToHtml(text: string): string {
     // 10. Horizontal Rule
     html = html.replace(/\[hr\]/g, '<hr class="content-hr">')
 
-    // Newlines to BR (for text outside P tags)
-    // But be careful not to break nested tags
-    
+    // 11. Forgiving pass — catch AI typos like [li> or [b> (angle bracket instead of square bracket close)
+    html = html.replace(/\[li>/g, '<li>')
+    html = html.replace(/\[\/li>/g, '</li>')
+    html = html.replace(/\[ul>/g, '<ul>')
+    html = html.replace(/\[\/ul>/g, '</ul>')
+    html = html.replace(/\[ol>/g, '<ol>')
+    html = html.replace(/\[\/ol>/g, '</ol>')
+    html = html.replace(/\[p>/g, '<p>')
+    html = html.replace(/\[\/p>/g, '</p>')
+    html = html.replace(/\[b>/g, '<strong>')
+    html = html.replace(/\[\/b>/g, '</strong>')
+    html = html.replace(/\[i>/g, '<em>')
+    html = html.replace(/\[\/i>/g, '</em>')
+    html = html.replace(/\[h1>/g, '<h1>')
+    html = html.replace(/\[\/h1>/g, '</h1>')
+    html = html.replace(/\[h2>/g, '<h2>')
+    html = html.replace(/\[\/h2>/g, '</h2>')
+    html = html.replace(/\[h3>/g, '<h3>')
+    html = html.replace(/\[\/h3>/g, '</h3>')
+
+    // 12. Final safety cleanup — strip any remaining [tag] or [/tag] or [tag:value] that were not converted
+    // This prevents raw tag syntax from showing as literal text in the editor
+    html = html.replace(/\[\/?\w+(?::[^\]>]*)?\]/g, '')
+    html = html.replace(/\[\/?\w+(?::[^\]>]*)?>/g, '')
+
     return html
+}
+
+/**
+ * fixAiMistakes — pure logic cleanup of AI-generated HTML in the Tiptap editor.
+ * No AI needed. Works in two phases:
+ *   Phase 1: DOM-based structural fix (handles [li> items packed inside one <li>)
+ *   Phase 2: String-level cleanup (markdown artifacts, empty paragraphs, etc.)
+ */
+export function fixAiMistakes(html: string): string {
+    if (!html) return ''
+    if (typeof window === 'undefined') return customToHtml(html)
+
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, 'text/html')
+
+    // ── Helper: normalise tag syntax on an HTML string ──────────────────────────
+    // Converts [li&gt; / [li> / [li] all to a canonical [li] so splits work uniformly
+    function normaliseTags(s: string): string {
+        return s
+            .replace(/\[li&gt;/g,    '[li]').replace(/\[\/li&gt;/g,  '[/li]')
+            .replace(/\[li>/g,       '[li]').replace(/\[\/li>/g,      '[/li]')
+            .replace(/\[ol&gt;/g,    '[ol]').replace(/\[\/ol&gt;/g,   '[/ol]')
+            .replace(/\[ol>/g,       '[ol]').replace(/\[\/ol>/g,       '[/ol]')
+            .replace(/\[ul&gt;/g,    '[ul]').replace(/\[\/ul&gt;/g,   '[/ul]')
+            .replace(/\[ul>/g,       '[ul]').replace(/\[\/ul>/g,       '[/ul]')
+            .replace(/\[b&gt;/g,     '[b]').replace(/\[\/b&gt;/g,     '[/b]')
+            .replace(/\[b>/g,        '[b]').replace(/\[\/b>/g,         '[/b]')
+            .replace(/\[i&gt;/g,     '[i]').replace(/\[\/i&gt;/g,     '[/i]')
+            .replace(/\[i>/g,        '[i]').replace(/\[\/i>/g,         '[/i]')
+            .replace(/\[u&gt;/g,     '[u]').replace(/\[\/u&gt;/g,     '[/u]')
+            .replace(/\[u>/g,        '[u]').replace(/\[\/u>/g,         '[/u]')
+            .replace(/\[p&gt;/g,     '[p]').replace(/\[\/p&gt;/g,     '[/p]')
+            .replace(/\[p>/g,        '[p]').replace(/\[\/p>/g,         '[/p]')
+            .replace(/\[h1&gt;/g,    '[h1]').replace(/\[\/h1&gt;/g,   '[/h1]')
+            .replace(/\[h1>/g,       '[h1]').replace(/\[\/h1>/g,       '[/h1]')
+            .replace(/\[h2&gt;/g,    '[h2]').replace(/\[\/h2&gt;/g,   '[/h2]')
+            .replace(/\[h2>/g,       '[h2]').replace(/\[\/h2>/g,       '[/h2]')
+            .replace(/\[h3&gt;/g,    '[h3]').replace(/\[\/h3&gt;/g,   '[/h3]')
+            .replace(/\[h3>/g,       '[h3]').replace(/\[\/h3>/g,       '[/h3]')
+            .replace(/\[hr&gt;/g,    '[hr]').replace(/\[hr>/g,         '[hr]')
+            .replace(/\[hl:#([a-fA-F0-9]+)&gt;/g, '[hl:#$1]')
+            .replace(/\[hl:#([a-fA-F0-9]+)>/g,    '[hl:#$1]')
+            .replace(/\[box:(\w+)&gt;/g, '[box:$1]').replace(/\[box:(\w+)>/g, '[box:$1]')
+    }
+
+    // ── Phase 1A: Fix <li> elements that contain packed [li] patterns ───────────
+    // e.g. Tiptap creates one <li> containing "[li>item1 [li>item2 [li>item3"
+    // We need to split these into proper sibling <li> elements.
+    const allLis = Array.from(doc.querySelectorAll('li'))
+    for (const li of allLis) {
+        const textContent = li.textContent || ''
+        // Check if this <li> has [li patterns inside its text
+        if (!/\[li/.test(textContent)) continue
+
+        const parent = li.parentNode
+        if (!parent) continue
+
+        // Tiptap wraps li content in <p> — strip that wrapper before splitting
+        // so we don't get a stray '<p>' fragment as a false list item
+        const rawInner = li.innerHTML.replace(/^<p>/, '').replace(/<\/p>$/, '')
+
+        // Normalise the innerHTML so all variants become [li]
+        const normalised = normaliseTags(rawInner)
+        if (!/\[li\]/.test(normalised)) continue
+
+        // Split by [li] opening tag boundaries
+        // Filter: only keep parts that have actual text (not just stray HTML tags)
+        const parts = normalised.split('[li]')
+            .map(p => p.replace(/\[\/li\]/g, '').replace(/^<p>/, '').replace(/<\/p>$/, '').trim())
+            .filter(p => p.replace(/<[^>]*>/g, '').trim().length > 0)
+
+        if (parts.length === 0) { parent.removeChild(li); continue }
+
+        // Create new <li> for each part and insert before original
+        const frag = doc.createDocumentFragment()
+        for (const part of parts) {
+            const newLi = doc.createElement('li')
+            newLi.innerHTML = customToHtml(part)
+            frag.appendChild(newLi)
+        }
+        parent.replaceChild(frag, li)
+    }
+
+    // ── Phase 1B: Fix <p> elements that contain packed [li] patterns ─────────────
+    // e.g. <p>[li>item1 [li>item2</p> → <ul><li>item1</li><li>item2</li></ul>
+    const allPs = Array.from(doc.querySelectorAll('p'))
+    for (const p of allPs) {
+        const textContent = p.textContent || ''
+        if (!/\[li/.test(textContent)) continue
+
+        const parent = p.parentNode
+        if (!parent) continue
+
+        const normalised = normaliseTags(p.innerHTML)
+        if (!/\[li\]/.test(normalised)) continue
+
+        const parts = normalised.split('[li]')
+            .map(part => part.replace(/\[\/li\]/g, '').replace(/^<p>/, '').replace(/<\/p>$/, '').trim())
+            .filter(part => part.replace(/<[^>]*>/g, '').trim().length > 0)
+
+        if (parts.length === 0) { parent.removeChild(p); continue }
+
+        const ul = doc.createElement('ul')
+        for (const part of parts) {
+            const li = doc.createElement('li')
+            li.innerHTML = customToHtml(part)
+            ul.appendChild(li)
+        }
+        parent.replaceChild(ul, p)
+    }
+
+    // ── Phase 1C: Fix remaining text nodes with other [tag] patterns ─────────────
+    // (headings, bold, italic, highlights etc. that are literal text in the editor)
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)
+    const textNodes: Text[] = []
+    let n = walker.nextNode()
+    while (n) {
+        if (/\[/.test(n.textContent || '')) textNodes.push(n as Text)
+        n = walker.nextNode()
+    }
+    for (const textNode of textNodes) {
+        const raw = textNode.textContent || ''
+        if (!/\[/.test(raw)) continue
+        const normalised = normaliseTags(raw)
+        const converted = customToHtml(normalised)
+        if (converted === raw) continue
+        const span = doc.createElement('span')
+        span.innerHTML = converted
+        textNode.parentNode?.replaceChild(span, textNode)
+    }
+
+    // ── Phase 1D: Remove empty <li> elements left over ───────────────────────────
+    Array.from(doc.querySelectorAll('li')).forEach(li => {
+        if (!li.textContent?.trim()) li.remove()
+    })
+
+    let h = doc.body.innerHTML
+
+    // ── Phase 2: String-level fixes ──────────────────────────────────────────────
+
+    // Markdown bold / italic / code
+    h = h.replace(/\*\*([^*<\n]+?)\*\*/g, '<strong>$1</strong>')
+    h = h.replace(/(?<!\*)\*([^*<\n]+?)\*(?!\*)/g, '<em>$1</em>')
+    h = h.replace(/`([^`<\n]+?)`/g, '<code>$1</code>')
+
+    // Markdown headings inside <p>
+    h = h.replace(/<p>\s*#{3}\s+(.+?)<\/p>/gi, '<h3>$1</h3>')
+    h = h.replace(/<p>\s*#{2}\s+(.+?)<\/p>/gi, '<h2>$1</h2>')
+    h = h.replace(/<p>\s*#\s+(.+?)<\/p>/gi, '<h1>$1</h1>')
+
+    // Markdown horizontal rules
+    h = h.replace(/<p>\s*-{3,}\s*<\/p>/g, '<hr>')
+    h = h.replace(/<p>\s*_{3,}\s*<\/p>/g, '<hr>')
+
+    // Markdown bullet lines inside <p> → <ul>
+    h = h.replace(/(<p>\s*[-•]\s+.+?<\/p>(\s*<p>\s*[-•]\s+.+?<\/p>)*)/gs, (match) => {
+        const items = match.replace(/<p>\s*[-•]\s+(.+?)<\/p>/gs, '<li>$1</li>')
+        return `<ul>${items}</ul>`
+    })
+
+    // Markdown numbered lines inside <p> → <ol>
+    h = h.replace(/(<p>\s*\d+[.)]\s+.+?<\/p>(\s*<p>\s*\d+[.)]\s+.+?<\/p>)*)/gs, (match) => {
+        const items = match.replace(/<p>\s*\d+[.)]\s+(.+?)<\/p>/gs, '<li>$1</li>')
+        return `<ol>${items}</ol>`
+    })
+
+    // Remove empty paragraphs
+    h = h.replace(/<p>\s*<\/p>/g, '')
+    h = h.replace(/<p>\s*<br\s*\/?>\s*<\/p>/g, '')
+
+    // Fix double spaces
+    h = h.replace(/ {2,}/g, ' ')
+
+    // Fix double-encoded entities
+    h = h.replace(/&amp;amp;/g, '&amp;')
+    h = h.replace(/&amp;lt;/g, '&lt;')
+    h = h.replace(/&amp;gt;/g, '&gt;')
+
+    // Strip any surviving [tag] remnants
+    h = h.replace(/\[\/?\w+(?::[^\]>]*)?\]/g, '')
+    h = h.replace(/\[\/?\w+(?::[^\]>]*)?&gt;/g, '')
+
+    return h
 }

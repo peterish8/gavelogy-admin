@@ -4,18 +4,20 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { 
-  LayoutDashboard, 
-  FileText, 
-  HelpCircle, 
-  LogOut, 
-  Menu, 
+import {
+  LayoutDashboard,
+  FileText,
+  HelpCircle,
+  LogOut,
+  Menu,
   ChevronsLeft,
   Sparkles,
   Gavel,
   ChevronUp,
   User,
-  Settings
+  Settings,
+  Newspaper,
+  ClipboardList
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { RealtimeProvider } from '@/lib/realtime/realtime-provider'
@@ -62,6 +64,16 @@ const sidebarItems = [
     title: 'Quizzes',
     href: '/admin/quizzes',
     icon: HelpCircle
+  },
+  {
+    title: 'Daily News',
+    href: '/admin/news',
+    icon: Newspaper
+  },
+  {
+    title: 'PYQ Tests',
+    href: '/admin/pyq',
+    icon: ClipboardList
   },
 ]
 
@@ -220,6 +232,7 @@ export default function AdminLayoutClient({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
+                suppressHydrationWarning
                 className={cn(
                   "flex items-center gap-3 px-3 py-3 w-full rounded-xl hover:bg-muted transition-all group",
                   !isSidebarOpen && "lg:justify-center lg:px-2"
@@ -318,13 +331,17 @@ export default function AdminLayoutClient({
         <main className={cn(
           "flex-1 bg-muted/50",
           // The main list page should scroll normally
-          pathname === '/admin/studio' ? "p-6 lg:p-8 overflow-y-auto" : 
+          pathname === '/admin/studio' ? "p-6 lg:p-8 overflow-y-auto" :
           // The IDE page handles its own scroll internally
-          pathname.includes('/admin/studio/') ? "p-0 overflow-hidden" : 
+          pathname.includes('/admin/studio/') ? "p-0 overflow-hidden" :
+          // Tagging workspace handles its own scroll internally
+          pathname.match(/\/admin\/tag\/.+/) ? "p-0 overflow-hidden" :
+          // PYQ exam preview handles its own scroll internally
+          pathname.match(/\/admin\/pyq\/.+\/preview/) ? "p-0 overflow-hidden" :
           // Other pages scroll normally
           "p-6 lg:p-8 overflow-y-auto"
         )}>
-           <div className={cn("w-full mx-auto", pathname.includes('/admin/studio/') ? "h-full" : "max-w-7xl")}>
+           <div className={cn("w-full mx-auto", pathname.includes('/admin/studio/') || pathname.match(/\/admin\/tag\/.+/) || pathname.match(/\/admin\/pyq\/.+\/preview/) ? "h-full" : "max-w-7xl")}>
              {children}
            </div>
         </main>

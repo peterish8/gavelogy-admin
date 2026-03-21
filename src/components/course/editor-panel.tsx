@@ -14,14 +14,25 @@ import Underline from '@tiptap/extension-underline'
 import Highlight from '@tiptap/extension-highlight'
 import { TextStyle } from '@tiptap/extension-text-style'
 import BubbleMenuExtension from '@tiptap/extension-bubble-menu'
-import { Node, mergeAttributes } from '@tiptap/core'
-import { htmlToCustom, customToHtml } from '@/lib/content-converter'
+import { Node, Mark, mergeAttributes } from '@tiptap/core'
+import { htmlToCustom, customToHtml, fixAiMistakes } from '@/lib/content-converter'
+import { fetchLinksForItem, insertLink, deleteLink } from '@/actions/judgment/links'
+import type { NotePdfLink } from '@/actions/judgment/links'
+import { saveNoteContent } from '@/actions/judgment/note-content'
+import { JudgmentPdfPanel, parseLinkMeta } from './judgment-pdf-panel'
+import type { ConnectionViz } from './judgment-pdf-panel'
+import { LineHeight } from '@/lib/line-height-extension'
+import { Table } from '@tiptap/extension-table'
+import { TableRow } from '@tiptap/extension-table-row'
+import { TableCell } from '@tiptap/extension-table-cell'
+import { TableHeader } from '@tiptap/extension-table-header'
 import {
     Bold, Italic, Underline as UnderlineIcon,
     List, ListOrdered, Save, X, RotateCcw, CheckCircle, AlertTriangle,
     Maximize2, Minimize2, ChevronRight, StickyNote, FileText,
     Highlighter, Braces, Sun, Moon,
-    GripVertical, ChevronLeft, Loader2, MessageSquare, Minus
+    GripVertical, ChevronLeft, Loader2, MessageSquare, Minus, Link2, Unlink2, Wand2,
+    Table as TableIcon, Check, CreditCard, BookOpen,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
@@ -100,12 +111,16 @@ export const NoteBox = Node.create({
   },
 })
 
-// Font Size Extension
+// Font Size + Font Family type declarations
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
     fontSize: {
       setFontSize: (size: string) => ReturnType
       unsetFontSize: () => ReturnType
+    }
+    fontFamily: {
+      setFontFamily: (fontFamily: string) => ReturnType
+      unsetFontFamily: () => ReturnType
     }
     noteBox: {
         toggleNoteBox: (attributes: { color: string }) => ReturnType
@@ -159,6 +174,70 @@ export const FontSize = Extension.create({
   },
 })
 
+// Font Family Extension — applies font-family to selected text via textStyle
+export const FontFamily = Extension.create({
+  name: 'fontFamily',
+  addOptions() {
+    return { types: ['textStyle'] }
+  },
+  addGlobalAttributes() {
+    return [{
+      types: this.options.types,
+      attributes: {
+        fontFamily: {
+          default: null,
+          parseHTML: element => (element as HTMLElement).style.fontFamily?.replace(/['"]+/g, '') || null,
+          renderHTML: attributes => {
+            if (!attributes.fontFamily) return {}
+            return { style: `font-family: ${attributes.fontFamily}` }
+          },
+        },
+      },
+    }]
+  },
+  addCommands() {
+    return {
+      setFontFamily: (fontFamily: string) => ({ chain }) =>
+        chain().setMark('textStyle', { fontFamily }).run(),
+      unsetFontFamily: () => ({ chain }) =>
+        chain().setMark('textStyle', { fontFamily: null }).run(),
+    }
+  },
+})
+
+// Available font options for the toolbar picker
+export const FONT_OPTIONS = [
+  { label: 'Default',          value: '',                                           sample: 'Aa' },
+  { label: 'Playfair Display', value: 'var(--font-playfair), serif',                sample: 'Aa' },
+  { label: 'Lora',             value: 'var(--font-lora), Georgia, serif',           sample: 'Aa' },
+  { label: 'IBM Plex Mono',    value: 'var(--font-ibm-mono), monospace',            sample: 'Aa' },
+  { label: 'Inter',            value: 'var(--font-inter), sans-serif',              sample: 'Aa' },
+] as const
+
+// LinkedText mark — renders amber span for note↔PDF connections
+const LinkedText = Mark.create({
+  name: 'linkedText',
+  addAttributes() {
+    return {
+      linkId: {
+        default: null,
+        parseHTML: el => (el as HTMLElement).getAttribute('data-link-id'),
+        renderHTML: attrs => attrs.linkId ? { 'data-link-id': attrs.linkId } : {},
+      },
+    }
+  },
+  parseHTML() {
+    return [{ tag: 'span[data-link-id]' }]
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['span', mergeAttributes(HTMLAttributes, {
+      class: 'linked-text',
+      style: 'color:#c9922a;border-bottom:2px solid #c9922a;cursor:pointer;padding-bottom:1px',
+    }), 0]
+  },
+})
+
+
 // Define extensions outside component to prevent re-creation on render (fixes duplicate extension warnings)
 const EDITOR_EXTENSIONS = [
   StarterKit.configure({
@@ -167,9 +246,16 @@ const EDITOR_EXTENSIONS = [
   Underline,
   TextStyle,
   FontSize,
-  Highlight.configure({ multicolor: true }), 
+  FontFamily,
+  LineHeight,
+  Highlight.configure({ multicolor: true }),
   BubbleMenuExtension,
-  NoteBox as any, 
+  NoteBox as any,
+  LinkedText,
+  Table.configure({ resizable: true }),
+  TableRow,
+  TableHeader,
+  TableCell,
 ]
 
 interface EditorPanelProps {
@@ -194,15 +280,104 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   // Decoupled fetch state to handle editor race conditions
   const [fetchedData, setFetchedData] = useState<any>(null)
   
+  // ── Judgment PDF Lock State ──
+  const [hasPdfAttached, setHasPdfAttached] = useState(false)
+
+  // ── Mobile Bottom Sheet State ──
+  const [mobileTagTab, setMobileTagTab] = useState<'notes' | 'pdf'>('notes')
+  const [mobileSheetLink, setMobileSheetLink] = useState<NotePdfLink | null>(null)
+  const [mobileSheetText, setMobileSheetText] = useState<string>('')
+  const [mobileSheetLoading, setMobileSheetLoading] = useState(false)
+  const cachedPdfDoc = useRef<any>(null)
+
   const { changes } = useDraftStore()
 
-  // Bubble Menu State
-  const [showHighlightPalette, setShowHighlightPalette] = useState(false)
-  const [showFontSizePalette, setShowFontSizePalette] = useState(false)
+  // Active highlight color for "paint bucket" mode — shows tick on selection
+  const [selectedHighlightColor, setSelectedHighlightColor] = useState<string | null>(null)
 
   // Import Modal State
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [importText, setImportText] = useState('')
+  const [isAiFormatOpen, setIsAiFormatOpen] = useState(false)
+  const [aiInstructions, setAiInstructions] = useState('')
+  const [aiFormatting, setAiFormatting] = useState(false)
+  const [aiProvider, setAiProvider] = useState('')
+  const [aiQuizzing, setAiQuizzing] = useState(false)
+
+  const handleAiFormat = async (instructions: string) => {
+    if (!editor) return
+    const rawText = editor.getText()
+    if (!rawText.trim()) { toast.error('Nothing to format — write some notes first'); return }
+    setAiFormatting(true)
+    setIsAiFormatOpen(false)
+    const toastId = toast.loading('✨ AI is formatting your notes…')
+    try {
+      const res = await fetch('/api/ai-format', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: rawText, instructions }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) throw new Error(data.error || 'AI failed')
+      const html = customToHtml(data.formatted)
+      editor.commands.setContent(html)
+      setAiProvider(data.provider || '')
+      toast.success(`✨ Notes beautifully formatted!${data.provider ? ` (via ${data.provider})` : ''}`, { id: toastId })
+    } catch (e: any) {
+      toast.error(e.message || 'AI formatting failed', { id: toastId })
+    } finally {
+      setAiFormatting(false)
+    }
+  }
+
+  const handleAiQuiz = async () => {
+    if (!editor) return
+    const notesText = editor.getText()
+    if (!notesText.trim()) { toast.error('Nothing to quiz — write or generate notes first'); return }
+    setAiQuizzing(true)
+    const toastId = toast.loading('🧠 AI is generating quiz from your notes…')
+    try {
+      const res = await fetch('/api/ai-quiz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notesText }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) throw new Error(data.error || 'AI failed')
+      setQuizContent(data.quiz)
+      setActiveTab('quiz')
+      toast.success(`🧠 10 questions ready in Quiz tab!${data.provider ? ` (via ${data.provider})` : ''}`, { id: toastId })
+    } catch (e: any) {
+      toast.error(e.message || 'AI quiz generation failed', { id: toastId })
+    } finally {
+      setAiQuizzing(false)
+    }
+  }
+
+  const handleAiFlashcards = async (notesTextOverride?: string) => {
+    if (!editor && !notesTextOverride) return
+    const notesText = notesTextOverride ?? editor!.getText()
+    if (!notesText.trim()) return
+    setAiFlashcarding(true)
+    const toastId = toast.loading('🃏 Generating flashcards…')
+    try {
+      const res = await fetch('/api/ai-flashcards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notesText }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) throw new Error(data.error || 'AI failed')
+      setFlashcards(data.flashcards || [])
+      setFlashcardIdx(0)
+      setFlashcardFlipped(false)
+      toast.success(`🃏 ${data.flashcards?.length ?? 0} flashcards ready!`, { id: toastId })
+    } catch (e: any) {
+      toast.error(e.message || 'Flashcard generation failed', { id: toastId })
+    } finally {
+      setAiFlashcarding(false)
+    }
+  }
 
   const handleImportContent = () => {
       if (!importText || !editor) return
@@ -227,9 +402,6 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   const prevItemIdRef = useRef<string | null>(null)
   const currentLoadedItemId = useRef<string | null>(null) // Tracks which item is ACTUALLY in the editor
   
-  // Reactivity State (to force toolbar updates)
-  const [, setTick] = useState(0)
-  
   // UI State
   const [internalIsExpanded, setInternalIsExpanded] = useState(false)
   const [forceLightMode, setForceLightMode] = useState(false)
@@ -250,10 +422,24 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
     // -------------------------------------------------------------------------
     // REUSABLE EDITOR TOOLBAR
     // -------------------------------------------------------------------------
+    // Apply line height to paragraphs/headings within the current selection only
+    const setAllLineHeights = (value: string | null) => {
+      if (!editor) return;
+      editor.chain().focus().command(({ tr, state }) => {
+        const { from, to } = state.selection
+        state.doc.nodesBetween(from, to, (node, pos) => {
+          if (node.type.name === 'paragraph' || node.type.name === 'heading') {
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, lineHeight: value })
+          }
+        })
+        return true
+      }).run()
+    }
+
     const renderEditorToolbar = () => {
         if (!editor) return null;
         return (
-            <div className="flex items-center gap-1 p-1 bg-card rounded-lg shadow-sm border border-border">
+            <div className="flex items-center gap-1 p-1 bg-card rounded-lg shadow-sm border border-border overflow-x-auto whitespace-nowrap [&>div]:shrink-0 [&>button]:shrink-0 notes-editor-scroll">
                 {/* Text Styling Group */}
                 <div className="flex items-center gap-0.5 border-r border-border pr-1 mr-1">
                     <button 
@@ -314,47 +500,215 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
 
                 {/* Font Size Selector */}
                 <div className="flex items-center border-r border-border pr-1 mr-1">
-                    <button
-                        onClick={() => {
-                            setShowFontSizePalette(!showFontSizePalette)
-                            setShowHighlightPalette(false)
-                        }}
-                        className={cn(
-                            "flex items-center gap-1 h-7 px-2 text-xs font-medium rounded hover:bg-muted/80 text-muted-foreground transition-colors",
-                            showFontSizePalette && "bg-muted/80 text-primary"
-                        )}
-                        title="Font Size"
-                    >
-                        {(() => {
-                            const size = editor.getAttributes('textStyle')?.fontSize
-                            if (size === '12px') return 'Small'
-                            if (size === '14px') return 'Normal'
-                            if (size === '18px') return 'Medium'
-                            if (size === '20px') return 'Large'
-                            if (size === '24px') return 'Ex-Lg'
-                            if (size === '30px') return 'H1'
-                            return 'Default'
-                        })()}
-                        <ChevronRight className={cn("w-3 h-3 text-muted-foreground/70 transition-transform", showFontSizePalette && "rotate-90")} />
-                    </button>
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <button
+                                className="flex items-center gap-1 h-7 px-2 text-xs font-medium rounded hover:bg-muted/80 text-muted-foreground transition-colors"
+                                title="Font Size"
+                            >
+                                {(() => {
+                                    const size = editor.getAttributes('textStyle')?.fontSize
+                                    if (size === '12px') return 'Small'
+                                    if (size === '14px') return 'Normal'
+                                    if (size === '18px') return 'Medium'
+                                    if (size === '20px') return 'Large'
+                                    if (size === '24px') return 'Ex-Lg'
+                                    if (size === '30px') return 'H1'
+                                    return 'Default'
+                                })()}
+                                <ChevronRight className="w-3 h-3 text-muted-foreground/70" />
+                            </button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-36 p-1.5" side="bottom" align="start">
+                            <div className="flex flex-col gap-0.5">
+                                {[
+                                    { size: '12px', label: 'Small (12)' },
+                                    { size: '14px', label: 'Normal (14)' },
+                                    { size: '16px', label: 'Default (16)' },
+                                    { size: '18px', label: 'Medium (18)' },
+                                    { size: '20px', label: 'Large (20)' },
+                                    { size: '24px', label: 'XL (24)' },
+                                    { size: '30px', label: 'H1 (30)' },
+                                ].map((item) => {
+                                    const currentSize = editor.getAttributes('textStyle')?.fontSize
+                                    const isActive = currentSize === item.size || (!currentSize && item.size === '16px')
+                                    return (
+                                        <button
+                                            key={item.size}
+                                            onClick={() => {
+                                                if (item.size === '16px') {
+                                                    editor.chain().focus().unsetFontSize().run()
+                                                } else {
+                                                    editor.chain().focus().setFontSize(item.size).run()
+                                                }
+                                            }}
+                                            className={cn(
+                                                "flex items-center justify-between w-full px-2 py-1.5 text-xs font-medium rounded hover:bg-muted transition-colors text-left",
+                                                isActive ? "bg-muted text-foreground" : "text-muted-foreground"
+                                            )}
+                                        >
+                                            {item.label}
+                                            {isActive && <Check className="w-3 h-3 ml-2 shrink-0 text-primary" />}
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        </PopoverContent>
+                    </Popover>
+                </div>
+
+                {/* Font Family Picker */}
+                <div className="flex items-center border-r border-border pr-1 mr-1">
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <button
+                                className="flex items-center gap-1 h-7 px-2 text-xs font-medium rounded hover:bg-muted/80 text-muted-foreground transition-colors min-w-[72px]"
+                                title="Font family"
+                            >
+                                {(() => {
+                                    const current = editor.getAttributes('textStyle')?.fontFamily || ''
+                                    if (current.includes('playfair')) return <span style={{ fontFamily: 'var(--font-playfair), serif' }}>Playfair</span>
+                                    if (current.includes('lora') || current.includes('Lora')) return <span style={{ fontFamily: 'var(--font-lora), serif' }}>Lora</span>
+                                    if (current.includes('ibm') || current.includes('mono') || current.includes('IBM')) return <span style={{ fontFamily: 'var(--font-ibm-mono), monospace' }}>Mono</span>
+                                    if (current.includes('inter') || current.includes('Inter')) return <span style={{ fontFamily: 'var(--font-inter), sans-serif' }}>Inter</span>
+                                    return <span>Font</span>
+                                })()}
+                                <ChevronRight className="w-3 h-3 opacity-50 ml-auto" />
+                            </button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-52 p-1.5" side="bottom" align="start">
+                            <div className="flex flex-col gap-0.5">
+                                {FONT_OPTIONS.map(({ label, value }) => {
+                                    const current = editor.getAttributes('textStyle')?.fontFamily || ''
+                                    const isActive = value ? current.includes(value.split(',')[0].replace('var(', '').replace('--font-', '').replace(')', '').trim()) : !current
+                                    return (
+                                        <button
+                                            key={label}
+                                            onClick={() => {
+                                                if (!value) {
+                                                    editor.chain().focus().unsetFontFamily().run()
+                                                } else {
+                                                    editor.chain().focus().setFontFamily(value).run()
+                                                }
+                                            }}
+                                            className={cn(
+                                                "flex items-center gap-3 w-full px-2 py-1.5 rounded text-left hover:bg-muted transition-colors",
+                                                isActive && "bg-muted"
+                                            )}
+                                        >
+                                            <span
+                                                className="text-base font-semibold w-7 text-center shrink-0"
+                                                style={{ fontFamily: value || 'var(--font-inter), sans-serif' }}
+                                            >
+                                                Ag
+                                            </span>
+                                            <div className="min-w-0">
+                                                <p className="text-xs font-medium text-foreground truncate">{label}</p>
+                                            </div>
+                                            {isActive && <Check className="w-3 h-3 ml-auto shrink-0 text-primary" />}
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        </PopoverContent>
+                    </Popover>
+                </div>
+
+                {/* Line Height */}
+                <div className="flex items-center border-r border-border pr-1 mr-1">
+                    {[
+                        { label: '1.2×', value: '1.2' },
+                        { label: '1.4×', value: '1.4' },
+                        { label: '1.6×', value: '1.6' },
+                        { label: '1.8×', value: '1.8' },
+                        { label: '2.0×', value: '2' },
+                    ].map(({ label, value }) => (
+                        <button
+                            key={value}
+                            onClick={() => setAllLineHeights(value)}
+                            className={cn(
+                                "h-7 px-1.5 text-xs font-medium rounded hover:bg-muted/80 transition-colors",
+                                editor.getAttributes('paragraph')?.lineHeight === value
+                                    ? "bg-muted text-foreground"
+                                    : "text-muted-foreground"
+                            )}
+                            title={`Line Height ${label}`}
+                        >
+                            {label}
+                        </button>
+                    ))}
                 </div>
 
                 {/* Highlight & Note Boxes */}
                 <div className="flex items-center gap-1.5">
-                    <button
-                        onClick={() => {
-                            setShowHighlightPalette(!showHighlightPalette)
-                            setShowFontSizePalette(false)
-                        }}
-                        className={cn(
-                            "p-1.5 rounded hover:bg-muted/80 text-muted-foreground flex items-center gap-1 transition-colors",
-                            (editor.isActive('highlight') || showHighlightPalette) && "bg-yellow-100 text-yellow-700"
-                        )}
-                        title="Highlight Colors"
-                    >
-                        <Highlighter className="w-4 h-4" />
-                        <ChevronRight className={cn("w-3 h-3 text-muted-foreground/70 transition-transform", showHighlightPalette && "rotate-90")} />
-                    </button>
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <button
+                                className={cn(
+                                    "p-1.5 rounded hover:bg-muted/80 flex items-center gap-1 transition-colors relative",
+                                    selectedHighlightColor
+                                        ? "text-foreground"
+                                        : "text-muted-foreground"
+                                )}
+                                title={selectedHighlightColor ? "Highlight mode ON — select text to apply" : "Pick highlight color"}
+                            >
+                                <Highlighter
+                                    className="w-4 h-4"
+                                    style={selectedHighlightColor ? { color: selectedHighlightColor, filter: 'brightness(0.7)' } : undefined}
+                                />
+                                {/* Active color dot */}
+                                {selectedHighlightColor && (
+                                    <span
+                                        className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white shadow-sm"
+                                        style={{ backgroundColor: selectedHighlightColor }}
+                                    />
+                                )}
+                                <ChevronRight className="w-3 h-3 text-muted-foreground/70" />
+                            </button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-2.5" side="bottom" align="start">
+                            <p className="text-[10px] text-muted-foreground mb-2 font-medium uppercase tracking-wide">Pick color → select text → click ✓</p>
+                            <div className="flex gap-2 items-center">
+                                {[
+                                    { color: '#D4A96A', title: 'Gold — Key Terms' },
+                                    { color: '#7EC8B8', title: 'Teal — Doctrines' },
+                                    { color: '#F0A0A0', title: 'Rose — Principles' },
+                                    { color: '#9EC4D8', title: 'Sky — Case Refs' },
+                                    { color: '#C4A8E0', title: 'Lavender — Notes' },
+                                ].map(({ color, title }) => (
+                                    <button
+                                        key={color}
+                                        onClick={() => {
+                                            setSelectedHighlightColor(prev => prev === color ? null : color)
+                                            // If text already selected, apply immediately
+                                            if (!editor.state.selection.empty) {
+                                                editor.chain().focus().toggleHighlight({ color }).run()
+                                            }
+                                        }}
+                                        className={cn(
+                                            "w-7 h-7 rounded-full border-2 shadow-sm hover:scale-110 transition-transform",
+                                            selectedHighlightColor === color
+                                                ? "border-slate-600 scale-110 ring-2 ring-slate-300 ring-offset-1"
+                                                : "border-transparent hover:border-slate-300"
+                                        )}
+                                        style={{ backgroundColor: color }}
+                                        title={title}
+                                    />
+                                ))}
+                                <div className="w-px h-5 bg-border mx-0.5" />
+                                <button
+                                    onClick={() => {
+                                        setSelectedHighlightColor(null)
+                                        editor.chain().focus().unsetHighlight().run()
+                                    }}
+                                    className="w-7 h-7 rounded-full border border-border flex items-center justify-center bg-card text-muted-foreground/70 hover:bg-muted text-xs"
+                                    title="Clear highlight"
+                                >
+                                    <X className="w-3 h-3" />
+                                </button>
+                            </div>
+                        </PopoverContent>
+                    </Popover>
 
                     <div className="w-px h-4 bg-muted" />
 
@@ -380,8 +734,35 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                 
                 <div className="w-px h-4 bg-muted mx-1" />
 
+                {/* Insert Table */}
+                <button
+                    onClick={() => (editor.chain().focus() as any).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
+                    className="p-1.5 rounded hover:bg-muted/80 text-muted-foreground transition-colors"
+                    title="Insert Table"
+                >
+                    <TableIcon className="w-4 h-4" />
+                </button>
+
+                <div className="w-px h-4 bg-muted mx-1" />
+
+                {/* Fix AI Mistakes */}
+                <button
+                    onClick={() => {
+                        const fixed = fixAiMistakes(editor.getHTML())
+                        editor.commands.setContent(fixed)
+                        toast.success('Fixed AI formatting issues')
+                    }}
+                    className="flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium text-amber-600 dark:text-amber-400 border border-amber-300 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors"
+                    title="Fix AI Mistakes — cleans up raw tags, markdown artifacts, empty paragraphs"
+                >
+                    <Wand2 className="w-3.5 h-3.5" />
+                    Fix
+                </button>
+
+                <div className="w-px h-4 bg-muted mx-1" />
+
                 {/* Clear Format */}
-                <button 
+                <button
                     onClick={() => {
                         editor.chain().focus().unsetAllMarks().run()
                         if (editor.isActive('noteBox')) {
@@ -393,6 +774,35 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                 >
                     <X className="w-4 h-4" />
                 </button>
+
+                <div className="w-px h-4 bg-muted mx-1" />
+
+                {/* ✨ AI Format buttons */}
+                <div className="flex items-center gap-1">
+                    {/* Quick format — no instructions */}
+                    <button
+                        onClick={() => handleAiFormat('')}
+                        disabled={aiFormatting}
+                        className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-semibold transition-all bg-linear-to-r from-violet-500 to-purple-600 text-white hover:from-violet-600 hover:to-purple-700 shadow-sm disabled:opacity-50"
+                        title="AI Format — auto-beautify notes"
+                    >
+                        {aiFormatting
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <span>✨</span>
+                        }
+                        AI Format
+                    </button>
+                    {/* Instructions button */}
+                    <button
+                        onClick={() => setIsAiFormatOpen(true)}
+                        disabled={aiFormatting}
+                        className="flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium border border-violet-300 dark:border-violet-700 text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-950/30 transition-colors disabled:opacity-50"
+                        title="AI Format with custom instructions"
+                    >
+                        <ChevronRight className="w-3.5 h-3.5" />
+                        Instructions
+                    </button>
+                </div>
             </div>
         )
     }
@@ -411,6 +821,16 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   const [quizContent, setQuizContent] = useState('')
   const [originalQuizContent, setOriginalQuizContent] = useState('')
 
+  // Flashcard State
+  interface Flashcard { front: string; back: string }
+  const [flashcards, setFlashcards] = useState<Flashcard[]>([])
+  const [flashcardIdx, setFlashcardIdx] = useState(0)
+  const [flashcardFlipped, setFlashcardFlipped] = useState(false)
+  const [aiFlashcarding, setAiFlashcarding] = useState(false)
+
+  // Preview nav tab — controls what's shown in each panel when in preview mode
+  const [jViewMode, setJViewMode] = useState<'notes' | 'quiz' | 'flashcards'>('notes')
+
   // Title Editing State (for inline rename)
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [editedTitle, setEditedTitle] = useState(title)
@@ -423,6 +843,318 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   // Check if this item is a new draft (unsaved in structure)
   const isStructureDraft = changes.some(c => c.entityId === itemId && c.action === 'create')
 
+  // ── Tag Case Notes Mode ───────────────────────────────────────────────────
+  // When true: hides Quiz tab, focuses on Note + Judgment View only
+  const [isTagCaseMode, setIsTagCaseMode] = useState(false)
+
+  // ── Judgment Mode State ──────────────────────────────────────────────────
+  const [judgmentMode, setJudgmentMode] = useState(false)
+  const [jSplitPct, setJSplitPct] = useState(50)
+  const jDraggingRef = useRef(false)
+  const jContainerRef = useRef<HTMLDivElement>(null)
+  const jNoteContainerRef = useRef<HTMLDivElement>(null)
+
+  const [jLinks, setJLinks] = useState<NotePdfLink[]>([])
+  const [jLinksLoaded, setJLinksLoaded] = useState(false)
+  const [jConnectMode, setJConnectMode] = useState(false)
+  const [jConnectStep, setJConnectStep] = useState<'note' | 'pdf' | null>(null)
+  const [jConnectNoteCapture, setJConnectNoteCapture] = useState<{ text: string; linkId: string } | null>(null)
+  const [jConnectPdfCapture, setJConnectPdfCapture] = useState<{
+    page: number; x: number; y: number; width: number; height: number; text: string
+  } | null>(null)
+  const [jHighlightedLinkId, setJHighlightedLinkId] = useState<string | null>(null)
+  const [jConnectionViz, setJConnectionViz] = useState<ConnectionViz | null>(null)
+  const [jSavingLink, setJSavingLink] = useState(false)
+  const [jNoteMode, setJNoteMode] = useState<'edit' | 'preview'>('edit')
+  const [jNoteZoom, setJNoteZoom] = useState(1.0)
+  const [jPreviewHtml, setJPreviewHtml] = useState('')
+  const [jNavigateToLinkId, setJNavigateToLinkId] = useState<string | null>(null)
+  const [jVizFading, setJVizFading] = useState(false)
+  const jVizTimersRef = useRef<ReturnType<typeof setTimeout>[]>([])
+  const [jRedrawTick, setJRedrawTick] = useState(0)
+
+  // Load links when judgment mode first activates for this item
+  useEffect(() => {
+    if (!judgmentMode || !itemId || jLinksLoaded) return
+    fetchLinksForItem(itemId)
+      .then(loadedLinks => { setJLinks(loadedLinks); setJLinksLoaded(true) })
+      .catch(() => toast.error('Failed to load connections'))
+  }, [judgmentMode, itemId, jLinksLoaded])
+
+  // When judgment mode activates and links exist but editor has no linked spans,
+  // load the published note_contents (which has [link:xxx] tags) so linked text is visible
+  useEffect(() => {
+    if (!judgmentMode || !jLinksLoaded || !editor || !itemId) return
+    if (jLinks.length === 0) return
+    const editorHtml = editor.getHTML()
+    const hasLinkedSpans = /data-link-id=/.test(editorHtml)
+    if (!hasLinkedSpans) {
+      // Editor has no linked text but DB has links — load live content
+      const supabase = createClient()
+      supabase.from('note_contents').select('content_html').eq('item_id', itemId).maybeSingle()
+        .then(({ data }: { data: any }) => {
+          if (data?.content_html) {
+            const html = customToHtml(data.content_html)
+            if (/data-link-id=/.test(html)) {
+              editor.commands.setContent(html)
+              toast.info('Loaded published content with linked text')
+            }
+          }
+        })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [judgmentMode, jLinksLoaded])
+
+  // Reset judgment state when item changes
+  useEffect(() => {
+    setJLinks([])
+    setJLinksLoaded(false)
+    setJConnectMode(false)
+    setJConnectStep(null)
+    setJConnectNoteCapture(null)
+    setJConnectPdfCapture(null)
+    setJHighlightedLinkId(null)
+    setJConnectionViz(null)
+    setJNoteMode('edit')
+    setJNavigateToLinkId(null)
+    setJViewMode('notes')
+    setFlashcards([])
+    setFlashcardIdx(0)
+    setFlashcardFlipped(false)
+  }, [itemId])
+
+  // Auto-hide connection viz after 5 seconds with a 0.5s fade
+  useEffect(() => {
+    jVizTimersRef.current.forEach(clearTimeout)
+    jVizTimersRef.current = []
+    if (!jConnectionViz) { setJVizFading(false); return }
+    setJVizFading(false)
+    jVizTimersRef.current = [
+      setTimeout(() => setJVizFading(true), 4500),
+      setTimeout(() => { setJConnectionViz(null); setJVizFading(false) }, 5000),
+    ]
+    return () => { jVizTimersRef.current.forEach(clearTimeout) }
+  }, [jConnectionViz])
+
+  // Resizable judgment splitter
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!jDraggingRef.current || !jContainerRef.current) return
+      const rect = jContainerRef.current.getBoundingClientRect()
+      const pct = ((e.clientX - rect.left) / rect.width) * 100
+      setJSplitPct(Math.max(28, Math.min(72, pct)))
+    }
+    function onUp() { jDraggingRef.current = false }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    return () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
+  }, [])
+
+  // ── Ctrl+Scroll Zoom Handler for Note Editor ──
+  useEffect(() => {
+    const el = jNoteContainerRef.current
+    if (!el) return
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+        const zoomDelta = -(e.deltaY * 0.002) // Smooth scaling based on wheel delta magnitude
+        setJNoteZoom(prev => Math.min(Math.max(0.5, prev + zoomDelta), 3.0))
+      }
+    }
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => el.removeEventListener('wheel', handleWheel)
+  }, [])
+
+  function autoLinkId(text: string): string {
+    const base = text.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().split(/\s+/).slice(0, 3).join('-')
+    return `link-${base || Date.now()}`
+  }
+
+  function getNoteLinkSpan(linkId: string): HTMLElement | null {
+    if (!jContainerRef.current) return null
+    // In preview mode, the editor is hidden, and its bounds are skewed.
+    // Querying jContainerRef ensures we find the span in the visible pane (edit or preview).
+    const spans = Array.from(jContainerRef.current.querySelectorAll(`[data-link-id="${linkId}"]`)) as HTMLElement[]
+    return spans.find(span => span.offsetParent !== null) || spans[0] || null
+  }
+
+  function getJNoteText(linkId: string): string {
+    const el = getNoteLinkSpan(linkId)
+    return el?.textContent?.trim() || linkId
+  }
+
+  async function extractTextForLink(link: NotePdfLink) {
+    setMobileSheetLoading(true)
+    setMobileSheetText('')
+    try {
+      let doc = cachedPdfDoc.current
+      if (!doc) {
+        let proxyUrl = ''
+        if (itemId) {
+           proxyUrl = `/api/judgment/pdf-proxy?itemId=${itemId}`
+        }
+        if (!proxyUrl) throw new Error('No PDF URL')
+        
+        const pdfjsLib = await import('pdfjs-dist')
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
+        doc = await pdfjsLib.getDocument(proxyUrl).promise
+        cachedPdfDoc.current = doc
+      }
+      
+      const page = await doc.getPage(link.pdf_page)
+      const content = await page.getTextContent()
+      const items = content.items as any[]
+      
+      let extracted = ''
+      for (const item of items) {
+        if (!item.transform) continue
+        const tx = item.transform[4] as number
+        const ty = item.transform[5] as number
+        const tw = item.width as number || 0
+        const th = item.height as number || 0
+        
+        const cx = tx + tw / 2
+        const cy = ty + th / 2
+        
+        if (cx >= link.x && cx <= link.x + link.width && cy >= link.y && cy <= link.y + link.height) {
+          extracted += (item.str ?? '') + ' '
+        }
+      }
+      
+      setMobileSheetText(extracted.trim() || 'No clear text found in this region.')
+    } catch (err) {
+      console.error('Failed to extract PDF text:', err)
+      setMobileSheetText('Failed to extract text from PDF.')
+    } finally {
+      setMobileSheetLoading(false)
+    }
+  }
+
+  // Click on a linked-text span in note (edit or preview mode) → navigate PDF
+  function handleJLinkedTextClick(e: React.MouseEvent) {
+    if (jConnectMode) return
+    const span = (e.target as HTMLElement).closest('[data-link-id]') as HTMLElement | null
+    if (!span) return
+    const linkId = span.getAttribute('data-link-id')
+    if (!linkId) return
+    e.preventDefault()
+    e.stopPropagation()
+
+    // Mobile Bottom Sheet
+    if (window.innerWidth < 1024) {
+      const link = jLinks.find(l => l.link_id === linkId)
+      if (link) {
+        setMobileSheetLink(link)
+        extractTextForLink(link)
+      }
+      return
+    }
+
+    setJNavigateToLinkId(linkId)
+    setJHighlightedLinkId(linkId)
+    setTimeout(() => setJHighlightedLinkId(null), 2000)
+  }
+
+  function switchJNoteMode(mode: 'edit' | 'preview') {
+    if (mode === 'preview' && editor) {
+      setJPreviewHtml(editor.getHTML())
+    }
+    setJNoteMode(mode)
+  }
+
+  function startJConnect() {
+    switchJNoteMode('edit') // Force edit mode since we rely on Tiptap's editor.state.selection
+    setJConnectMode(true)
+    setJConnectStep('note')
+    setJConnectNoteCapture(null)
+    setJConnectPdfCapture(null)
+    toast.info('Step 1: Select text in the note to link')
+  }
+
+  // saved=true means connection was committed — keep the mark; saved=false means cancel — remove it
+  function exitJConnect(saved = false) {
+    if (!saved && jConnectNoteCapture?.linkId && jConnectStep === 'pdf' && editor) {
+      const safeId = jConnectNoteCapture.linkId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const spanRe = new RegExp(`<span[^>]*data-link-id="${safeId}"[^>]*>(.*?)<\\/span>`, 'gi')
+      const newHtml = editor.getHTML().replace(spanRe, '$1')
+      editor.commands.setContent(newHtml)
+    }
+    setJConnectMode(false)
+    setJConnectStep(null)
+    setJConnectNoteCapture(null)
+    setJConnectPdfCapture(null)
+  }
+
+  // Called when user releases mouse after selecting text in judgment mode note panel
+  function handleJNoteMouseUp() {
+    if (!jConnectMode || jConnectStep !== 'note' || !editor) return
+    const { from, to } = editor.state.selection
+    if (from === to) return
+    const text = editor.state.doc.textBetween(from, to, ' ', ' ').trim()
+    if (!text) return
+    const linkId = autoLinkId(text)
+    editor.chain().focus().setMark('linkedText', { linkId }).run()
+    setJConnectNoteCapture({ text, linkId })
+    setJConnectStep('pdf')
+    toast.info('Note text captured — now select text in the PDF →')
+  }
+
+  async function handleJConnectSave() {
+    if (!jConnectNoteCapture || !jConnectPdfCapture || !itemId || !editor) return
+    const { linkId, text: noteText } = jConnectNoteCapture
+    setJSavingLink(true)
+    try {
+      const newLink = await insertLink({
+        item_id: itemId,
+        link_id: linkId,
+        pdf_page: jConnectPdfCapture.page,
+        x: jConnectPdfCapture.x,
+        y: jConnectPdfCapture.y,
+        width: jConnectPdfCapture.width,
+        height: jConnectPdfCapture.height,
+      })
+      setJLinks(prev => [...prev, newLink])
+
+      // Save note content with the new linked mark
+      const customTags = htmlToCustom(editor.getHTML())
+      await saveNoteContent(itemId, customTags)
+
+      toast.success(`Connected "${noteText}" ↔ page ${jConnectPdfCapture.page}`)
+      exitJConnect(true) // true = saved, keep the mark
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save connection')
+    } finally {
+      setJSavingLink(false)
+    }
+  }
+
+  async function handleJDeleteLink(linkDbId: string) {
+    const linkToDelete = jLinks.find(l => l.id === linkDbId)
+    if (!linkToDelete || !editor || !itemId) return
+    try {
+      await deleteLink(linkDbId)
+      setJLinks(prev => prev.filter(l => l.id !== linkDbId))
+
+      // Remove the mark from editor content
+      const safeId = linkToDelete.link_id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const spanRe = new RegExp(`<span[^>]*data-link-id="${safeId}"[^>]*>(.*?)<\\/span>`, 'gi')
+      const newHtml = editor.getHTML().replace(spanRe, '$1')
+      editor.commands.setContent(newHtml)
+
+      // Save updated note content
+      const customTags = htmlToCustom(editor.getHTML())
+      await saveNoteContent(itemId, customTags)
+
+      if (jHighlightedLinkId === linkToDelete.link_id) {
+        setJHighlightedLinkId(null)
+        setJConnectionViz(null)
+      }
+      toast.success('Connection removed')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete')
+    }
+  }
+
   // Initialize Tiptap Editor
   const editor = useEditor({
     immediatelyRender: false,
@@ -430,18 +1162,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
     content: '',
     editorProps: {
         attributes: {
-        class: cn(
-            // STRICT USER SITE MIRRORING
-            // Single Card Concept: This inner div is THE card.
-            'prose prose-lg w-full max-w-5xl mx-auto focus:outline-none px-[72px] py-12 text-lg leading-relaxed outline-none text-justify font-sans',
-            'text-foreground', // Body Color respects theme
-            'prose-headings:font-bold prose-headings:text-foreground', // Headings respect theme
-            'prose-h1:text-4xl prose-h2:text-3xl', // Specific sizes
-            'prose-li:text-foreground prose-li:marker:text-foreground',
-            'min-h-[900px] bg-card shadow-sm border border-border rounded-xl my-8',
-            // Ensure inputs inside prose inherit correct color
-            '[&_input]:text-foreground [&_textarea]:text-foreground'
-        ),
+        class: 'prose prose-lg max-w-none focus:outline-none outline-none',
       },
       handlePaste: (view, event) => {
         const text = event.clipboardData?.getData('text/plain')
@@ -469,11 +1190,6 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
         }
         return false // Normal paste
       }
-    },
-    // Force re-render on selection updates to sync toolbar state (bold, font size, etc)
-    // Force re-render on selection updates to sync toolbar state (bold, font size, etc)
-    onTransaction: () => {
-        setTick(prev => prev + 1)
     },
     onUpdate: ({ editor }) => {
         // LOCAL AUTOSAVE: Debounced save to local storage
@@ -512,6 +1228,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
       }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
 
   // Close expanded mode on Escape
   useEffect(() => {
@@ -636,10 +1353,11 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
             const cachedQuiz = localCache.getQuizContent(itemId!)
 
             // Fetch DB Data in Parallel
-            const [draftRes, liveRes, quizRes] = await Promise.all([
+            const [draftRes, liveRes, quizRes, itemRes] = await Promise.all([
                 supabase.from('draft_content_cache').select('*').eq('original_content_id', itemId!).maybeSingle(),
                 supabase.from('note_contents').select('*').eq('item_id', itemId!).maybeSingle(),
-                supabase.from('attached_quizzes').select('*, quiz_questions(*)').eq('note_item_id', itemId!).maybeSingle()
+                supabase.from('attached_quizzes').select('*, quiz_questions(*)').eq('note_item_id', itemId!).maybeSingle(),
+                supabase.from('structure_items').select('pdf_url').eq('id', itemId!).maybeSingle()
             ])
 
             if (!isMounted) return
@@ -651,6 +1369,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                 publishedContent: liveRes.data?.content_html || '',
                 hasDraft: !!draftRes.data,
                 draftId: draftRes.data?.id || null,
+                hasPdf: !!itemRes.data?.pdf_url,
                 
                 // Quiz Data
                 quizSource: cachedQuiz ? 'cache' : 'db',
@@ -737,6 +1456,11 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
     setHasDraft(fetchedData.hasDraft)
     setDraftId(fetchedData.draftId)
     setPublishedContent(customToHtml(fetchedData.publishedContent))
+    setHasPdfAttached(fetchedData.hasPdf)
+    if (fetchedData.hasPdf) {
+        setIsTagCaseMode(true)
+        setJudgmentMode(true)
+    }
 
     // 3. Set Quiz Content
     if (fetchedData.quizContent) {
@@ -1115,15 +1839,46 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
     <div 
         className={cn(
             "h-full flex flex-col bg-card rounded-xl shadow-sm border border-border overflow-hidden transition-all duration-300",
-            isExpanded && "fixed inset-0 z-50 rounded-none border-0"
+            isExpanded && "fixed inset-0 z-40 rounded-none border-0"
         )}
     >
         {/* Header */}
         <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-card z-10 relative">
-            <Button variant="ghost" size="sm" onClick={onClose} className="mr-2">
+            <Button
+                variant="ghost"
+                size="sm"
+                onClick={isExpanded ? () => onExpandChange?.(false) : onClose}
+                className={cn("mr-2", isExpanded && "ml-12")}
+            >
                 <ChevronLeft className="w-4 h-4 mr-1" />
                 Back
             </Button>
+
+            {/* Tag Case Notes mode toggle */}
+            <button
+                onClick={() => {
+                    if (hasPdfAttached) return;
+                    const next = !isTagCaseMode
+                    setIsTagCaseMode(next)
+                    if (next) setActiveTab('note')
+                    if (!next) setJudgmentMode(false)
+                }}
+                disabled={hasPdfAttached}
+                className={cn(
+                    "flex items-center gap-1.5 h-7 px-3 rounded-full text-xs font-semibold border transition-all mr-3",
+                    isTagCaseMode
+                        ? "bg-amber-100 dark:bg-amber-900/40 border-amber-400 dark:border-amber-600 text-amber-700 dark:text-amber-300"
+                        : "bg-muted border-border text-muted-foreground hover:text-foreground hover:border-amber-300",
+                    hasPdfAttached && "opacity-60 cursor-not-allowed"
+                )}
+                title={hasPdfAttached ? "Judgment PDF is attached, so Tag Case Notes mode is locked." : (isTagCaseMode ? "Switch back to full notes mode (show all tabs)" : "Switch to Tag Case Notes mode (Note + Judgment only)")}
+            >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M8 2L10 6H14L11 9L12 13L8 11L4 13L5 9L2 6H6L8 2Z" strokeLinejoin="round" />
+                </svg>
+                {isTagCaseMode ? 'Tag Case Notes' : 'Note Mode'}
+            </button>
+
             <div className="flex items-center gap-4">
                 <div>
                      <div className="flex items-center gap-2 mb-1">
@@ -1205,8 +1960,36 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
 
                 {activeTab === 'note' ? (
                     <>
+                        {/* Judgment Mode Toggle */}
+                        {itemId && isTagCaseMode && (
+                            <button
+                                onClick={() => setJudgmentMode(v => !v)}
+                                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors mr-1"
+                                style={judgmentMode ? {
+                                    background: 'rgba(201,146,42,0.18)',
+                                    border: '1px solid #c9922a',
+                                    color: '#c9922a',
+                                } : {
+                                    background: 'rgba(201,146,42,0.07)',
+                                    border: '1px solid rgba(201,146,42,0.3)',
+                                    color: '#c9922a',
+                                }}
+                                title={judgmentMode ? 'Exit judgment split view' : 'Open Notes + Judgment split view'}
+                            >
+                                {judgmentMode ? (
+                                    <Unlink2 className="w-4 h-4" />
+                                ) : (
+                                    <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                        <rect x="1" y="2" width="6" height="12" rx="1" />
+                                        <rect x="9" y="2" width="6" height="12" rx="1" />
+                                    </svg>
+                                )}
+                                {judgmentMode ? 'Exit Judgment' : 'Judgment View'}
+                            </button>
+                        )}
+
                         {/* Discard - Reverts to published content */}
-                        <Button 
+                        <Button
                             size="sm" 
                             variant="ghost" 
                             onClick={handleDiscardDraft}
@@ -1268,15 +2051,16 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
             <div className="px-6 border-b bg-muted/50">
             {mode === 'all' ? (
                 <TabsList className="bg-transparent p-0 h-10 w-full justify-start space-x-2">
-                    <TabsTrigger 
+                    <TabsTrigger
                         value="note"
                         className="data-[state=active]:bg-card data-[state=active]:border-b-2 data-[state=active]:border-blue-500 data-[state=active]:shadow-none rounded-none px-4 h-10 border-b-2 border-transparent transition-all"
                     >
                         <StickyNote className="w-4 h-4 mr-2" />
                         Note Content
                     </TabsTrigger>
-                    <TabsTrigger 
-                        value="quiz" 
+                    {/* Always show Quiz tab */}
+                    <TabsTrigger
+                        value="quiz"
                         className="data-[state=active]:bg-card data-[state=active]:border-b-2 data-[state=active]:border-purple-500 data-[state=active]:shadow-none rounded-none px-4 h-10 border-b-2 border-transparent transition-all"
                     >
                         <MessageSquare className="w-4 h-4 mr-2" />
@@ -1312,7 +2096,424 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
             </div>
 
             <TabsContent value="note" className="flex-1 overflow-hidden flex flex-col relative m-0 p-0">
-                 {/* Editor Area */}
+                {/* ── Judgment connect banner (shown above toolbar in judgment mode) ── */}
+                {judgmentMode && jConnectMode && (
+                    <div className={cn(
+                        'px-4 py-2 border-b shrink-0 flex items-center justify-between gap-2 z-20',
+                        jConnectStep === 'note'
+                            ? 'bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/30'
+                            : 'bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800/30'
+                    )}>
+                        {jConnectStep === 'note' && (
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200">1</span>
+                                <span className="text-xs text-amber-800 dark:text-amber-300">Select text in the note then release mouse — it will be highlighted amber</span>
+                            </div>
+                        )}
+                        {jConnectStep === 'pdf' && (
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-green-200 dark:bg-green-800 text-green-800 dark:text-green-200">✓</span>
+                                <span className="text-xs text-green-800 dark:text-green-300">
+                                    <span className="font-medium">"{jConnectNoteCapture?.text}"</span> captured — now select text in the PDF →
+                                </span>
+                            </div>
+                        )}
+                        <button onClick={() => exitJConnect()} className="text-muted-foreground hover:text-foreground transition-colors ml-auto shrink-0">
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
+                )}
+
+                {/* ── Judgment split layout ── */}
+                {judgmentMode ? (
+                    <div
+                        ref={jContainerRef}
+                        className="flex-1 overflow-hidden flex flex-col lg:flex-row relative"
+                    >
+                        {/* Mobile Tabs Toggle */}
+                        <div className="lg:hidden flex items-center bg-muted/40 border-b border-border p-1 shrink-0 z-20">
+                            <div className="flex w-full bg-card rounded-md border shadow-sm p-0.5 relative">
+                               <button 
+                                   onClick={() => setMobileTagTab('notes')} 
+                                   className={cn("flex-1 py-1.5 text-xs font-semibold rounded-sm z-10 transition-colors", mobileTagTab === 'notes' ? "text-foreground shadow-sm bg-background border border-border/50" : "text-muted-foreground hover:text-foreground")}
+                               >
+                                  Notes
+                               </button>
+                               <button 
+                                   onClick={() => setMobileTagTab('pdf')} 
+                                   className={cn("flex-1 py-1.5 text-xs font-semibold rounded-sm z-10 transition-colors", mobileTagTab === 'pdf' ? "text-foreground shadow-sm bg-background border border-border/50" : "text-muted-foreground hover:text-foreground")}
+                               >
+                                  PDF Viewer
+                               </button>
+                            </div>
+                        </div>
+
+                        {/* Dynamic per-link color styles for linked text spans */}
+                        <style>{jLinks.map(link => {
+                            const { color } = parseLinkMeta(link.label)
+                            return `span[data-link-id="${link.link_id}"] { color: ${color} !important; border-bottom-color: ${color} !important; }`
+                        }).join('\n')}</style>
+
+                        {/* Left: Note Editor */}
+                        <div
+                            className={cn(
+                                "flex-col min-w-0 overflow-hidden lg:border-r border-border shrink-0",
+                                mobileTagTab === 'notes' ? "flex w-full lg:w-(--split-pct)" : "hidden lg:flex lg:w-(--split-pct)"
+                            )}
+                            style={{ '--split-pct': `${jSplitPct}%` } as any}
+                        >
+                            {/* Row 1: Edit mode = Connect + zoom + toggle | Preview mode = 4-tab nav */}
+                            {jNoteMode === 'preview' ? (
+                                /* ── Preview Nav Bar: Notes | Judgment | Quiz | Flashcards ── */
+                                <div className="flex items-center border-b border-border bg-card shrink-0 px-2 py-1 gap-1">
+                                    {([
+                                        { id: 'notes',      icon: StickyNote,    label: 'Notes',       vm: 'notes' as const },
+                                        { id: 'judgment',   icon: FileText,      label: 'Judgment',    vm: 'notes' as const },
+                                        { id: 'quiz',       icon: MessageSquare, label: 'Quiz',        vm: 'quiz' as const },
+                                        { id: 'flashcards', icon: CreditCard,    label: 'Flashcards',  vm: 'flashcards' as const },
+                                    ] as const).map(({ id, icon: Icon, label, vm }) => {
+                                        const isActive = id === 'flashcards' ? jViewMode === 'flashcards'
+                                            : id === 'quiz' ? jViewMode === 'quiz'
+                                            : id === 'judgment' ? (jViewMode === 'notes')
+                                            : jViewMode === 'notes'
+                                        return (
+                                            <button
+                                                key={id}
+                                                onClick={() => setJViewMode(vm)}
+                                                className={cn(
+                                                    'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all',
+                                                    isActive
+                                                        ? 'bg-primary text-primary-foreground shadow-sm'
+                                                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                                                )}
+                                            >
+                                                <Icon className="w-3.5 h-3.5" />
+                                                {label}
+                                                {id === 'quiz' && quizContent && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+                                                {id === 'flashcards' && flashcards.length > 0 && <span className="text-[10px] opacity-70">{flashcards.length}</span>}
+                                            </button>
+                                        )
+                                    })}
+                                    <div className="flex-1" />
+                                    <button
+                                        onClick={() => { switchJNoteMode('edit'); setJViewMode('notes') }}
+                                        className="px-2 py-1 rounded text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                                    >Edit</button>
+                                </div>
+                            ) : (
+                                /* ── Edit mode: Connect + zoom + Edit/Preview toggle ── */
+                                <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-card shrink-0">
+                                    <Button
+                                        size="sm"
+                                        variant={jConnectMode ? 'default' : 'outline'}
+                                        onClick={jConnectMode ? () => exitJConnect() : startJConnect}
+                                        className={cn(
+                                            'h-7 text-xs shrink-0',
+                                            jConnectMode
+                                                ? 'bg-amber-500 hover:bg-amber-600 border-0 text-white'
+                                                : 'border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30'
+                                        )}
+                                    >
+                                        <Link2 className="w-3.5 h-3.5 mr-1" />
+                                        {jConnectMode ? 'Cancel' : 'Connect'}
+                                    </Button>
+                                    {jConnectMode && jConnectStep === 'note' && (
+                                        <span className="text-xs text-amber-700 dark:text-amber-400 truncate">Select text then release</span>
+                                    )}
+                                    <div className="flex-1" />
+                                    <div className="flex items-center gap-px bg-muted/60 p-0.5 rounded-md border border-border mr-2 shrink-0">
+                                        <button onClick={() => setJNoteZoom(p => Math.max(0.5, p - 0.1))} className="w-6 h-6 flex items-center justify-center text-xs hover:bg-background rounded-sm text-muted-foreground hover:text-foreground" title="Zoom Out">-</button>
+                                        <button onClick={() => setJNoteZoom(1.0)} className="px-2 h-6 flex items-center justify-center text-[10px] hover:bg-background rounded-sm font-mono text-muted-foreground hover:text-foreground" title="Reset Zoom">{Math.round(jNoteZoom * 100)}%</button>
+                                        <button onClick={() => setJNoteZoom(p => Math.min(3.0, p + 0.1))} className="w-6 h-6 flex items-center justify-center text-xs hover:bg-background rounded-sm text-muted-foreground hover:text-foreground" title="Zoom In">+</button>
+                                    </div>
+                                    <div className="flex gap-px p-0.5 rounded-md bg-muted shrink-0">
+                                        <button
+                                            onClick={() => switchJNoteMode('edit')}
+                                            className="px-2 py-0.5 rounded text-xs font-medium transition-all bg-background text-foreground shadow-sm"
+                                        >Edit</button>
+                                        <button
+                                            onClick={() => switchJNoteMode('preview')}
+                                            className="px-2 py-0.5 rounded text-xs font-medium transition-all text-muted-foreground hover:text-foreground"
+                                        >Preview</button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Row 2: Full formatting toolbar (same as normal notes) */}
+                            {jNoteMode === 'edit' && editor && (
+                                <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border bg-card shadow-sm z-10 sticky top-0 flex-wrap">
+                                    {renderEditorToolbar()}
+                                </div>
+                            )}
+
+                            {/* Editor Area */}
+                            <div className="flex-1 overflow-hidden flex flex-col relative" ref={jNoteContainerRef}>
+                                {loading && (
+                                    <div className="absolute inset-0 bg-card/50 backdrop-blur-sm z-50 flex items-center justify-center">
+                                        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                                    </div>
+                                )}
+
+                                {/* Editor (always mounted, hidden in preview) */}
+                                <div
+                                    className="judgment-note-editor notes-editor-scroll flex-1 overflow-y-auto"
+                                    style={{ display: jNoteMode === 'edit' ? undefined : 'none' }}
+                                    onMouseUp={handleJNoteMouseUp}
+                                    onClick={handleJLinkedTextClick}
+                                    onScroll={() => {
+                                        if (jConnectionViz) setJRedrawTick(t => t + 1)
+                                    }}
+                                >
+                                    <div className={cn("relative", forceLightMode && "force-light")} style={{ zoom: jNoteZoom }}>
+                                        <EditorContent editor={editor} />
+                                    </div>
+                                </div>
+
+                                {/* Preview (read-only, linked text clickable) — hidden when quiz tab */}
+                                {jNoteMode === 'preview' && jViewMode !== 'quiz' && (
+                                    <div
+                                        className="notes-editor-scroll flex-1 overflow-y-auto"
+                                        onScroll={() => {
+                                            if (jConnectionViz) setJRedrawTick(t => t + 1)
+                                        }}
+                                    >
+                                        <div
+                                            className="note-prose-render prose prose-lg max-w-none"
+                                            style={{ zoom: jNoteZoom }}
+                                            onClick={handleJLinkedTextClick}
+                                            dangerouslySetInnerHTML={{ __html: jPreviewHtml }}
+                                        />
+                                    </div>
+                                )}
+
+                                {/* Quiz View — shown when quiz tab active in preview mode */}
+                                {jNoteMode === 'preview' && jViewMode === 'quiz' && (
+                                    <div className="flex-1 overflow-y-auto">
+                                        {quizContent ? (
+                                            <QuizPreview
+                                                content={quizContent}
+                                                onContentChange={setQuizContent}
+                                            />
+                                        ) : (
+                                            <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+                                                <MessageSquare className="w-10 h-10 opacity-30" />
+                                                <p className="text-sm">No quiz yet — generate notes with AI to auto-create one.</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Divider */}
+                        <div
+                            className="hidden lg:flex w-1 cursor-col-resize hover:bg-primary/30 transition-colors items-center justify-center group z-10 shrink-0"
+                            style={{ background: 'hsl(var(--border))' }}
+                            onMouseDown={() => { jDraggingRef.current = true }}
+                        >
+                            <div className="w-0.5 h-8 rounded-full bg-border group-hover:bg-primary/60 transition-colors" />
+                        </div>
+
+                        {/* Right: PDF Panel (hidden when flashcards tab active) */}
+                        <div
+                           className={cn(
+                               "flex-col min-w-0 overflow-hidden flex-1",
+                               mobileTagTab === 'pdf' ? "flex w-full" : "hidden lg:flex",
+                               jViewMode === 'flashcards' && "!hidden"
+                           )}
+                        >
+                            <JudgmentPdfPanel
+                                itemId={itemId!}
+                                links={jLinks}
+                                onLinksChange={setJLinks}
+                                connectMode={jConnectMode}
+                                connectStep={jConnectStep}
+                                connectNoteCapture={jConnectNoteCapture}
+                                connectPdfCapture={jConnectPdfCapture}
+                                onConnectPdfCapture={setJConnectPdfCapture}
+                                highlightedLinkId={jHighlightedLinkId}
+                                onHighlightedLinkIdChange={setJHighlightedLinkId}
+                                connectionViz={jConnectionViz}
+                                onConnectionVizChange={setJConnectionViz}
+                                getNoteLinkSpan={getNoteLinkSpan}
+                                getNoteText={getJNoteText}
+                                onDeleteLink={handleJDeleteLink}
+                                onConnectSave={handleJConnectSave}
+                                savingLink={jSavingLink}
+                                navigateToLinkId={jNavigateToLinkId}
+                                onNavigateComplete={() => setJNavigateToLinkId(null)}
+                                redrawTick={jRedrawTick}
+                                onAiNotesGenerated={(formatted, provider) => {
+                                    if (!editor) return
+                                    const html = customToHtml(formatted)
+                                    editor.commands.setContent(html)
+                                    toast.success(`✨ Case notes ready! Auto-generating quiz + flashcards…${provider ? ` (via ${provider})` : ''}`)
+                                    // Auto-generate quiz and flashcards after notes are set
+                                    const notesText = editor.getText()
+                                    setTimeout(() => {
+                                        handleAiQuiz()
+                                        handleAiFlashcards(notesText)
+                                    }, 300)
+                                }}
+                            />
+                        </div>
+
+                        {/* Right: Flashcard Viewer — shown when flashcards tab active */}
+                        {jViewMode === 'flashcards' && (
+                            <div className={cn(
+                                "flex-col min-w-0 overflow-hidden flex-1 bg-card",
+                                mobileTagTab === 'pdf' ? "flex w-full" : "hidden lg:flex"
+                            )}>
+                                {flashcards.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+                                        <CreditCard className="w-12 h-12 opacity-25" />
+                                        <p className="text-sm text-center px-8">No flashcards yet — generate notes with AI to auto-create them.</p>
+                                        <button
+                                            onClick={() => handleAiFlashcards()}
+                                            disabled={aiFlashcarding}
+                                            className="mt-1 px-3 py-1.5 rounded-md text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-all"
+                                        >
+                                            {aiFlashcarding ? 'Generating…' : 'Generate Flashcards'}
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center h-full gap-5 px-8 select-none">
+                                        {/* Progress */}
+                                        <div className="flex items-center gap-1.5">
+                                            {flashcards.map((_, i) => (
+                                                <button
+                                                    key={i}
+                                                    onClick={() => { setFlashcardIdx(i); setFlashcardFlipped(false) }}
+                                                    className={cn(
+                                                        "w-2 h-2 rounded-full transition-all",
+                                                        i === flashcardIdx ? "bg-primary scale-125" : "bg-muted-foreground/30 hover:bg-muted-foreground/60"
+                                                    )}
+                                                />
+                                            ))}
+                                        </div>
+
+                                        {/* Card */}
+                                        <div
+                                            className="w-full max-w-md cursor-pointer"
+                                            style={{ perspective: '1000px' }}
+                                            onClick={() => setFlashcardFlipped(f => !f)}
+                                        >
+                                            <div
+                                                className="relative transition-all duration-500"
+                                                style={{
+                                                    transformStyle: 'preserve-3d',
+                                                    transform: flashcardFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
+                                                    minHeight: '200px',
+                                                }}
+                                            >
+                                                {/* Front */}
+                                                <div
+                                                    className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl border border-border bg-background shadow-md p-7 text-center backface-hidden"
+                                                    style={{ backfaceVisibility: 'hidden' }}
+                                                >
+                                                    <span className="text-[10px] uppercase tracking-widest text-muted-foreground mb-3 font-semibold">Question</span>
+                                                    <p className="text-base font-semibold text-foreground leading-snug">{flashcards[flashcardIdx]?.front}</p>
+                                                    <span className="mt-4 text-[11px] text-muted-foreground/60">tap to reveal answer</span>
+                                                </div>
+                                                {/* Back */}
+                                                <div
+                                                    className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl border border-primary/40 bg-primary/5 shadow-md p-7 text-center"
+                                                    style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
+                                                >
+                                                    <span className="text-[10px] uppercase tracking-widest text-primary mb-3 font-semibold">Answer</span>
+                                                    <p className="text-sm text-foreground leading-relaxed">{flashcards[flashcardIdx]?.back}</p>
+                                                    <span className="mt-4 text-[11px] text-muted-foreground/60">tap to flip back</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Nav */}
+                                        <div className="flex items-center gap-4">
+                                            <button
+                                                onClick={() => { setFlashcardIdx(i => Math.max(0, i - 1)); setFlashcardFlipped(false) }}
+                                                disabled={flashcardIdx === 0}
+                                                className="p-2 rounded-lg border border-border hover:bg-muted disabled:opacity-30 transition-all"
+                                            >
+                                                <ChevronLeft className="w-4 h-4" />
+                                            </button>
+                                            <span className="text-xs text-muted-foreground tabular-nums">
+                                                {flashcardIdx + 1} / {flashcards.length}
+                                            </span>
+                                            <button
+                                                onClick={() => { setFlashcardIdx(i => Math.min(flashcards.length - 1, i + 1)); setFlashcardFlipped(false) }}
+                                                disabled={flashcardIdx === flashcards.length - 1}
+                                                className="p-2 rounded-lg border border-border hover:bg-muted disabled:opacity-30 transition-all"
+                                            >
+                                                <ChevronRight className="w-4 h-4" />
+                                            </button>
+                                        </div>
+
+                                        {/* Regenerate */}
+                                        <button
+                                            onClick={() => handleAiFlashcards()}
+                                            disabled={aiFlashcarding}
+                                            className="text-[11px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                                        >
+                                            {aiFlashcarding ? 'Regenerating…' : '↻ Regenerate'}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* SVG connection curve overlay */}
+                        {jConnectionViz && (() => {
+                            const { fromX, fromY, toX, toY, color: lineColor, label: lineLabel } = jConnectionViz
+                            const dx = (toX - fromX) * 0.4
+                            const path = `M ${fromX} ${fromY} C ${fromX + dx} ${fromY}, ${toX - dx} ${toY}, ${toX} ${toY}`
+                            // Midpoint of cubic bezier at t=0.5
+                            const midX = (fromX + toX) / 2
+                            const midY = (fromY + toY) / 2
+                            const labelText = lineLabel?.toUpperCase() ?? ''
+                            // Approximate pill width: ~6.5px per char + 14px padding
+                            const pillW = labelText.length * 6.5 + 14
+                            const pillH = 16
+                            return (
+                                <svg style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh', pointerEvents: 'none', zIndex: 40, opacity: jVizFading ? 0 : 1, transition: 'opacity 0.5s ease' }} aria-hidden>
+                                    <defs>
+                                        <marker id="j-conn-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                                            <path d="M0,0.5 L5,3 L0,5.5" fill="none" stroke={lineColor} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                                        </marker>
+                                    </defs>
+                                    <path d={path} fill="none" stroke={lineColor} strokeWidth="1.5" strokeDasharray="6 4" strokeLinecap="round" markerEnd="url(#j-conn-arrow)" />
+                                    {labelText && (
+                                        <g>
+                                            {/* Pill background */}
+                                            <rect
+                                                x={midX - pillW / 2}
+                                                y={midY - pillH - 4}
+                                                width={pillW}
+                                                height={pillH}
+                                                rx={4}
+                                                fill={lineColor}
+                                                opacity={0.92}
+                                            />
+                                            {/* White outline text (background) */}
+                                            <text
+                                                x={midX}
+                                                y={midY - 4 - pillH / 2}
+                                                textAnchor="middle"
+                                                dominantBaseline="middle"
+                                                fontSize="9"
+                                                fontWeight="700"
+                                                fill="white"
+                                                fontFamily="system-ui, -apple-system, sans-serif"
+                                                letterSpacing="0.6"
+                                            >
+                                                {labelText}
+                                            </text>
+                                        </g>
+                                    )}
+                                </svg>
+                            )
+                        })()}
+                    </div>
+                ) : (
                 <div className="flex-1 overflow-hidden flex flex-col relative bg-muted/30">
                     {loading && (
                         <div className="absolute inset-0 bg-card/50 backdrop-blur-sm z-50 flex items-center justify-center">
@@ -1382,12 +2583,16 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
 
                                 {/* Font Size */}
                                 <div className="flex items-center border-r border-border pr-2 mr-2 gap-1">
-                                    <Select 
-                                        value={editor.getAttributes('textStyle')?.fontSize || '16px'}
-                                        onValueChange={(value) => editor.chain().focus().setFontSize(value).run()}
+                                    <Select
+                                        value={editor.getAttributes('textStyle')?.fontSize || ''}
+                                        onValueChange={(value) => {
+                                            if (value && editor.getAttributes('textStyle')?.fontSize !== value) {
+                                                editor.chain().focus().setFontSize(value).run()
+                                            }
+                                        }}
                                     >
                                         <SelectTrigger className="h-8 w-[100px] text-xs">
-                                            <SelectValue placeholder="Size" />
+                                            <SelectValue placeholder="Default" />
                                         </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="12px">Small (12)</SelectItem>
@@ -1410,6 +2615,31 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                     </Button>
                                 </div>
 
+                                {/* Line Height */}
+                                <div className="flex items-center border-r border-border pr-2 mr-2 gap-1">
+                                    <Select
+                                        value={editor.getAttributes('paragraph')?.lineHeight || 'default'}
+                                        onValueChange={(value) => {
+                                            const current = editor.getAttributes('paragraph')?.lineHeight || 'default'
+                                            if (value !== current) {
+                                                setAllLineHeights(value === 'default' ? null : value)
+                                            }
+                                        }}
+                                    >
+                                        <SelectTrigger className="h-8 w-[90px] text-xs">
+                                            <SelectValue placeholder="Line Ht" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="default">Default</SelectItem>
+                                            <SelectItem value="1.2">1.2× Tight</SelectItem>
+                                            <SelectItem value="1.4">1.4× Snug</SelectItem>
+                                            <SelectItem value="1.6">1.6× Normal</SelectItem>
+                                            <SelectItem value="1.8">1.8× Relaxed</SelectItem>
+                                            <SelectItem value="2">2.0× Airy</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
                                 {/* Highlighting */}
                                 <div className="flex items-center border-r border-border pr-2 mr-2 gap-1">
                                     <Popover>
@@ -1425,13 +2655,19 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                         </PopoverTrigger>
                                         <PopoverContent className="w-auto p-2">
                                             <div className="flex gap-2">
-                                                {['#fef08a', '#bbf7d0', '#bfdbfe', '#fecaca'].map((color) => (
+                                                {[
+                                                    { color: '#D4A96A', title: 'Gold — Key Terms' },
+                                                    { color: '#7EC8B8', title: 'Teal — Doctrines' },
+                                                    { color: '#F0A0A0', title: 'Rose — Principles' },
+                                                    { color: '#9EC4D8', title: 'Sky — Case Refs' },
+                                                    { color: '#C4A8E0', title: 'Lavender — Notes' },
+                                                ].map(({ color, title }) => (
                                                     <button
                                                         key={color}
                                                         onClick={() => editor.chain().focus().toggleHighlight({ color }).run()}
-                                                        className="w-6 h-6 rounded-full border border-border"
+                                                        className="w-6 h-6 rounded-full border border-border shadow-sm hover:scale-110 transition-transform"
                                                         style={{ backgroundColor: color }}
-                                                        title="Highlight Color"
+                                                        title={title}
                                                     />
                                                 ))}
                                                 <button
@@ -1479,12 +2715,12 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                         </DialogContent>
                                     </Dialog>
 
-                                    <Button 
-                                        variant="ghost" 
-                                        size="sm" 
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
                                         onClick={() => editor.chain().focus().setHorizontalRule().run()}
                                         className="h-8 w-8 p-0"
-                                        title="Insert Horizontal Line (---)"
+                                        title="Insert Horizontal Line"
                                     >
                                         <Minus className="w-4 h-4" />
                                     </Button>
@@ -1496,113 +2732,59 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
 
                     {/* Editor Content Scroll Area */}
                     <div className={cn(
-                            "flex-1 overflow-y-auto p-6 pb-20 relative flex flex-col items-center",
-                            isExpanded ? "bg-muted/80" : "bg-muted/30"
+                            "flex-1 overflow-y-auto p-8 pb-20 relative flex flex-col items-center notes-editor-scroll",
+                            isExpanded ? "bg-muted/80" : "bg-muted/50"
                         )}>
+                                {/* ── Highlight tick bubble — appears on selection when a color is active ── */}
+                                {editor && selectedHighlightColor && (
+                                    <BubbleMenu
+                                        editor={editor}
+                                        options={{ placement: 'top' }}
+                                        shouldShow={({ editor }) => !editor.state.selection.empty}
+                                        className=""
+                                    >
+                                        <div className="flex items-center gap-1 rounded-full shadow-lg border border-white/20 px-2 py-1" style={{ backgroundColor: selectedHighlightColor }}>
+                                            <button
+                                                onClick={() => editor.chain().focus().toggleHighlight({ color: selectedHighlightColor }).run()}
+                                                className="flex items-center justify-center w-5 h-5 rounded-full bg-white/30 hover:bg-white/50 transition-colors"
+                                                title="Apply highlight"
+                                            >
+                                                <Check className="w-3 h-3 text-slate-800" strokeWidth={3} />
+                                            </button>
+                                            <button
+                                                onClick={() => setSelectedHighlightColor(null)}
+                                                className="flex items-center justify-center w-4 h-4 rounded-full hover:bg-white/30 transition-colors"
+                                                title="Cancel highlight mode"
+                                            >
+                                                <X className="w-2.5 h-2.5 text-slate-700" strokeWidth={2.5} />
+                                            </button>
+                                        </div>
+                                    </BubbleMenu>
+                                )}
+
                                 {editor && (
                             <BubbleMenu editor={editor} className="flex flex-col gap-1 items-center" options={{ placement: 'bottom' }}>
                                 {/* Hide BubbleMenu toolbar if already in header */}
                                 {!isExpanded && renderEditorToolbar()}
 
-                                {/* Top Row: Highlight Palette (Now Btm Check) */}
-                                {showHighlightPalette && ( // Swapped
-                                    <div className="flex items-center gap-2 p-1.5 bg-slate-900/90 backdrop-blur text-white rounded-full shadow-xl mt-1 animate-in slide-in-from-top-2 duration-200">
-                                            {[
-                                                { color: '#fef08a', name: 'Yellow', border: '#eab308' },
-                                                { color: '#bbf7d0', name: 'Green', border: '#22c55e' },
-                                                { color: '#bfdbfe', name: 'Blue', border: '#3b82f6' },
-                                                { color: '#fbcfe8', name: 'Pink', border: '#ec4899' },
-                                                { color: '#fed7aa', name: 'Orange', border: '#f97316' },
-                                            ].map((item) => (
-                                                <button
-                                                    key={item.color}
-                                                    onClick={() => {
-                                                        editor.chain().focus().toggleHighlight({ color: item.color }).run()
-                                                        // Optional: Keep palette open or close it? User didn't specify, keeping open might be nice for exploration, 
-                                                        // but usually selecting an action closes the submenu. Let's keep it toggled for now as "mode".
-                                                        // actually, "previous box shld also be there" implies a mode.
-                                                    }}
-                                                    className={cn(
-                                                        "w-6 h-6 rounded-full border border-white/20 shadow-sm hover:scale-125 transition-transform",
-                                                        editor.isActive('highlight', { color: item.color }) && "ring-2 ring-white scale-125"
-                                                    )}
-                                                    style={{ backgroundColor: item.color }}
-                                                    title={item.name}
-                                                />
-                                            ))}
-                                            
-                                            <div className="w-px h-4 bg-card/20 mx-1" />
-                                            
-                                            <button
-                                                onClick={() => {
-                                                    editor.chain().focus().unsetHighlight().run()
-                                                    setShowHighlightPalette(false) // Close palette on reset
-                                                }}
-                                                className="w-6 h-6 rounded-full border border-white/20 flex items-center justify-center bg-transparent text-white/70 hover:text-red-400 hover:border-red-400/50 transition-colors"
-                                                title="Remove Highlight"
-                                            >
-                                                <X className="w-3 h-3" />
-                                            </button>
-                                    </div>
-                                )}
-
-                                {/* Top Row: Font Size Palette (Now Btm Check) */}
-                                {showFontSizePalette && ( // Swapped
-                                    <div className="flex items-center gap-1 p-1.5 bg-slate-900/90 backdrop-blur text-white rounded-full shadow-xl mt-1 animate-in slide-in-from-top-2 duration-200 overflow-x-auto max-w-[90vw] no-scrollbar">
-                                        {[
-                                            { size: '12px', label: 'Small (12)' },
-                                            { size: '14px', label: 'Normal (14)' },
-                                            { size: '16px', label: 'Default (16)' },
-                                            { size: '18px', label: 'Medium (18)' },
-                                            { size: '20px', label: 'Large (20)' },
-                                            { size: '24px', label: 'XL (24)' },
-                                            { size: '30px', label: 'H1 (30)' },
-                                        ].map((item) => (
-                                            <button
-                                                key={item.size}
-                                                onClick={() => {
-                                                    editor.chain().focus().setFontSize(item.size).run()
-                                                }}
-                                                className={cn(
-                                                    "px-2.5 py-1 text-xs font-medium rounded-full hover:bg-card/20 transition-colors whitespace-nowrap",
-                                                    editor.getAttributes('textStyle')?.fontSize === item.size 
-                                                        ? "bg-card text-foreground shadow-sm" 
-                                                        : "text-white/80"
-                                                )}
-                                            >
-                                                {item.label}
-                                            </button>
-                                        ))}
-
-                                        <div className="w-px h-4 bg-card/20 mx-1" />
-                                            
-                                        <button
-                                            onClick={() => {
-                                                editor.chain().focus().unsetFontSize().run()
-                                                setShowFontSizePalette(false) // Close palette on reset
-                                            }}
-                                            className="w-6 h-6 rounded-full border border-white/20 flex items-center justify-center bg-transparent text-white/70 hover:text-red-400 hover:border-red-400/50 transition-colors"
-                                            title="Reset Size"
-                                        >
-                                            <X className="w-3 h-3" />
-                                        </button>
-                                    </div>
-                                )}
                             </BubbleMenu>
                         )}
                         
                         <div 
                             className={cn(
                                 // WRAPPER: Transparent, just layout positioning. No borders/backgrounds here.
-                                "transition-all duration-300 h-fit shrink-0 w-full flex justify-center",
+                                "transition-all duration-300 h-fit shrink-0 w-full flex justify-center relative",
                                 isExpanded ? "min-h-[900px] my-8" : "min-h-[600px]",
                                 forceLightMode && "force-light"
                             )}
                         >
-                                <EditorContent editor={editor} className="w-full max-w-5xl mx-auto" />
+                                <div className="relative mx-auto w-full max-w-3xl bg-card shadow-md rounded-sm border border-border/40 min-h-[600px]">
+                                    <EditorContent editor={editor} />
+                                </div>
                         </div>
                     </div>
                 </div>
+                )}
             </TabsContent>
 
             <TabsContent value="quiz" className="flex-1 overflow-hidden m-0 p-0 flex relative" id="quiz-split-container">
@@ -1614,9 +2796,23 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                     )}
                     style={{ width: `${quizSplit}%` }}
                 >
-                    <div className="px-4 py-3 border-b bg-card text-xs font-medium text-muted-foreground uppercase tracking-widest flex justify-between">
-                        <span>Quiz Editor</span>
-                        <span className="text-muted-foreground/50">Plain Text</span>
+                    <div className="px-4 py-3 border-b bg-card flex items-center justify-between gap-3">
+                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-widest">Quiz Editor</span>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={handleAiQuiz}
+                                disabled={aiQuizzing}
+                                className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-semibold transition-all bg-linear-to-r from-emerald-500 to-teal-600 text-white hover:from-emerald-600 hover:to-teal-700 shadow-sm disabled:opacity-50"
+                                title="AI Quiz — generate 10 MCQs from current notes"
+                            >
+                                {aiQuizzing
+                                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    : <span>🧠</span>
+                                }
+                                {aiQuizzing ? 'Generating…' : 'AI Quiz'}
+                            </button>
+                            <span className="text-xs text-muted-foreground/50">Plain Text</span>
+                        </div>
                     </div>
                     <textarea 
                         className="flex-1 w-full p-6 bg-muted font-mono text-sm resize-none focus:outline-none focus:bg-card transition-colors text-foreground"
@@ -1686,6 +2882,95 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                 )}
             </TabsContent>
         </Tabs>
+
+        {/* AI Format Instructions Modal */}
+        {isAiFormatOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setIsAiFormatOpen(false)}>
+                <div className="bg-card border border-border rounded-2xl shadow-2xl p-6 w-[480px] max-w-[90vw]" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xl">✨</span>
+                        <h2 className="font-bold text-base">AI Format Notes</h2>
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-4">
+                        The AI will read your notes and apply highlights, note boxes, bold, and structure automatically.
+                        Add custom instructions below to guide the formatting.
+                    </p>
+                    <div className="mb-4">
+                        <label className="text-xs font-semibold block mb-1.5 text-foreground">
+                            Custom Instructions <span className="font-normal text-muted-foreground">(optional)</span>
+                        </label>
+                        <Textarea
+                            autoFocus
+                            value={aiInstructions}
+                            onChange={e => setAiInstructions(e.target.value)}
+                            placeholder={`Examples:\n• Highlight all article numbers in blue\n• Put every case name in a violet box\n• Bold all definitions\n• Orange highlight all exceptions`}
+                            className="min-h-[120px] text-sm resize-none"
+                        />
+                    </div>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => { handleAiFormat(aiInstructions); setAiInstructions('') }}
+                            disabled={aiFormatting}
+                            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold text-white bg-linear-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 transition-all shadow disabled:opacity-50"
+                        >
+                            {aiFormatting ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>✨</span>}
+                            Format My Notes
+                        </button>
+                        <button
+                            onClick={() => setIsAiFormatOpen(false)}
+                            className="px-4 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:bg-muted transition-colors"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+      {/* ── Mobile Bottom Sheet (Option A pattern) ── */}
+      {mobileSheetLink && (
+        <>
+          <div 
+            className="fixed inset-0 bg-black/50 z-100 transition-opacity animate-in fade-in"
+            onClick={() => setMobileSheetLink(null)} 
+          />
+          <div className="fixed bottom-0 left-0 right-0 bg-card rounded-t-2xl shadow-xl z-101 transform transition-transform animate-in slide-in-from-bottom duration-300 max-h-[85vh] flex flex-col">
+            <div className="w-10 h-1 bg-border rounded-full mx-auto mt-3 mb-2" />
+            <div className="px-5 pb-3 border-b border-border flex justify-between items-center shrink-0">
+               <span 
+                 className="text-[0.6rem] tracking-wider rounded border px-2 py-1 font-mono uppercase"
+                 style={{ 
+                    color: parseLinkMeta(mobileSheetLink.label).color,
+                    backgroundColor: `${parseLinkMeta(mobileSheetLink.label).color}15`,
+                    borderColor: `${parseLinkMeta(mobileSheetLink.label).color}30`
+                 }}
+               >
+                 JUDGMENT · {parseLinkMeta(mobileSheetLink.label).text || mobileSheetLink.link_id}
+               </span>
+               <button onClick={() => setMobileSheetLink(null)} className="p-1 rounded-full hover:bg-muted text-muted-foreground">
+                 <X className="w-4 h-4" />
+               </button>
+            </div>
+            {mobileSheetLoading ? (
+              <div className="p-12 flex flex-col justify-center items-center gap-3">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                <span className="text-xs text-muted-foreground font-mono">Extracting text...</span>
+              </div>
+            ) : (
+              <div className="px-5 py-4 overflow-y-auto notes-editor-scroll text-[0.82rem] leading-relaxed text-foreground">
+                <div className="font-mono text-[0.62rem] text-amber-600 dark:text-amber-500 mb-2 tracking-wide uppercase">
+                  Page {mobileSheetLink.pdf_page}
+                </div>
+                {mobileSheetText}
+              </div>
+            )}
+            <div className="px-5 py-4 border-t border-border shrink-0">
+               <Button variant="outline" className="w-full text-xs h-9 font-medium" onClick={() => setMobileSheetLink(null)}>Close</Button>
+            </div>
+          </div>
+        </>
+      )}
+
     </div>
   )
 }

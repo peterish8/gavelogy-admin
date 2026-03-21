@@ -1,16 +1,39 @@
 import type { Metadata } from "next";
-import { Inter, Geist_Mono } from "next/font/google"; // Switched to Inter as requested
+import { Inter, Geist_Mono, Lora, Playfair_Display, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 
 const inter = Inter({
-  variable: "--font-inter", // Specific name to avoid collision with theme key
+  variable: "--font-inter",
   subsets: ["latin"],
 });
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+});
+
+// Body serif — warm readable serif for note body text
+const lora = Lora({
+  variable: "--font-lora",
+  subsets: ["latin"],
+  style: ["normal", "italic"],
+  weight: ["400", "500", "600", "700"],
+});
+
+// Title serif — high-contrast elegant serif for headings/case titles
+const playfairDisplay = Playfair_Display({
+  variable: "--font-playfair",
+  subsets: ["latin"],
+  style: ["normal", "italic"],
+  weight: ["400", "500", "600", "700", "800", "900"],
+});
+
+// Monospace — for citations, metadata, code
+const ibmPlexMono = IBM_Plex_Mono({
+  variable: "--font-ibm-mono",
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
 });
 
 export const metadata: Metadata = {
@@ -28,8 +51,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${inter.variable} ${geistMono.variable} antialiased font-sans`}
+<body
+        suppressHydrationWarning
+        className={`${inter.variable} ${geistMono.variable} ${lora.variable} ${playfairDisplay.variable} ${ibmPlexMono.variable} antialiased font-sans`}
       >
         <ThemeProvider
           attribute="class"
