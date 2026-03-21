@@ -2,9 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { b2Client, BUCKET } from '@/lib/b2-client'
-// pdf-parse is CommonJS — use require to avoid ESM interop issues in Next.js edge/server
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string }>
 import {
   sendMessage, editMessage, answerCallback,
   getSession, setSession, clearSession,
@@ -165,6 +162,8 @@ async function handleGenerateAi(chatId: number, itemId: string) {
   // 2. Extract text with pdf-parse
   let pdfText: string
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string }>
     const parsed = await pdfParse(pdfBuffer)
     pdfText = parsed.text
     if (!pdfText?.trim()) throw new Error('No text extracted from PDF')
