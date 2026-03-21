@@ -8,7 +8,7 @@ import {
   getCourses, getTopLevelFolders, getFolderChildren,
   getItem, getNoteContent, saveNoteContent, updateItemPdfUrl,
   createCourse, createStructureItem,
-  stripTags, truncate, btn, rows,
+  stripTags, truncate, btn, rows, sid, expandId,
 } from '@/lib/telegram'
 
 // Supports comma-separated list: e.g. "1243366277,6256543340"
@@ -54,7 +54,7 @@ async function showCourses(chatId: number, msgId?: number) {
   }
   const text = '📚 <b>Select a Course</b>'
   const kb: ReturnType<typeof btn>[][] = [
-    ...rows(courses.map(c => btn(`${c.icon ?? '📚'} ${c.name}`, `nav_c:${c.id}`)), 1),
+    ...rows(courses.map(c => btn(`${c.icon ?? '📚'} ${c.name}`, `nav_c:${sid(c.id)}`)), 1),
     [btn('➕ New Course', 'new_course')],
   ]
   msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
@@ -72,9 +72,9 @@ async function showCourse(chatId: number, courseId: string, msgId?: number) {
 
   const kb: ReturnType<typeof btn>[][] = [
     ...rows(all.map(i => btn(`${itemEmoji(i.item_type)} ${i.title}`,
-      i.item_type === 'folder' ? `nav_f:${i.id}:${courseId}` : `nav_i:${i.id}`
+      i.item_type === 'folder' ? `nav_f:${sid(i.id)}:${sid(courseId)}` : `nav_i:${sid(i.id)}`
     )), 1),
-    [btn('📁 New Module', `new_mod:${courseId}:root`), btn('📄 New Note', `new_note:${courseId}:root`)],
+    [btn('📁 New Module', `new_mod:${sid(courseId)}:root`), btn('📄 New Note', `new_note:${sid(courseId)}:root`)],
     [btn('← Back to Courses', 'nav_courses')],
   ]
   msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
@@ -92,10 +92,10 @@ async function showFolder(chatId: number, folderId: string, courseId: string, ms
 
   const kb: ReturnType<typeof btn>[][] = [
     ...rows(all.map(i => btn(`${itemEmoji(i.item_type)} ${i.title}`,
-      i.item_type === 'folder' ? `nav_f:${i.id}:${courseId}` : `nav_i:${i.id}`
+      i.item_type === 'folder' ? `nav_f:${sid(i.id)}:${sid(courseId)}` : `nav_i:${sid(i.id)}`
     )), 1),
-    [btn('📁 New Module', `new_mod:${courseId}:${folderId}`), btn('📄 New Note', `new_note:${courseId}:${folderId}`)],
-    [btn('← Back', `nav_c:${courseId}`)],
+    [btn('📁 New Module', `new_mod:${sid(courseId)}:${sid(folderId)}`), btn('📄 New Note', `new_note:${sid(courseId)}:${sid(folderId)}`)],
+    [btn('← Back', `nav_c:${sid(courseId)}`)],
   ]
   msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
 }
@@ -108,10 +108,10 @@ async function showNote(chatId: number, itemId: string, msgId?: number) {
   const text = `📄 <b>${item.title}</b>\n\n${hasPdf ? '✅ Judgment PDF attached' : '⚠️ No judgment PDF yet'}`
 
   const kb: ReturnType<typeof btn>[][] = [
-    [btn(hasPdf ? '🔄 Replace PDF' : '📄 Upload PDF', `act_upload:${itemId}`)],
-    [btn('🤖 Generate AI (Notes+Quiz+Flashcards)', `act_ai:${itemId}`)],
-    [btn('👁️ View Content', `view_menu:${itemId}`)],
-    [btn('← Back', item.parent_id ? `nav_f:${item.parent_id}:${item.course_id}` : `nav_c:${item.course_id}`)],
+    [btn(hasPdf ? '🔄 Replace PDF' : '📄 Upload PDF', `act_upload:${sid(itemId)}`)],
+    [btn('🤖 Generate AI (Notes+Quiz+Flashcards)', `act_ai:${sid(itemId)}`)],
+    [btn('👁️ View Content', `view_menu:${sid(itemId)}`)],
+    [btn('← Back', item.parent_id ? `nav_f:${sid(item.parent_id)}:${sid(item.course_id)}` : `nav_c:${sid(item.course_id)}`)],
   ]
   msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
 }
@@ -119,10 +119,10 @@ async function showNote(chatId: number, itemId: string, msgId?: number) {
 async function showViewMenu(chatId: number, itemId: string, msgId?: number) {
   const text = '👁️ <b>What would you like to view?</b>'
   const kb = [
-    [btn('📝 Notes', `view_n:${itemId}`)],
-    [btn('❓ Quiz (generate on demand)', `view_q:${itemId}`)],
-    [btn('🃏 Flashcards (generate on demand)', `view_f:${itemId}`)],
-    [btn('← Back', `nav_i:${itemId}`)],
+    [btn('📝 Notes', `view_n:${sid(itemId)}`)],
+    [btn('❓ Quiz (generate on demand)', `view_q:${sid(itemId)}`)],
+    [btn('🃏 Flashcards (generate on demand)', `view_f:${sid(itemId)}`)],
+    [btn('← Back', `nav_i:${sid(itemId)}`)],
   ]
   msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
 }
@@ -243,7 +243,7 @@ async function handleGenerateAi(chatId: number, itemId: string) {
   ].join('\n')
 
   await editMessage(chatId, progressMsgId, summary, [
-    [btn('👁️ View Notes', `view_n:${itemId}`), btn('← Back to Note', `nav_i:${itemId}`)],
+    [btn('👁️ View Notes', `view_n:${sid(itemId)}`), btn('← Back to Note', `nav_i:${sid(itemId)}`)],
   ])
 }
 
@@ -505,17 +505,27 @@ async function handleCallback(chatId: number, callbackId: string, data: string, 
   // nav_courses
   if (data === 'nav_courses') { await showCourses(chatId, msgId); return }
 
-  // nav_c:{courseId}
-  if (data.startsWith('nav_c:')) { await showCourse(chatId, data.slice(6), msgId); return }
+  // nav_c:{shortCourseId}
+  if (data.startsWith('nav_c:')) {
+    const courseId = await expandId('courses', data.slice(6))
+    await showCourse(chatId, courseId, msgId); return
+  }
 
-  // nav_f:{folderId}:{courseId}
+  // nav_f:{shortFolderId}:{shortCourseId}
   if (data.startsWith('nav_f:')) {
-    const [, folderId, courseId] = data.split(':')
+    const [, shortFolder, shortCourse] = data.split(':')
+    const [folderId, courseId] = await Promise.all([
+      expandId('structure_items', shortFolder),
+      expandId('courses', shortCourse),
+    ])
     await showFolder(chatId, folderId, courseId, msgId); return
   }
 
-  // nav_i:{itemId}
-  if (data.startsWith('nav_i:')) { await showNote(chatId, data.slice(6), msgId); return }
+  // nav_i:{shortItemId}
+  if (data.startsWith('nav_i:')) {
+    const itemId = await expandId('structure_items', data.slice(6))
+    await showNote(chatId, itemId, msgId); return
+  }
 
   // new_course
   if (data === 'new_course') {
@@ -524,46 +534,63 @@ async function handleCallback(chatId: number, callbackId: string, data: string, 
     return
   }
 
-  // new_mod:{courseId}:{parentId}
+  // new_mod:{shortCourseId}:{shortParentId|root}
   if (data.startsWith('new_mod:')) {
-    const [, courseId, parentId] = data.split(':')
+    const [, shortCourse, shortParent] = data.split(':')
+    const courseId = await expandId('courses', shortCourse)
+    const parentId = shortParent === 'root' ? 'root' : await expandId('structure_items', shortParent)
     await setSession(chatId, 'creating_module_name', { courseId, parentId })
     await editMessage(chatId, msgId, '📁 <b>New Module</b>\n\nEnter the module name:')
     return
   }
 
-  // new_note:{courseId}:{parentId}
+  // new_note:{shortCourseId}:{shortParentId|root}
   if (data.startsWith('new_note:')) {
-    const [, courseId, parentId] = data.split(':')
+    const [, shortCourse, shortParent] = data.split(':')
+    const courseId = await expandId('courses', shortCourse)
+    const parentId = shortParent === 'root' ? 'root' : await expandId('structure_items', shortParent)
     await setSession(chatId, 'creating_note_title', { courseId, parentId })
     await editMessage(chatId, msgId, '📄 <b>New Note</b>\n\nEnter the note title:')
     return
   }
 
-  // act_upload:{itemId}
+  // act_upload:{shortItemId}
   if (data.startsWith('act_upload:')) {
-    const itemId = data.slice(11)
+    const itemId = await expandId('structure_items', data.slice(11))
     await setSession(chatId, 'awaiting_pdf', { itemId })
     await editMessage(chatId, msgId, '📎 <b>Send the PDF file now.</b>\n\nJust send it as a document in this chat. The file will replace any existing judgment for this note.')
     return
   }
 
-  // act_ai:{itemId}
+  // act_ai:{shortItemId}
   if (data.startsWith('act_ai:')) {
-    await handleGenerateAi(chatId, data.slice(7)); return
+    const itemId = await expandId('structure_items', data.slice(7))
+    await handleGenerateAi(chatId, itemId); return
   }
 
-  // view_menu:{itemId}
-  if (data.startsWith('view_menu:')) { await showViewMenu(chatId, data.slice(10), msgId); return }
+  // view_menu:{shortItemId}
+  if (data.startsWith('view_menu:')) {
+    const itemId = await expandId('structure_items', data.slice(10))
+    await showViewMenu(chatId, itemId, msgId); return
+  }
 
-  // view_n:{itemId}
-  if (data.startsWith('view_n:')) { await handleViewNotes(chatId, data.slice(7)); return }
+  // view_n:{shortItemId}
+  if (data.startsWith('view_n:')) {
+    const itemId = await expandId('structure_items', data.slice(7))
+    await handleViewNotes(chatId, itemId); return
+  }
 
-  // view_q:{itemId}
-  if (data.startsWith('view_q:')) { await handleViewQuiz(chatId, data.slice(7)); return }
+  // view_q:{shortItemId}
+  if (data.startsWith('view_q:')) {
+    const itemId = await expandId('structure_items', data.slice(7))
+    await handleViewQuiz(chatId, itemId); return
+  }
 
-  // view_f:{itemId}
-  if (data.startsWith('view_f:')) { await handleViewFlashcards(chatId, data.slice(7)); return }
+  // view_f:{shortItemId}
+  if (data.startsWith('view_f:')) {
+    const itemId = await expandId('structure_items', data.slice(7))
+    await handleViewFlashcards(chatId, itemId); return
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
