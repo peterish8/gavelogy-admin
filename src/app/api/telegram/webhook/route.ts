@@ -8,10 +8,16 @@ import {
   getCourses, getTopLevelFolders, getFolderChildren,
   getItem, getNoteContent, saveNoteContent, updateItemPdfUrl,
   createCourse, createStructureItem,
-  getCourseStructure,
+  getCourse, updateCoursePrice, toggleCourseActive,
+  getCourseStructure, getLatestNoteWithContent, getStats,
   stripTags, truncate, btn, rows, sid, expandId,
   extractPdfText,
 } from '@/lib/telegram'
+
+const ADMIN_NAMES: Record<number, string> = {
+  1243366277: 'Aksh',
+  6256543340: 'Peter',
+}
 
 // Supports comma-separated list: e.g. "1243366277,6256543340"
 const ADMIN_CHAT_IDS = new Set(
@@ -63,6 +69,21 @@ async function showCourses(chatId: number, msgId?: number) {
   msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
 }
 
+async function showCourseSettings(chatId: number, courseId: string, msgId?: number) {
+  const course = await getCourse(courseId)
+  if (!course) { await sendMessage(chatId, '❌ Course not found.'); return }
+
+  const status = course.is_active ? '🟢 Published' : '🔴 Hidden'
+  const text = `⚙️ <b>${course.name} — Settings</b>\n\n💰 Price: ₹${course.price ?? 0}\n📢 Status: ${status}`
+
+  const kb: ReturnType<typeof btn>[][] = [
+    [btn(course.is_active ? '🔴 Hide Course' : '🟢 Publish Course', `toggle_pub:${sid(courseId)}`)],
+    [btn('💰 Change Price', `edit_price:${sid(courseId)}`)],
+    [btn('← Back to Course', `nav_c:${sid(courseId)}`)],
+  ]
+  msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
+}
+
 async function showCourse(chatId: number, courseId: string, msgId?: number) {
   const items = await getTopLevelFolders(courseId)
   const folders = items.filter(i => i.item_type === 'folder')
@@ -74,15 +95,11 @@ async function showCourse(chatId: number, courseId: string, msgId?: number) {
     : `📁 <b>Modules</b> (${folders.length} folders, ${files.length} notes)`
 
   const kb: ReturnType<typeof btn>[][] = [
-    // nav_f:{8}:{8} = 6 + 8 + 1 + 8 = 23 bytes ✓
-    // nav_i:{8}     = 6 + 8         = 14 bytes ✓
     ...rows(all.map(i => btn(`${itemEmoji(i.item_type)} ${i.title}`,
       i.item_type === 'folder' ? `nav_f:${sid(i.id)}:${sid(courseId)}` : `nav_i:${sid(i.id)}`
     )), 1),
-    // new_mod:{8}:root = 8 + 8 + 1 + 4 = 21 bytes ✓
-    // new_note:{8}:root= 9 + 8 + 1 + 4 = 22 bytes ✓
     [btn('📁 New Module', `new_mod:${sid(courseId)}:root`), btn('📄 New Note', `new_note:${sid(courseId)}:root`)],
-    [btn('← Back to Courses', 'nav_courses')],
+    [btn('⚙️ Settings', `course_set:${sid(courseId)}`), btn('← Back', 'nav_courses')],
   ]
   msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
 }
@@ -117,18 +134,30 @@ async function showNote(chatId: number, itemId: string, msgId?: number) {
   if (!item) { await sendMessage(chatId, '❌ Note not found.'); return }
 
   const hasPdf = !!item.pdf_url
-  const text = `📄 <b>${item.title}</b>\n\n${hasPdf ? '✅ Judgment PDF attached' : '⚠️ No judgment PDF yet'}`
+  const backBtn = btn('← Back', item.parent_id ? `nav_f:${sid(item.parent_id)}:${sid(item.course_id)}` : `nav_c:${sid(item.course_id)}`)
 
-  const kb: ReturnType<typeof btn>[][] = [
-    // act_upload:{8}   = 11 + 8 = 19 bytes ✓
-    [btn(hasPdf ? '🔄 Replace PDF' : '📄 Upload PDF', `act_upload:${sid(itemId)}`)],
-    // act_ai:{8}       = 7  + 8 = 15 bytes ✓
-    [btn('🤖 Generate AI (Notes+Quiz+Flashcards)', `act_ai:${sid(itemId)}`)],
-    // view_menu:{8}    = 10 + 8 = 18 bytes ✓
-    [btn('👁️ View Content', `view_menu:${sid(itemId)}`)],
-    // nav_f:{8}:{8} = 23 bytes ✓  or  nav_c:{8} = 14 bytes ✓
-    [btn('← Back', item.parent_id ? `nav_f:${sid(item.parent_id)}:${sid(item.course_id)}` : `nav_c:${sid(item.course_id)}`)],
-  ]
+  let text: string
+  let kb: ReturnType<typeof btn>[][]
+
+  if (hasPdf) {
+    // ── TAG MODE ── PDF attached, AI generation available
+    text = `📄 <b>${item.title}</b>\n\n🏷️ <b>Tag Mode</b> — Judgment PDF attached\n\nYou can generate AI notes, quiz and flashcards from the PDF.`
+    kb = [
+      [btn('🔄 Replace PDF', `act_upload:${sid(itemId)}`)],
+      [btn('🤖 Generate AI (Notes + Quiz + Flashcards)', `act_ai:${sid(itemId)}`)],
+      [btn('👁️ View Content', `view_menu:${sid(itemId)}`)],
+      [btn('📝 Switch to Notes Mode', `mode_notes:${sid(itemId)}`), backBtn],
+    ]
+  } else {
+    // ── NOTES MODE ── No PDF, text content only
+    text = `📄 <b>${item.title}</b>\n\n📝 <b>Notes Mode</b> — No judgment PDF\n\nUpload a PDF to switch to Tag Mode and enable AI generation.`
+    kb = [
+      [btn('📤 Upload PDF → switches to Tag Mode', `act_upload:${sid(itemId)}`)],
+      [btn('👁️ View Notes', `view_n:${sid(itemId)}`)],
+      [backBtn],
+    ]
+  }
+
   msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
 }
 
@@ -148,6 +177,87 @@ async function showViewMenu(chatId: number, itemId: string, msgId?: number) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// SLASH COMMAND SCREENS
+// ═══════════════════════════════════════════════════════════════════════
+
+async function showHelp(chatId: number) {
+  await sendMessage(
+    chatId,
+    `📖 <b>Gavelogy Bot — Commands</b>\n\n` +
+    `/start — Home screen\n` +
+    `/help — This help message\n` +
+    `/courses — Browse all courses\n` +
+    `/new — Quick create menu\n` +
+    `/newcourse — Create a new course\n` +
+    `/newmodule — Create a module (picks course)\n` +
+    `/newnote — Create a note (picks course)\n` +
+    `/generate — Generate AI (picks course → note)\n` +
+    `/upload — Upload PDF (picks course → note)\n` +
+    `/publish — Publish/hide a course\n` +
+    `/price — Change a course price\n` +
+    `/status — Platform stats\n` +
+    `/me — Your admin info\n\n` +
+    `<i>Or just type naturally — "go to civil law", "upload pdf for rajeeb note"</i>`,
+    [[btn('📚 Browse Courses', 'nav_courses'), btn('➕ New Course', 'new_course')]]
+  )
+}
+
+async function showNewMenu(chatId: number) {
+  await sendMessage(
+    chatId,
+    '➕ <b>What would you like to create?</b>',
+    [
+      [btn('📚 New Course', 'new_course')],
+      [btn('📁 New Module', 'sc_pick:mod'), btn('📄 New Note', 'sc_pick:note')],
+    ]
+  )
+}
+
+async function showStatus(chatId: number) {
+  const stats = await getStats()
+  const pct = stats.notes > 0 ? Math.round((stats.notesWithContent / stats.notes) * 100) : 0
+  await sendMessage(
+    chatId,
+    `📊 <b>Platform Stats</b>\n\n` +
+    `📚 Courses: <b>${stats.courses}</b>\n` +
+    `📁 Modules: <b>${stats.folders}</b>\n` +
+    `📄 Notes: <b>${stats.notes}</b>\n` +
+    `📎 Notes with PDF: <b>${stats.notesWithPdf}</b>\n` +
+    `🤖 Notes with AI content: <b>${stats.notesWithContent}</b> (${pct}%)\n`,
+    [[btn('📚 Browse Courses', 'nav_courses')]]
+  )
+}
+
+async function showMe(chatId: number) {
+  const name = ADMIN_NAMES[chatId] ?? 'Admin'
+  await sendMessage(
+    chatId,
+    `👤 <b>Your Info</b>\n\nName: <b>${name}</b>\nChat ID: <code>${chatId}</code>\nRole: Admin`,
+    [[btn('🏠 Home', 'nav_home')]]
+  )
+}
+
+// ── Pick a course, then show all its notes for generate/upload ─────────
+async function showPickCourseFor(chatId: number, action: 'gen' | 'upload' | 'mod' | 'note') {
+  const courses = await getCourses()
+  if (courses.length === 0) {
+    await sendMessage(chatId, '📚 No courses yet. Create one first!', [[btn('➕ New Course', 'new_course')]])
+    return
+  }
+  const label =
+    action === 'gen' ? '🤖 Generate AI' :
+    action === 'upload' ? '📤 Upload PDF' :
+    action === 'mod' ? '📁 New Module' : '📄 New Note'
+  await sendMessage(
+    chatId,
+    `${label} — <b>Pick a course first:</b>`,
+    [
+      ...rows(courses.map(c => btn(`${c.icon ?? '📚'} ${c.name}`, `sc_pick_c:${action}:${sid(c.id)}`)), 1),
+    ]
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // AI GENERATION
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -155,113 +265,127 @@ async function handleGenerateAi(chatId: number, itemId: string) {
   const item = await getItem(itemId)
   if (!item) { await sendMessage(chatId, '❌ Note not found.'); return }
   if (!item.pdf_url) {
-    await sendMessage(chatId, '❌ No judgment PDF attached to this note.\nUpload a PDF first, then try again.', [
-      // nav_i:{8} = 14 bytes ✓
+    await sendMessage(chatId, '❌ No PDF attached. Upload a PDF first (Tag Mode).', [
       [btn('← Back to Note', `nav_i:${sid(itemId)}`)],
     ])
     return
   }
 
-  const progressMsg = await sendMessage(chatId, `⏳ Fetching PDF for <b>${item.title}</b>…`)
-  const progressMsgId = progressMsg?.result?.message_id
+  // Live progress log — each line is appended and message is edited in real time
+  const log: string[] = [`🤖 <b>AI Generation — ${item.title}</b>\n`]
+  const progressMsg = await sendMessage(chatId, log.join('\n'))
+  const msgId = progressMsg?.result?.message_id
+  const update = async () => { if (msgId) await editMessage(chatId, msgId, log.join('\n')) }
 
-  // 1. Get signed URL and download PDF
+  const elapsed = (start: number) => `${Math.round((Date.now() - start) / 1000)}s`
+
+  // ── STEP 1: Fetch PDF ──────────────────────────────────────────────
+  log.push('📥 Fetching PDF from storage…')
+  await update()
   let pdfBuffer: Buffer
   try {
+    const t = Date.now()
     const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: item.pdf_url })
     const signedUrl = await getSignedUrl(b2Client, cmd, { expiresIn: 300 })
     const res = await fetch(signedUrl)
-    if (!res.ok) throw new Error(`Failed to download PDF: ${res.status}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     pdfBuffer = Buffer.from(await res.arrayBuffer())
+    log[log.length - 1] = `📥 PDF fetched ✅ · ${elapsed(t)}`
+    await update()
   } catch (e: any) {
-    await editMessage(chatId, progressMsgId, `❌ Could not fetch PDF: ${e.message}\n\nPlease generate from the admin panel instead.`, [
-      [btn('← Back', `nav_i:${sid(itemId)}`)],
-    ])
+    log[log.length - 1] = `📥 PDF fetch ❌ — ${e.message}`
+    await update()
+    await sendMessage(chatId, '❌ Could not fetch PDF. Please try again.', [[btn('← Back', `nav_i:${sid(itemId)}`)]])
     return
   }
 
-  // 2. Extract text with pdf-parse (Vercel-safe via extractPdfText helper)
+  // ── STEP 2: Extract text ───────────────────────────────────────────
+  log.push('📄 Extracting text from PDF…')
+  await update()
   let pdfText: string
   try {
-    if (progressMsgId) await editMessage(chatId, progressMsgId, '📄 Extracting PDF text…')
+    const t = Date.now()
     pdfText = await extractPdfText(pdfBuffer)
+    const words = pdfText.split(/\s+/).length
+    log[log.length - 1] = `📄 Text extracted ✅ · ${words.toLocaleString()} words · ${elapsed(t)}`
+    await update()
   } catch (e: any) {
-    await editMessage(chatId, progressMsgId, `❌ Could not extract PDF text: ${e.message}\n\nThe PDF may be scanned/image-based. Please generate from the admin panel.`, [
-      [btn('← Back', `nav_i:${sid(itemId)}`)],
-    ])
+    log[log.length - 1] = `📄 Text extraction ❌ — ${e.message}`
+    await update()
+    await sendMessage(chatId, '❌ PDF may be scanned/image-based. Cannot extract text.', [[btn('← Back', `nav_i:${sid(itemId)}`)]])
     return
   }
 
   const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
+  log.push('')
+  await update()
 
-  // 3. Generate Notes
-  if (progressMsgId) await editMessage(chatId, progressMsgId, '📝 Generating notes… (this may take 15–30s)')
+  // ── STEP 3: Notes ──────────────────────────────────────────────────
+  log.push('📝 <b>Notes</b> — generating…')
+  await update()
   let notesText = ''
-  let notesProvider = 'unknown'
   try {
+    const t = Date.now()
     const res = await fetch(`${baseUrl}/api/ai-summarize`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pdfText }),
     })
     const data = await res.json()
-    if (!res.ok || data.error) throw new Error(data.error || 'Notes generation failed')
+    if (!res.ok || data.error) throw new Error(data.error || 'failed')
     await saveNoteContent(itemId, data.formatted)
     notesText = stripTags(data.formatted)
-    notesProvider = data.provider ?? 'unknown'
+    log[log.length - 1] = `📝 <b>Notes</b> ✅ · <code>${data.provider ?? 'unknown'}</code> · ${elapsed(t)}`
+    await update()
   } catch (e: any) {
-    await editMessage(chatId, progressMsgId, `❌ Notes generation failed: ${e.message}`, [
-      [btn('← Back', `nav_i:${sid(itemId)}`)],
-    ])
+    log[log.length - 1] = `📝 <b>Notes</b> ❌ — ${e.message}`
+    await update()
+    await sendMessage(chatId, '❌ Notes generation failed. Cannot continue.', [[btn('← Back', `nav_i:${sid(itemId)}`)]])
     return
   }
 
-  // 4. Generate Quiz
-  if (progressMsgId) await editMessage(chatId, progressMsgId, '❓ Generating quiz…')
+  // ── STEP 4: Quiz ───────────────────────────────────────────────────
+  log.push('❓ <b>Quiz</b> — generating…')
+  await update()
   let quizCount = 0
-  let quizProvider = 'unknown'
   try {
+    const t = Date.now()
     const res = await fetch(`${baseUrl}/api/ai-quiz`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ notesText }),
     })
     const data = await res.json()
-    if (res.ok && data.quiz) {
-      const matches = data.quiz.match(/^Q\d+\./gm)
-      quizCount = matches?.length ?? 10
-      quizProvider = data.provider ?? 'unknown'
-    }
-  } catch { /* non-fatal */ }
+    if (!res.ok || data.error) throw new Error(data.error || 'failed')
+    quizCount = (data.quiz as string).match(/^Q\d+\./gm)?.length ?? 10
+    log[log.length - 1] = `❓ <b>Quiz</b> ✅ · ${quizCount} questions · <code>${data.provider ?? 'unknown'}</code> · ${elapsed(t)}`
+    await update()
+  } catch (e: any) {
+    log[log.length - 1] = `❓ <b>Quiz</b> ❌ — ${e.message} (non-fatal)`
+    await update()
+  }
 
-  // 5. Generate Flashcards
-  if (progressMsgId) await editMessage(chatId, progressMsgId, '🃏 Generating flashcards…')
+  // ── STEP 5: Flashcards ─────────────────────────────────────────────
+  log.push('🃏 <b>Flashcards</b> — generating…')
+  await update()
   let cardCount = 0
-  let flashProvider = 'unknown'
   try {
+    const t = Date.now()
     const res = await fetch(`${baseUrl}/api/ai-flashcards`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ notesText }),
     })
     const data = await res.json()
-    if (res.ok && data.flashcards) {
-      cardCount = data.flashcards.length
-      flashProvider = data.provider ?? 'unknown'
-    }
-  } catch { /* non-fatal */ }
+    if (!res.ok || data.error) throw new Error(data.error || 'failed')
+    cardCount = (data.flashcards ?? []).length
+    log[log.length - 1] = `🃏 <b>Flashcards</b> ✅ · ${cardCount} cards · <code>${data.provider ?? 'unknown'}</code> · ${elapsed(t)}`
+    await update()
+  } catch (e: any) {
+    log[log.length - 1] = `🃏 <b>Flashcards</b> ❌ — ${e.message} (non-fatal)`
+    await update()
+  }
 
-  // 6. Done
-  const summary = [
-    `✅ <b>AI Generation Complete</b> — <i>${item.title}</i>`,
-    '',
-    `📝 <b>Notes</b> saved  •  Model: <code>${notesProvider}</code>`,
-    `❓ <b>Quiz</b>: ${quizCount} questions  •  Model: <code>${quizProvider}</code>`,
-    `🃏 <b>Flashcards</b>: ${cardCount} cards  •  Model: <code>${flashProvider}</code>`,
-  ].join('\n')
-
-  await editMessage(chatId, progressMsgId, summary, [
-    // view_n:{8} = 15 bytes ✓   nav_i:{8} = 14 bytes ✓
+  // ── DONE ───────────────────────────────────────────────────────────
+  log.push('\n✅ <b>All done!</b>')
+  await editMessage(chatId, msgId, log.join('\n'), [
     [btn('👁️ View Notes', `view_n:${sid(itemId)}`), btn('← Back to Note', `nav_i:${sid(itemId)}`)],
   ])
 }
@@ -782,7 +906,8 @@ async function handleTextInput(chatId: number, text: string) {
     }
     case 'creating_course_price': {
       const raw = text.trim().toLowerCase()
-      const price = raw === '/skip' ? 0 : parseInt(raw, 10) || 0
+      // Strip commas/spaces so "3,333" or "3 333" parses as 3333
+      const price = raw === '/skip' ? 0 : parseInt(raw.replace(/[,\s]/g, ''), 10) || 0
       const { name, desc } = session.data
       await clearSession(chatId)
       try {
@@ -809,12 +934,9 @@ async function handleTextInput(chatId: number, text: string) {
           itemType: 'folder',
           title: text.trim(),
         })
-        await sendMessage(chatId, `✅ <b>Module created!</b>\n\n📁 ${text.trim()}`, [
-          // nav_f:{8}:{8} = 23 bytes ✓
-          [btn('📂 Open Module', `nav_f:${sid(id)}:${sid(courseId)}`)],
-          // nav_c:{8} or nav_f:{8}:{8} ✓
-          [btn('← Back', parentId === 'root' ? `nav_c:${sid(courseId)}` : `nav_f:${sid(parentId)}:${sid(courseId)}`)],
-        ])
+        // Auto-navigate into the new module so user lands in the folder view
+        await sendMessage(chatId, `✅ <b>Module "${text.trim()}" created!</b>`)
+        await showFolder(chatId, id, courseId)
       } catch (e: any) {
         await sendMessage(chatId, `❌ Failed to create module: ${e.message}`)
       }
@@ -832,12 +954,9 @@ async function handleTextInput(chatId: number, text: string) {
           itemType: 'file',
           title: text.trim(),
         })
-        await sendMessage(chatId, `✅ <b>Note created!</b>\n\n📄 ${text.trim()}`, [
-          // nav_i:{8} = 14 bytes ✓
-          [btn('📄 Open Note', `nav_i:${sid(id)}`)],
-          // nav_c:{8} or nav_f:{8}:{8} ✓
-          [btn('← Back', parentId === 'root' ? `nav_c:${sid(courseId)}` : `nav_f:${sid(parentId)}:${sid(courseId)}`)],
-        ])
+        // Auto-navigate into the note so user sees Upload PDF / Generate AI directly
+        await sendMessage(chatId, `✅ <b>Note "${text.trim()}" created!</b>`)
+        await showNote(chatId, id)
       } catch (e: any) {
         await sendMessage(chatId, `❌ Failed to create note: ${e.message}`)
       }
@@ -845,11 +964,29 @@ async function handleTextInput(chatId: number, text: string) {
     }
 
     // ── IDLE: route free text through natural language AI ──────────
+    // ── EDIT COURSE PRICE ─────────────────────────────────────────
+    case 'editing_course_price': {
+      const { courseId } = session.data
+      await clearSession(chatId)
+      const raw = text.trim()
+      const price = raw === '/skip' ? null : parseInt(raw.replace(/[,\s]/g, ''), 10)
+      if (price === null || isNaN(price) || price < 0) {
+        await sendMessage(chatId, '❌ Invalid price. Enter a number like <code>3333</code> or <code>0</code> for free.')
+        await setSession(chatId, 'editing_course_price', { courseId })
+        return
+      }
+      try {
+        await updateCoursePrice(courseId, price)
+        await sendMessage(chatId, `✅ Price updated to ₹${price}`)
+        await showCourseSettings(chatId, courseId)
+      } catch (e: any) {
+        await sendMessage(chatId, `❌ Failed to update price: ${e.message}`)
+      }
+      break
+    }
+
     case 'idle':
     default:
-      // When session is idle and the user types free text, interpret it
-      // with the LLM-powered natural language handler instead of showing
-      // a generic "use buttons" message.
       await handleNaturalLanguage(chatId, text)
       break
   }
@@ -961,6 +1098,80 @@ async function handleCallback(chatId: number, callbackId: string, data: string, 
     const itemId = await expandId('structure_items', data.slice(7))
     await handleViewFlashcards(chatId, itemId); return
   }
+
+  // mode_notes:{shortItemId} — switch to notes mode view (just re-shows note, mode is auto from pdf_url)
+  if (data.startsWith('mode_notes:')) {
+    const itemId = await expandId('structure_items', data.slice(11))
+    await showNote(chatId, itemId, msgId); return
+  }
+
+  // course_set:{shortCourseId} — open course settings
+  if (data.startsWith('course_set:')) {
+    const courseId = await expandId('courses', data.slice(11))
+    await showCourseSettings(chatId, courseId, msgId); return
+  }
+
+  // toggle_pub:{shortCourseId} — publish/unpublish
+  if (data.startsWith('toggle_pub:')) {
+    const courseId = await expandId('courses', data.slice(11))
+    const newState = await toggleCourseActive(courseId)
+    await editMessage(chatId, msgId, `${newState ? '🟢 Course published!' : '🔴 Course hidden!'}`)
+    await showCourseSettings(chatId, courseId)
+    return
+  }
+
+  // edit_price:{shortCourseId} — start price edit wizard
+  if (data.startsWith('edit_price:')) {
+    const courseId = await expandId('courses', data.slice(11))
+    await setSession(chatId, 'editing_course_price', { courseId })
+    await editMessage(chatId, msgId, '💰 Enter the new price in ₹ (e.g. <code>3333</code>) or <code>0</code> for free:')
+    return
+  }
+
+  // nav_home — back to welcome
+  if (data === 'nav_home') { await showWelcome(chatId); return }
+
+  // sc_pick:mod|note|gen|upload — pick a course for slash command flow
+  if (data.startsWith('sc_pick:')) {
+    const action = data.slice(8) as 'gen' | 'upload' | 'mod' | 'note'
+    await showPickCourseFor(chatId, action)
+    return
+  }
+
+  // sc_pick_c:{action}:{shortCourseId} — course chosen, now show items or start wizard
+  if (data.startsWith('sc_pick_c:')) {
+    const parts = data.split(':')
+    const action = parts[1] as 'gen' | 'upload' | 'mod' | 'note'
+    const courseId = await expandId('courses', parts[2])
+    if (action === 'mod') {
+      await setSession(chatId, 'creating_module_name', { courseId, parentId: 'root' })
+      await editMessage(chatId, msgId, '📁 <b>New Module</b>\n\nEnter the module name:')
+    } else if (action === 'note') {
+      await setSession(chatId, 'creating_note_title', { courseId, parentId: 'root' })
+      await editMessage(chatId, msgId, '📄 <b>New Note</b>\n\nEnter the note title:')
+    } else {
+      // gen or upload: show the course so user can pick a note
+      const label = action === 'gen' ? '🤖 Tap a note to Generate AI' : '📤 Tap a note to Upload PDF'
+      await editMessage(chatId, msgId, label)
+      await showCourse(chatId, courseId)
+    }
+    return
+  }
+
+  // sc_pub:{shortCourseId} — publish/unpublish course (from /publish command)
+  if (data.startsWith('sc_pub:')) {
+    const courseId = await expandId('courses', data.slice(7))
+    await showCourseSettings(chatId, courseId, msgId)
+    return
+  }
+
+  // sc_price:{shortCourseId} — edit price (from /price command)
+  if (data.startsWith('sc_price:')) {
+    const courseId = await expandId('courses', data.slice(9))
+    await setSession(chatId, 'editing_course_price', { courseId })
+    await editMessage(chatId, msgId, '💰 Enter the new price in ₹ (e.g. <code>3333</code>) or <code>0</code> for free:')
+    return
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1001,11 +1212,64 @@ export async function POST(req: NextRequest) {
 
       // Commands
       if (text.startsWith('/')) {
-        const cmd = text.split(' ')[0].toLowerCase()
+        const cmd = text.split(' ')[0].toLowerCase().split('@')[0] // strip @botname suffix
         await clearSession(chatId)
-        if (cmd === '/start' || cmd === '/help') { await showWelcome(chatId); return NextResponse.json({ ok: true }) }
-        if (cmd === '/courses') { await showCourses(chatId); return NextResponse.json({ ok: true }) }
-        await showWelcome(chatId)
+        switch (cmd) {
+          case '/start':
+            await showWelcome(chatId); break
+          case '/help':
+            await showHelp(chatId); break
+          case '/courses':
+            await showCourses(chatId); break
+          case '/new':
+            await showNewMenu(chatId); break
+          case '/newcourse':
+            await setSession(chatId, 'creating_course_name', {})
+            await sendMessage(chatId, '➕ <b>New Course</b>\n\nEnter the course name:')
+            break
+          case '/newmodule':
+            await showPickCourseFor(chatId, 'mod'); break
+          case '/newnote':
+            await showPickCourseFor(chatId, 'note'); break
+          case '/generate':
+            await showPickCourseFor(chatId, 'gen'); break
+          case '/upload':
+            await showPickCourseFor(chatId, 'upload'); break
+          case '/publish': {
+            // Show list of courses to pick which to publish/hide
+            const courses = await getCourses()
+            if (courses.length === 0) {
+              await sendMessage(chatId, '📚 No courses yet.')
+            } else {
+              await sendMessage(
+                chatId,
+                '📢 <b>Publish / Hide — Pick a course:</b>',
+                rows(courses.map(c => btn(`${c.icon ?? '📚'} ${c.name}`, `sc_pub:${sid(c.id)}`)), 1)
+              )
+            }
+            break
+          }
+          case '/price': {
+            // Show list of courses to pick which to edit price
+            const courses = await getCourses()
+            if (courses.length === 0) {
+              await sendMessage(chatId, '📚 No courses yet.')
+            } else {
+              await sendMessage(
+                chatId,
+                '💰 <b>Change Price — Pick a course:</b>',
+                rows(courses.map(c => btn(`${c.icon ?? '📚'} ${c.name}`, `sc_price:${sid(c.id)}`)), 1)
+              )
+            }
+            break
+          }
+          case '/status':
+            await showStatus(chatId); break
+          case '/me':
+            await showMe(chatId); break
+          default:
+            await showHelp(chatId); break
+        }
         return NextResponse.json({ ok: true })
       }
 

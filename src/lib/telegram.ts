@@ -205,6 +205,38 @@ export async function updateItemPdfUrl(itemId: string, pdfUrl: string) {
   await sb.from('structure_items').update({ pdf_url: pdfUrl }).eq('id', itemId)
 }
 
+export async function getCourse(courseId: string) {
+  const sb = getServiceSupabase()
+  const { data, error } = await sb
+    .from('courses')
+    .select('id, name, icon, price, is_active, description')
+    .eq('id', courseId)
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function updateCoursePrice(courseId: string, price: number) {
+  const sb = getServiceSupabase()
+  const { error } = await sb
+    .from('courses')
+    .update({ price, updated_at: new Date().toISOString() })
+    .eq('id', courseId)
+  if (error) throw error
+}
+
+export async function toggleCourseActive(courseId: string): Promise<boolean> {
+  const sb = getServiceSupabase()
+  const { data } = await sb.from('courses').select('is_active').eq('id', courseId).single()
+  const newState = !data?.is_active
+  const { error } = await sb
+    .from('courses')
+    .update({ is_active: newState, updated_at: new Date().toISOString() })
+    .eq('id', courseId)
+  if (error) throw error
+  return newState
+}
+
 export async function createCourse(name: string, description: string | null, price: number) {
   const sb = getServiceSupabase()
   const id = crypto.randomUUID()
@@ -361,6 +393,47 @@ export async function getCourseStructure(): Promise<CourseStructureCourse[]> {
     icon: c.icon,
     folders: buildChildren(c.id, null),
   }))
+}
+
+// ── Latest note that has AI-generated content ─────────────────────────
+export async function getLatestNoteWithContent(): Promise<{
+  id: string; title: string; course_id: string; parent_id: string | null
+} | null> {
+  const sb = getServiceSupabase()
+  // Get all item_ids that have note content, ordered by update time
+  const { data: contents } = await sb
+    .from('note_contents')
+    .select('item_id, updated_at')
+    .order('updated_at', { ascending: false })
+    .limit(1)
+  if (!contents?.length) return null
+  const { data } = await sb
+    .from('structure_items')
+    .select('id, title, course_id, parent_id')
+    .eq('id', contents[0].item_id)
+    .single()
+  return data ?? null
+}
+
+// ── Count stats for /status ────────────────────────────────────────────
+export async function getStats(): Promise<{
+  courses: number; folders: number; notes: number; notesWithContent: number; notesWithPdf: number
+}> {
+  const sb = getServiceSupabase()
+  const [{ count: courses }, { count: folders }, { count: notes }, { count: notesWithContent }, { count: notesWithPdf }] = await Promise.all([
+    sb.from('courses').select('*', { count: 'exact', head: true }),
+    sb.from('structure_items').select('*', { count: 'exact', head: true }).eq('item_type', 'folder'),
+    sb.from('structure_items').select('*', { count: 'exact', head: true }).eq('item_type', 'file'),
+    sb.from('note_contents').select('*', { count: 'exact', head: true }),
+    sb.from('structure_items').select('*', { count: 'exact', head: true }).eq('item_type', 'file').not('pdf_url', 'is', null),
+  ])
+  return {
+    courses: courses ?? 0,
+    folders: folders ?? 0,
+    notes: notes ?? 0,
+    notesWithContent: notesWithContent ?? 0,
+    notesWithPdf: notesWithPdf ?? 0,
+  }
 }
 
 // ── Strip custom tags from notes HTML for plain-text display ──────────
