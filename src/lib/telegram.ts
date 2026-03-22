@@ -142,33 +142,37 @@ export async function setSession(chatId: number, state: string, data: Record<str
   const user_name = ADMIN_NAMES[chatId] ?? `user_${chatId}`
   const session = { chat_id: chatId, state, data, user_name, updated_at: new Date().toISOString() }
   _sessionCache.set(chatId, { chat_id: chatId, state, data, user_name })
-  await sb.from('telegram_sessions').upsert(session, { onConflict: 'chat_id' })
+  await (sb.from('telegram_sessions') as any).upsert(session, { onConflict: 'chat_id' })
 }
 
 export async function clearSession(chatId: number): Promise<void> {
-  // Update cache immediately so next getSession() is instant
   _sessionCache.set(chatId, { chat_id: chatId, state: 'idle', data: {} })
-  // Fire DB write — non-blocking for callers that don't await this
   const sb = getServiceSupabase()
   const user_name = ADMIN_NAMES[chatId] ?? `user_${chatId}`
-  await sb.from('telegram_sessions').upsert(
+  await (sb.from('telegram_sessions') as any).upsert(
     { chat_id: chatId, state: 'idle', data: {}, user_name, updated_at: new Date().toISOString() },
     { onConflict: 'chat_id' }
   )
 }
 
+// ── DB row types ──────────────────────────────────────────────────────
+export interface CourseRow { id: string; name: string; icon: string | null }
+export interface CourseDetailRow { id: string; name: string; icon: string | null; price: number | null; is_active: boolean; description: string | null }
+export interface StructureItemRow { id: string; title: string; item_type: string; icon?: string | null }
+export interface StructureItemDetailRow { id: string; title: string; item_type: string; course_id: string; parent_id: string | null; pdf_url: string | null }
+
 // ── Database helpers (service role) ──────────────────────────────────
-export async function getCourses() {
+export async function getCourses(): Promise<CourseRow[]> {
   const sb = getServiceSupabase()
   const { data, error } = await sb
     .from('courses')
     .select('id, name, icon')
     .order('order_index', { ascending: true })
   if (error) throw error
-  return data ?? []
+  return (data ?? []) as CourseRow[]
 }
 
-export async function getTopLevelFolders(courseId: string) {
+export async function getTopLevelFolders(courseId: string): Promise<StructureItemRow[]> {
   const sb = getServiceSupabase()
   const { data, error } = await sb
     .from('structure_items')
@@ -177,10 +181,10 @@ export async function getTopLevelFolders(courseId: string) {
     .is('parent_id', null)
     .order('order_index', { ascending: true })
   if (error) throw error
-  return data ?? []
+  return (data ?? []) as StructureItemRow[]
 }
 
-export async function getFolderChildren(folderId: string, courseId: string) {
+export async function getFolderChildren(folderId: string, courseId: string): Promise<StructureItemRow[]> {
   const sb = getServiceSupabase()
   const { data, error } = await sb
     .from('structure_items')
@@ -189,18 +193,18 @@ export async function getFolderChildren(folderId: string, courseId: string) {
     .eq('parent_id', folderId)
     .order('order_index', { ascending: true })
   if (error) throw error
-  return data ?? []
+  return (data ?? []) as StructureItemRow[]
 }
 
-export async function getItem(itemId: string) {
+export async function getItem(itemId: string): Promise<StructureItemDetailRow | null> {
   const sb = getServiceSupabase()
   const { data, error } = await sb
     .from('structure_items')
     .select('id, title, item_type, course_id, parent_id, pdf_url')
     .eq('id', itemId)
     .single()
-  if (error) throw error
-  return data
+  if (error) return null
+  return data as StructureItemDetailRow
 }
 
 export async function getNoteContent(itemId: string): Promise<string | null> {
@@ -210,12 +214,12 @@ export async function getNoteContent(itemId: string): Promise<string | null> {
     .select('content_html')
     .eq('item_id', itemId)
     .single()
-  return data?.content_html ?? null
+  return (data as any)?.content_html ?? null
 }
 
 export async function saveNoteContent(itemId: string, contentHtml: string) {
   const sb = getServiceSupabase()
-  await sb.from('note_contents').upsert(
+  await (sb.from('note_contents') as any).upsert(
     { item_id: itemId, content_html: contentHtml, updated_at: new Date().toISOString() },
     { onConflict: 'item_id' }
   )
@@ -223,24 +227,23 @@ export async function saveNoteContent(itemId: string, contentHtml: string) {
 
 export async function updateItemPdfUrl(itemId: string, pdfUrl: string) {
   const sb = getServiceSupabase()
-  await sb.from('structure_items').update({ pdf_url: pdfUrl }).eq('id', itemId)
+  await (sb.from('structure_items') as any).update({ pdf_url: pdfUrl }).eq('id', itemId)
 }
 
-export async function getCourse(courseId: string) {
+export async function getCourse(courseId: string): Promise<CourseDetailRow | null> {
   const sb = getServiceSupabase()
   const { data, error } = await sb
     .from('courses')
     .select('id, name, icon, price, is_active, description')
     .eq('id', courseId)
     .single()
-  if (error) throw error
-  return data
+  if (error) return null
+  return data as CourseDetailRow
 }
 
 export async function updateCoursePrice(courseId: string, price: number) {
   const sb = getServiceSupabase()
-  const { error } = await sb
-    .from('courses')
+  const { error } = await (sb.from('courses') as any)
     .update({ price, updated_at: new Date().toISOString() })
     .eq('id', courseId)
   if (error) throw error
@@ -249,9 +252,8 @@ export async function updateCoursePrice(courseId: string, price: number) {
 export async function toggleCourseActive(courseId: string): Promise<boolean> {
   const sb = getServiceSupabase()
   const { data } = await sb.from('courses').select('is_active').eq('id', courseId).single()
-  const newState = !data?.is_active
-  const { error } = await sb
-    .from('courses')
+  const newState = !(data as any)?.is_active
+  const { error } = await (sb.from('courses') as any)
     .update({ is_active: newState, updated_at: new Date().toISOString() })
     .eq('id', courseId)
   if (error) throw error
@@ -261,15 +263,9 @@ export async function toggleCourseActive(courseId: string): Promise<boolean> {
 export async function createCourse(name: string, description: string | null, price: number) {
   const sb = getServiceSupabase()
   const id = crypto.randomUUID()
-  const { error } = await sb.from('courses').insert({
-    id,
-    name,
-    description,
-    price,
-    icon: '📚',
-    is_active: false,
-    order_index: 0,
-    version: 1,
+  const { error } = await (sb.from('courses') as any).insert({
+    id, name, description, price, icon: '📚',
+    is_active: false, order_index: 0, version: 1,
     updated_at: new Date().toISOString(),
   })
   if (error) throw error
@@ -284,14 +280,13 @@ export async function createStructureItem(params: {
 }) {
   const sb = getServiceSupabase()
   const id = crypto.randomUUID()
-  const { error } = await sb.from('structure_items').insert({
+  const { error } = await (sb.from('structure_items') as any).insert({
     id,
     course_id: params.courseId,
     parent_id: params.parentId,
     item_type: params.itemType,
     title: params.title,
-    is_active: false,
-    order_index: 0,
+    is_active: false, order_index: 0,
     updated_at: new Date().toISOString(),
   })
   if (error) throw error
@@ -335,7 +330,8 @@ export async function expandId(table: string, shortId: string): Promise<string> 
         lastError = error?.message ?? 'no data'
         continue
       }
-      const match = data.find((row: { id: string }) => row.id.startsWith(shortId))
+      const rows = data as { id: string }[]
+      const match = rows.find(row => row.id.startsWith(shortId))
       if (!match) throw new Error(`[expandId] No match for "${shortId}" in "${table}"`)
       return match.id
     } catch (e: any) {
@@ -377,20 +373,20 @@ export async function getCourseStructure(): Promise<CourseStructureCourse[]> {
   const sb = getServiceSupabase()
 
   // Fetch all courses
-  const { data: courses, error: cErr } = await sb
+  const { data: coursesRaw, error: cErr } = await sb
     .from('courses')
     .select('id, name, icon')
     .order('order_index', { ascending: true })
   if (cErr) throw cErr
+  const courses = (coursesRaw ?? []) as { id: string; name: string; icon: string | null }[]
 
   // Fetch ALL structure items in a single query (more efficient than N+1)
-  const { data: allItems, error: iErr } = await sb
+  const { data: allItemsRaw, error: iErr } = await sb
     .from('structure_items')
     .select('id, title, item_type, course_id, parent_id')
     .order('order_index', { ascending: true })
   if (iErr) throw iErr
-
-  const items = allItems ?? []
+  const items = (allItemsRaw ?? []) as { id: string; title: string; item_type: string; course_id: string; parent_id: string | null }[]
 
   // Build a lookup: parentId (or 'root:{courseId}') → children
   function buildChildren(courseId: string, parentId: string | null): (CourseStructureFolder | CourseStructureNote)[] {
@@ -414,7 +410,7 @@ export async function getCourseStructure(): Promise<CourseStructureCourse[]> {
       })
   }
 
-  return (courses ?? []).map(c => ({
+  return courses.map(c => ({
     id: c.id,
     name: c.name,
     icon: c.icon,
@@ -427,19 +423,18 @@ export async function getLatestNoteWithContent(): Promise<{
   id: string; title: string; course_id: string; parent_id: string | null
 } | null> {
   const sb = getServiceSupabase()
-  // Get all item_ids that have note content, ordered by update time
   const { data: contents } = await sb
     .from('note_contents')
     .select('item_id, updated_at')
     .order('updated_at', { ascending: false })
     .limit(1)
-  if (!contents?.length) return null
+  if (!(contents as any)?.length) return null
   const { data } = await sb
     .from('structure_items')
     .select('id, title, course_id, parent_id')
-    .eq('id', contents[0].item_id)
+    .eq('id', (contents as any)[0].item_id)
     .single()
-  return data ?? null
+  return (data as any) ?? null
 }
 
 // ── Count stats for /status ────────────────────────────────────────────
@@ -447,19 +442,19 @@ export async function getStats(): Promise<{
   courses: number; folders: number; notes: number; notesWithContent: number; notesWithPdf: number
 }> {
   const sb = getServiceSupabase()
-  const [{ count: courses }, { count: folders }, { count: notes }, { count: notesWithContent }, { count: notesWithPdf }] = await Promise.all([
+  const results = await Promise.all([
     sb.from('courses').select('*', { count: 'exact', head: true }),
-    sb.from('structure_items').select('*', { count: 'exact', head: true }).eq('item_type', 'folder'),
-    sb.from('structure_items').select('*', { count: 'exact', head: true }).eq('item_type', 'file'),
+    (sb.from('structure_items') as any).select('*', { count: 'exact', head: true }).eq('item_type', 'folder'),
+    (sb.from('structure_items') as any).select('*', { count: 'exact', head: true }).eq('item_type', 'file'),
     sb.from('note_contents').select('*', { count: 'exact', head: true }),
-    sb.from('structure_items').select('*', { count: 'exact', head: true }).eq('item_type', 'file').not('pdf_url', 'is', null),
+    (sb.from('structure_items') as any).select('*', { count: 'exact', head: true }).eq('item_type', 'file').not('pdf_url', 'is', null),
   ])
   return {
-    courses: courses ?? 0,
-    folders: folders ?? 0,
-    notes: notes ?? 0,
-    notesWithContent: notesWithContent ?? 0,
-    notesWithPdf: notesWithPdf ?? 0,
+    courses: results[0].count ?? 0,
+    folders: results[1].count ?? 0,
+    notes: results[2].count ?? 0,
+    notesWithContent: results[3].count ?? 0,
+    notesWithPdf: results[4].count ?? 0,
   }
 }
 
