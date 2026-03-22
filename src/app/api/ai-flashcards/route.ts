@@ -114,22 +114,23 @@ function parseFlashcards(raw: string): Flashcard[] {
   return cards.slice(0, 8)
 }
 
-async function callCerebras(messages: any[], apiKey: string): Promise<string> {
+async function callCerebras(messages: any[], apiKey: string, model: string): Promise<string> {
   const res = await fetch('https://api.cerebras.ai/v1/chat/completions', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'llama-3.3-70b', messages, max_completion_tokens: 2000, temperature: 0.3 }),
+    body: JSON.stringify({ model, messages, max_completion_tokens: 2000, temperature: 0.3 }),
   })
-  if (!res.ok) throw new Error(`Cerebras ${res.status}: ${await res.text()}`)
+  if (!res.ok) throw new Error(`Cerebras(${model}) ${res.status}: ${await res.text()}`)
   const data = await res.json()
   return data.choices[0].message.content as string
 }
 
 async function callTogether(messages: any[], apiKey: string): Promise<string> {
+  // Free model: ServiceNow Apriel 15B — suitable for flashcard generation from notes
   const res = await fetch('https://api.together.xyz/v1/chat/completions', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', messages, max_tokens: 2000, temperature: 0.3 }),
+    body: JSON.stringify({ model: 'ServiceNow-AI/Apriel-1.6-15b-Thinker', messages, max_tokens: 2000, temperature: 0.3 }),
   })
   if (!res.ok) throw new Error(`Together ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -197,21 +198,23 @@ export async function POST(req: NextRequest) {
       } catch (e: any) { console.warn('[ai-flashcards] NVIDIA failed:', e.message) }
     }
 
-    // 2. Cerebras — llama-3.3-70b
+    // 2. Cerebras — gpt-oss-120b → llama3.1-8b fallback
     if (cerebrasKey) {
-      try {
-        const raw = await callCerebras(messages, cerebrasKey)
-        const flashcards = parseFlashcards(raw)
-        if (flashcards.length > 0) return NextResponse.json({ flashcards, provider: 'cerebras/llama-3.3-70b' })
-      } catch (e: any) { console.warn('[ai-flashcards] Cerebras failed:', e.message) }
+      for (const model of ['gpt-oss-120b', 'llama3.1-8b']) {
+        try {
+          const raw = await callCerebras(messages, cerebrasKey, model)
+          const flashcards = parseFlashcards(raw)
+          if (flashcards.length > 0) return NextResponse.json({ flashcards, provider: `cerebras/${model}` })
+        } catch (e: any) { console.warn(`[ai-flashcards] Cerebras(${model}) failed:`, e.message) }
+      }
     }
 
-    // 3. Together AI — llama-3.3-70b-instruct-turbo
+    // 3. Together AI — free 15B model, good for flashcards from notes
     if (togetherKey) {
       try {
         const raw = await callTogether(messages, togetherKey)
         const flashcards = parseFlashcards(raw)
-        if (flashcards.length > 0) return NextResponse.json({ flashcards, provider: 'together/llama-3.3-70b' })
+        if (flashcards.length > 0) return NextResponse.json({ flashcards, provider: 'together/apriel-15b' })
       } catch (e: any) { console.warn('[ai-flashcards] Together failed:', e.message) }
     }
 
