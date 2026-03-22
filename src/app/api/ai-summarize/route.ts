@@ -242,6 +242,20 @@ async function callCerebras(messages: any[], apiKey: string, maxTokens = 8000): 
   return data.choices[0].message.content as string
 }
 
+async function callTogether(messages: any[], apiKey: string, maxTokens = 8000): Promise<string> {
+  const res = await fetch('https://api.together.xyz/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+      messages, max_tokens: maxTokens, temperature: 0.2,
+    }),
+  })
+  if (!res.ok) throw new Error(`Together ${res.status}: ${await res.text()}`)
+  const data = await res.json()
+  return data.choices[0].message.content as string
+}
+
 async function callNvidia(messages: any[], apiKey: string, maxTokens = 10000): Promise<string> {
   const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
@@ -325,6 +339,7 @@ export async function POST(req: NextRequest) {
     const errors: string[] = []
     const nvidiaKey = process.env.NVIDIA_API_KEY
     const cerebrasKey = process.env.CEREBRAS_API_KEY
+    const togetherKey = process.env.TOGETHER_API_KEY
     const groqKey = process.env.GROQ_API_KEY
     const orKey = process.env.OPENROUTER_API_KEY
 
@@ -352,7 +367,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Groq — llama-3.1-8b-instant (max_tokens kept low to stay under 6000 TPM)
+    // 3. Together AI — llama-3.3-70b-instruct-turbo
+    if (togetherKey) {
+      try {
+        const raw = await callTogether(makeMessages(trimmedTextOR), togetherKey, 8000)
+        const { formatted, connections } = parseAiResponse(raw)
+        return NextResponse.json({ formatted, connections, provider: 'together/llama-3.3-70b' })
+      } catch (e: any) {
+        errors.push(`Together: ${e.message}`)
+        console.warn('[ai-summarize] Together failed:', e.message)
+      }
+    }
+
+    // 4. Groq — llama-3.1-8b-instant (max_tokens kept low to stay under 6000 TPM)
     if (groqKey) {
       try {
         const raw = await callGroq(makeMessages(trimmedTextGroq), groqKey, 2500)

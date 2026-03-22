@@ -125,6 +125,17 @@ async function callCerebras(messages: any[], apiKey: string): Promise<string> {
   return data.choices[0].message.content as string
 }
 
+async function callTogether(messages: any[], apiKey: string): Promise<string> {
+  const res = await fetch('https://api.together.xyz/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', messages, max_tokens: 2000, temperature: 0.3 }),
+  })
+  if (!res.ok) throw new Error(`Together ${res.status}: ${await res.text()}`)
+  const data = await res.json()
+  return data.choices[0].message.content as string
+}
+
 async function callNvidia(messages: any[], apiKey: string): Promise<string> {
   const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
@@ -173,6 +184,7 @@ export async function POST(req: NextRequest) {
 
     const nvidiaKey = process.env.NVIDIA_API_KEY
     const cerebrasKey = process.env.CEREBRAS_API_KEY
+    const togetherKey = process.env.TOGETHER_API_KEY
     const groqKey = process.env.GROQ_API_KEY
     const orKey = process.env.OPENROUTER_API_KEY
 
@@ -192,6 +204,15 @@ export async function POST(req: NextRequest) {
         const flashcards = parseFlashcards(raw)
         if (flashcards.length > 0) return NextResponse.json({ flashcards, provider: 'cerebras/llama-3.3-70b' })
       } catch (e: any) { console.warn('[ai-flashcards] Cerebras failed:', e.message) }
+    }
+
+    // 3. Together AI — llama-3.3-70b-instruct-turbo
+    if (togetherKey) {
+      try {
+        const raw = await callTogether(messages, togetherKey)
+        const flashcards = parseFlashcards(raw)
+        if (flashcards.length > 0) return NextResponse.json({ flashcards, provider: 'together/llama-3.3-70b' })
+      } catch (e: any) { console.warn('[ai-flashcards] Together failed:', e.message) }
     }
 
     if (groqKey) {
