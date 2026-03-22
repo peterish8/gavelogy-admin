@@ -92,7 +92,7 @@ Criminal cases: list BOTH old IPC/CrPC section AND new BNS/BNSS/BSA equivalent a
 FIELD 4A — CASE LAWS REFERENCED (min 1, max 8)
 [h2]🏛️ Case Laws Referenced[/h2]
 [ul]
-[li][hl:#9EC4D8][Case Name (Year)][/hl] | [hl:#7EC8B8]Applied[/hl] / [hl:#7EC8B8]Extended[/hl] / [hl:#7EC8B8]Followed[/hl] / [hl:#F0A0A0]Overruled[/hl] / [hl:#F0A0A0]Distinguished[/hl] / [hl:#C4A8E0]Referred[/hl] | [principle invoked, max 20 words][/li]
+[li][hl:#9EC4D8][Case Name (Year)][/hl] | Applied / Extended / Followed / Overruled / Distinguished / Referred | [principle invoked, max 20 words][/li]
 [/ul]
 Rules: List ONLY cases the court itself cited and engaged with — never cases only argued by counsel. Write [VERIFY] next to any entry where citation is uncertain. Never guess a citation.
 [hr]
@@ -134,7 +134,7 @@ FIELD 6 — DOCTRINAL LINEAGE
 FIELD 6A — DOCTRINES AND PRINCIPLES IN PLAY (min 1, max 6)
 [h2]📐 Doctrines & Principles in Play[/h2]
 [ul]
-[li][hl:#D4A96A][Doctrine / Principle name, max 5 words][/hl] | [Meaning: one sentence, max 20 words] | [hl:#7EC8B8]Primary[/hl] / [hl:#C4A8E0]Secondary[/hl] / [hl:#C4A8E0]Background[/hl] | First established in: [hl:#9EC4D8][Case (Year)][/hl][/li]
+[li][hl:#D4A96A][Doctrine / Principle name, max 5 words][/hl] | [Meaning: one sentence, max 20 words] | Primary / Secondary / Background | First established in: [hl:#9EC4D8][Case (Year)][/hl][/li]
 [/ul]
 Rules: Constitutional provisions are NOT doctrines — list the derived doctrine, not the article. Never merge two distinct doctrines — list separately even if closely related. Include the Field 6 doctrine here tagged Primary. If no established name exists, describe the principle plainly. Write [VERIFY] if origin case is uncertain.
 [hr]
@@ -173,6 +173,8 @@ ABSOLUTE RULES — NEVER VIOLATE
 8. NEVER apply highlight colours arbitrarily. Each colour has one semantic meaning — apply consistently and only as specified.
 9. Wrap ALL body text in [p][/p] — never leave bare text outside tags.
 10. BNSS/BNS/BSA equivalent is mandatory for ALL criminal law cases.
+11. NEVER nest a highlight tag inside another highlight tag. [hl:...] tags must NEVER contain another [hl:...] tag. Only one highlight per phrase. If a phrase needs both a highlight colour AND bold, use [b] inside [hl:...] but NEVER [hl:...] inside [hl:...].
+12. NEVER put plain label words like "Primary", "Secondary", "Background", "Applied", "Followed", "Overruled" inside [hl:...] tags. These status words must appear as plain text outside any highlight tag. Only actual case names, doctrine names, legal terms, and ratio sentences get highlight colours.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CONNECTIONS OUTPUT
