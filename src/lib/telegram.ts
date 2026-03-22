@@ -461,8 +461,12 @@ export async function getStats(): Promise<{
 // ── Strip custom tags from notes HTML for plain-text display ──────────
 export function stripTags(html: string): string {
   return html
-    .replace(/\[\/?(h[1-6]|p|b|i|u|li|ul|ol|hr|box:[a-z]+|hl:#[0-9A-Fa-f]{6})\]/g, '')
-    .replace(/\[hl:#[0-9A-Fa-f]{6}\]/g, '')
+    // Remove all custom tags including closing variants like [/box:blue], [/hl:#RRGGBB]
+    .replace(/\[\/?(h[1-6]|p|b|i|u|li|ul|ol|hr)\]/g, ' ')
+    .replace(/\[\/?(box:[a-z]+)\]/g, ' ')
+    .replace(/\[\/?(hl:#[0-9A-Fa-f]{6})\]/g, ' ')
+    .replace(/\[hl:#[0-9A-Fa-f]{6}\]/g, ' ')
+    .replace(/\[hr\]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }

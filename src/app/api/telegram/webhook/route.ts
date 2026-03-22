@@ -370,6 +370,7 @@ async function handleGenerateAi(chatId: number, itemId: string) {
     })
     const data = await res.json()
     if (!res.ok || data.error) throw new Error(data.error || 'failed')
+    if (!data.quiz) throw new Error('Quiz response missing quiz field')
     quizCount = (data.quiz as string).match(/^Q\d+\./gm)?.length ?? 10
     log[log.length - 1] = `❓ <b>Quiz</b> ✅ <code>${data.provider ?? 'unknown'}</code> · ${quizCount} Qs · ${elapsed(t)}`
     await update()
