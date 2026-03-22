@@ -111,6 +111,17 @@ QUALITY RULES — NEVER VIOLATE
 5. For Q8/Q9: never use facts near-identical to the actual case. The student must APPLY the ratio to a new situation, not recall it from the facts.
 6. Output all 10 questions in one response. Do not ask for confirmation between questions.`
 
+async function callCerebras(messages: any[], apiKey: string, maxTokens = 4000): Promise<string> {
+  const res = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'llama-3.3-70b', messages, max_completion_tokens: maxTokens, temperature: 0.3 }),
+  })
+  if (!res.ok) throw new Error(`Cerebras ${res.status}: ${await res.text()}`)
+  const data = await res.json()
+  return data.choices[0].message.content as string
+}
+
 async function callNvidia(messages: any[], apiKey: string, maxTokens = 4000): Promise<string> {
   const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
@@ -161,6 +172,7 @@ export async function POST(req: NextRequest) {
 
     const errors: string[] = []
     const nvidiaKey = process.env.NVIDIA_API_KEY
+    const cerebrasKey = process.env.CEREBRAS_API_KEY
     const groqKey = process.env.GROQ_API_KEY
     const orKey = process.env.OPENROUTER_API_KEY
 
@@ -172,6 +184,17 @@ export async function POST(req: NextRequest) {
       } catch (e: any) {
         errors.push(`NVIDIA: ${e.message}`)
         console.warn('[ai-quiz] NVIDIA failed:', e.message)
+      }
+    }
+
+    // 2. Cerebras — llama-3.3-70b
+    if (cerebrasKey) {
+      try {
+        const quiz = await callCerebras(messages, cerebrasKey, 4000)
+        return NextResponse.json({ quiz, provider: 'cerebras/llama-3.3-70b' })
+      } catch (e: any) {
+        errors.push(`Cerebras: ${e.message}`)
+        console.warn('[ai-quiz] Cerebras failed:', e.message)
       }
     }
 

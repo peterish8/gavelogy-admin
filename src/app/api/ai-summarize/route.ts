@@ -231,6 +231,17 @@ Example (do not copy — generate from actual judgment):
   {"linkId":"link-lineage","noteAnchor":"Doctrinal Lineage","pdfPage":11,"pdfSearchText":"the Polluter Pays Principle as evolved in MC Mehta does not override express statutory limitations","label":"Lineage","color":"#16a34a"}
 ]`
 
+async function callCerebras(messages: any[], apiKey: string, maxTokens = 8000): Promise<string> {
+  const res = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'llama-3.3-70b', messages, max_completion_tokens: maxTokens, temperature: 0.2 }),
+  })
+  if (!res.ok) throw new Error(`Cerebras ${res.status}: ${await res.text()}`)
+  const data = await res.json()
+  return data.choices[0].message.content as string
+}
+
 async function callNvidia(messages: any[], apiKey: string, maxTokens = 10000): Promise<string> {
   const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
@@ -313,6 +324,7 @@ export async function POST(req: NextRequest) {
 
     const errors: string[] = []
     const nvidiaKey = process.env.NVIDIA_API_KEY
+    const cerebrasKey = process.env.CEREBRAS_API_KEY
     const groqKey = process.env.GROQ_API_KEY
     const orKey = process.env.OPENROUTER_API_KEY
 
@@ -328,7 +340,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Groq — llama-3.1-8b-instant (max_tokens kept low to stay under 6000 TPM)
+    // 2. Cerebras — llama-3.3-70b, very fast inference
+    if (cerebrasKey) {
+      try {
+        const raw = await callCerebras(makeMessages(trimmedTextOR), cerebrasKey, 8000)
+        const { formatted, connections } = parseAiResponse(raw)
+        return NextResponse.json({ formatted, connections, provider: 'cerebras/llama-3.3-70b' })
+      } catch (e: any) {
+        errors.push(`Cerebras: ${e.message}`)
+        console.warn('[ai-summarize] Cerebras failed:', e.message)
+      }
+    }
+
+    // 3. Groq — llama-3.1-8b-instant (max_tokens kept low to stay under 6000 TPM)
     if (groqKey) {
       try {
         const raw = await callGroq(makeMessages(trimmedTextGroq), groqKey, 2500)

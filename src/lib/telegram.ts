@@ -4,18 +4,26 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!
 const API_BASE = `https://api.telegram.org/bot${BOT_TOKEN}`
 
 // ── Service-role Supabase (bypasses RLS) ──────────────────────────────
+// Singleton — reused across calls in same serverless instance for speed
+// typed as `any` to avoid losing the ungenericized SupabaseClient overloads
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _sb: any = null
 function getServiceSupabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
+  if (!_sb) {
+    _sb = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      { auth: { persistSession: false } }
+    )
+  }
+  return _sb as ReturnType<typeof createClient>
 }
 
 // ── Raw Telegram API call ─────────────────────────────────────────────
 export async function tg(method: string, body: object) {
   const res = await fetch(`${API_BASE}/${method}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Connection': 'keep-alive' },
     body: JSON.stringify(body),
   })
   const data = await res.json()
@@ -113,27 +121,40 @@ export interface TelegramSession {
   user_name?: string
 }
 
+// In-memory cache — survives across requests in the same warm serverless instance
+const _sessionCache = new Map<number, TelegramSession>()
+
 export async function getSession(chatId: number): Promise<TelegramSession> {
+  if (_sessionCache.has(chatId)) return _sessionCache.get(chatId)!
   const sb = getServiceSupabase()
   const { data } = await sb
     .from('telegram_sessions')
     .select('*')
     .eq('chat_id', chatId)
     .single()
-  return data ?? { chat_id: chatId, state: 'idle', data: {} }
+  const session = data ?? { chat_id: chatId, state: 'idle', data: {} }
+  _sessionCache.set(chatId, session)
+  return session
 }
 
 export async function setSession(chatId: number, state: string, data: Record<string, any> = {}) {
   const sb = getServiceSupabase()
   const user_name = ADMIN_NAMES[chatId] ?? `user_${chatId}`
-  await sb.from('telegram_sessions').upsert(
-    { chat_id: chatId, state, data, user_name, updated_at: new Date().toISOString() },
-    { onConflict: 'chat_id' }
-  )
+  const session = { chat_id: chatId, state, data, user_name, updated_at: new Date().toISOString() }
+  _sessionCache.set(chatId, { chat_id: chatId, state, data, user_name })
+  await sb.from('telegram_sessions').upsert(session, { onConflict: 'chat_id' })
 }
 
-export async function clearSession(chatId: number) {
-  await setSession(chatId, 'idle', {})
+export async function clearSession(chatId: number): Promise<void> {
+  // Update cache immediately so next getSession() is instant
+  _sessionCache.set(chatId, { chat_id: chatId, state: 'idle', data: {} })
+  // Fire DB write — non-blocking for callers that don't await this
+  const sb = getServiceSupabase()
+  const user_name = ADMIN_NAMES[chatId] ?? `user_${chatId}`
+  await sb.from('telegram_sessions').upsert(
+    { chat_id: chatId, state: 'idle', data: {}, user_name, updated_at: new Date().toISOString() },
+    { onConflict: 'chat_id' }
+  )
 }
 
 // ── Database helpers (service role) ──────────────────────────────────

@@ -114,6 +114,17 @@ function parseFlashcards(raw: string): Flashcard[] {
   return cards.slice(0, 8)
 }
 
+async function callCerebras(messages: any[], apiKey: string): Promise<string> {
+  const res = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'llama-3.3-70b', messages, max_completion_tokens: 2000, temperature: 0.3 }),
+  })
+  if (!res.ok) throw new Error(`Cerebras ${res.status}: ${await res.text()}`)
+  const data = await res.json()
+  return data.choices[0].message.content as string
+}
+
 async function callNvidia(messages: any[], apiKey: string): Promise<string> {
   const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
@@ -161,6 +172,7 @@ export async function POST(req: NextRequest) {
     ]
 
     const nvidiaKey = process.env.NVIDIA_API_KEY
+    const cerebrasKey = process.env.CEREBRAS_API_KEY
     const groqKey = process.env.GROQ_API_KEY
     const orKey = process.env.OPENROUTER_API_KEY
 
@@ -171,6 +183,15 @@ export async function POST(req: NextRequest) {
         const flashcards = parseFlashcards(raw)
         if (flashcards.length > 0) return NextResponse.json({ flashcards, provider: 'nvidia/kimi-k2.5' })
       } catch (e: any) { console.warn('[ai-flashcards] NVIDIA failed:', e.message) }
+    }
+
+    // 2. Cerebras — llama-3.3-70b
+    if (cerebrasKey) {
+      try {
+        const raw = await callCerebras(messages, cerebrasKey)
+        const flashcards = parseFlashcards(raw)
+        if (flashcards.length > 0) return NextResponse.json({ flashcards, provider: 'cerebras/llama-3.3-70b' })
+      } catch (e: any) { console.warn('[ai-flashcards] Cerebras failed:', e.message) }
     }
 
     if (groqKey) {
