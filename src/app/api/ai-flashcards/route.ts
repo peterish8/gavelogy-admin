@@ -114,6 +114,29 @@ function parseFlashcards(raw: string): Flashcard[] {
   return cards.slice(0, 8)
 }
 
+async function callCerebras(messages: any[], apiKey: string, model: string): Promise<string> {
+  const res = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages, max_completion_tokens: 2000, temperature: 0.3 }),
+  })
+  if (!res.ok) throw new Error(`Cerebras(${model}) ${res.status}: ${await res.text()}`)
+  const data = await res.json()
+  return data.choices[0].message.content as string
+}
+
+async function callTogether(messages: any[], apiKey: string): Promise<string> {
+  // Free model: ServiceNow Apriel 15B — suitable for flashcard generation from notes
+  const res = await fetch('https://api.together.xyz/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'ServiceNow-AI/Apriel-1.6-15b-Thinker', messages, max_tokens: 2000, temperature: 0.3 }),
+  })
+  if (!res.ok) throw new Error(`Together ${res.status}: ${await res.text()}`)
+  const data = await res.json()
+  return data.choices[0].message.content as string
+}
+
 async function callNvidia(messages: any[], apiKey: string): Promise<string> {
   const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
@@ -161,6 +184,8 @@ export async function POST(req: NextRequest) {
     ]
 
     const nvidiaKey = process.env.NVIDIA_API_KEY
+    const cerebrasKey = process.env.CEREBRAS_API_KEY
+    const togetherKey = process.env.TOGETHER_API_KEY
     const groqKey = process.env.GROQ_API_KEY
     const orKey = process.env.OPENROUTER_API_KEY
 
@@ -171,6 +196,26 @@ export async function POST(req: NextRequest) {
         const flashcards = parseFlashcards(raw)
         if (flashcards.length > 0) return NextResponse.json({ flashcards, provider: 'nvidia/kimi-k2.5' })
       } catch (e: any) { console.warn('[ai-flashcards] NVIDIA failed:', e.message) }
+    }
+
+    // 2. Cerebras — gpt-oss-120b → llama3.1-8b fallback
+    if (cerebrasKey) {
+      for (const model of ['gpt-oss-120b', 'llama3.1-8b']) {
+        try {
+          const raw = await callCerebras(messages, cerebrasKey, model)
+          const flashcards = parseFlashcards(raw)
+          if (flashcards.length > 0) return NextResponse.json({ flashcards, provider: `cerebras/${model}` })
+        } catch (e: any) { console.warn(`[ai-flashcards] Cerebras(${model}) failed:`, e.message) }
+      }
+    }
+
+    // 3. Together AI — free 15B model, good for flashcards from notes
+    if (togetherKey) {
+      try {
+        const raw = await callTogether(messages, togetherKey)
+        const flashcards = parseFlashcards(raw)
+        if (flashcards.length > 0) return NextResponse.json({ flashcards, provider: 'together/apriel-15b' })
+      } catch (e: any) { console.warn('[ai-flashcards] Together failed:', e.message) }
     }
 
     if (groqKey) {

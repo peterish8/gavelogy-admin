@@ -92,7 +92,7 @@ Criminal cases: list BOTH old IPC/CrPC section AND new BNS/BNSS/BSA equivalent a
 FIELD 4A — CASE LAWS REFERENCED (min 1, max 8)
 [h2]🏛️ Case Laws Referenced[/h2]
 [ul]
-[li][hl:#9EC4D8][Case Name (Year)][/hl] | [hl:#7EC8B8]Applied[/hl] / [hl:#7EC8B8]Extended[/hl] / [hl:#7EC8B8]Followed[/hl] / [hl:#F0A0A0]Overruled[/hl] / [hl:#F0A0A0]Distinguished[/hl] / [hl:#C4A8E0]Referred[/hl] | [principle invoked, max 20 words][/li]
+[li][hl:#9EC4D8][Case Name (Year)][/hl] | Applied / Extended / Followed / Overruled / Distinguished / Referred | [principle invoked, max 20 words][/li]
 [/ul]
 Rules: List ONLY cases the court itself cited and engaged with — never cases only argued by counsel. Write [VERIFY] next to any entry where citation is uncertain. Never guess a citation.
 [hr]
@@ -134,7 +134,7 @@ FIELD 6 — DOCTRINAL LINEAGE
 FIELD 6A — DOCTRINES AND PRINCIPLES IN PLAY (min 1, max 6)
 [h2]📐 Doctrines & Principles in Play[/h2]
 [ul]
-[li][hl:#D4A96A][Doctrine / Principle name, max 5 words][/hl] | [Meaning: one sentence, max 20 words] | [hl:#7EC8B8]Primary[/hl] / [hl:#C4A8E0]Secondary[/hl] / [hl:#C4A8E0]Background[/hl] | First established in: [hl:#9EC4D8][Case (Year)][/hl][/li]
+[li][hl:#D4A96A][Doctrine / Principle name, max 5 words][/hl] | [Meaning: one sentence, max 20 words] | Primary / Secondary / Background | First established in: [hl:#9EC4D8][Case (Year)][/hl][/li]
 [/ul]
 Rules: Constitutional provisions are NOT doctrines — list the derived doctrine, not the article. Never merge two distinct doctrines — list separately even if closely related. Include the Field 6 doctrine here tagged Primary. If no established name exists, describe the principle plainly. Write [VERIFY] if origin case is uncertain.
 [hr]
@@ -173,6 +173,8 @@ ABSOLUTE RULES — NEVER VIOLATE
 8. NEVER apply highlight colours arbitrarily. Each colour has one semantic meaning — apply consistently and only as specified.
 9. Wrap ALL body text in [p][/p] — never leave bare text outside tags.
 10. BNSS/BNS/BSA equivalent is mandatory for ALL criminal law cases.
+11. NEVER nest a highlight tag inside another highlight tag. [hl:...] tags must NEVER contain another [hl:...] tag. Only one highlight per phrase. If a phrase needs both a highlight colour AND bold, use [b] inside [hl:...] but NEVER [hl:...] inside [hl:...].
+12. NEVER put plain label words like "Primary", "Secondary", "Background", "Applied", "Followed", "Overruled" inside [hl:...] tags. These status words must appear as plain text outside any highlight tag. Only actual case names, doctrine names, legal terms, and ratio sentences get highlight colours.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CONNECTIONS OUTPUT
@@ -230,6 +232,17 @@ Example (do not copy — generate from actual judgment):
   {"linkId":"link-core-ratio","noteAnchor":"Section 33A does not confer power to impose monetary penalties","pdfPage":9,"pdfSearchText":"the direction-issuing power under Section 33A is distinct from the penalty provisions","label":"Core Ratio","color":"#2563eb"},
   {"linkId":"link-lineage","noteAnchor":"Doctrinal Lineage","pdfPage":11,"pdfSearchText":"the Polluter Pays Principle as evolved in MC Mehta does not override express statutory limitations","label":"Lineage","color":"#16a34a"}
 ]`
+
+async function callCerebras(messages: any[], apiKey: string, model: string, maxTokens = 8000): Promise<string> {
+  const res = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages, max_completion_tokens: maxTokens, temperature: 0.2 }),
+  })
+  if (!res.ok) throw new Error(`Cerebras(${model}) ${res.status}: ${await res.text()}`)
+  const data = await res.json()
+  return data.choices[0].message.content as string
+}
 
 async function callNvidia(messages: any[], apiKey: string, maxTokens = 10000): Promise<string> {
   const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
@@ -313,6 +326,7 @@ export async function POST(req: NextRequest) {
 
     const errors: string[] = []
     const nvidiaKey = process.env.NVIDIA_API_KEY
+    const cerebrasKey = process.env.CEREBRAS_API_KEY
     const groqKey = process.env.GROQ_API_KEY
     const orKey = process.env.OPENROUTER_API_KEY
 
@@ -328,7 +342,21 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Groq — llama-3.1-8b-instant (max_tokens kept low to stay under 6000 TPM)
+    // 2. Cerebras gpt-oss-120b — 120B param, free, best quality
+    if (cerebrasKey) {
+      for (const model of ['gpt-oss-120b', 'llama3.1-8b']) {
+        try {
+          const raw = await callCerebras(makeMessages(trimmedTextOR), cerebrasKey, model, 8000)
+          const { formatted, connections } = parseAiResponse(raw)
+          return NextResponse.json({ formatted, connections, provider: `cerebras/${model}` })
+        } catch (e: any) {
+          errors.push(`Cerebras(${model}): ${e.message}`)
+          console.warn(`[ai-summarize] Cerebras(${model}) failed:`, e.message)
+        }
+      }
+    }
+
+    // 3. Groq — llama-3.1-8b-instant (max_tokens kept low to stay under 6000 TPM)
     if (groqKey) {
       try {
         const raw = await callGroq(makeMessages(trimmedTextGroq), groqKey, 2500)

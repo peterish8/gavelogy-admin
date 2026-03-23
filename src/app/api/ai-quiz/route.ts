@@ -111,6 +111,29 @@ QUALITY RULES — NEVER VIOLATE
 5. For Q8/Q9: never use facts near-identical to the actual case. The student must APPLY the ratio to a new situation, not recall it from the facts.
 6. Output all 10 questions in one response. Do not ask for confirmation between questions.`
 
+async function callCerebras(messages: any[], apiKey: string, model: string, maxTokens = 4000): Promise<string> {
+  const res = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages, max_completion_tokens: maxTokens, temperature: 0.3 }),
+  })
+  if (!res.ok) throw new Error(`Cerebras(${model}) ${res.status}: ${await res.text()}`)
+  const data = await res.json()
+  return data.choices[0].message.content as string
+}
+
+async function callTogether(messages: any[], apiKey: string, maxTokens = 4000): Promise<string> {
+  // Free model: ServiceNow Apriel 15B — suitable for quiz generation from notes
+  const res = await fetch('https://api.together.xyz/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'ServiceNow-AI/Apriel-1.6-15b-Thinker', messages, max_tokens: maxTokens, temperature: 0.3 }),
+  })
+  if (!res.ok) throw new Error(`Together ${res.status}: ${await res.text()}`)
+  const data = await res.json()
+  return data.choices[0].message.content as string
+}
+
 async function callNvidia(messages: any[], apiKey: string, maxTokens = 4000): Promise<string> {
   const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
@@ -161,6 +184,8 @@ export async function POST(req: NextRequest) {
 
     const errors: string[] = []
     const nvidiaKey = process.env.NVIDIA_API_KEY
+    const cerebrasKey = process.env.CEREBRAS_API_KEY
+    const togetherKey = process.env.TOGETHER_API_KEY
     const groqKey = process.env.GROQ_API_KEY
     const orKey = process.env.OPENROUTER_API_KEY
 
@@ -172,6 +197,30 @@ export async function POST(req: NextRequest) {
       } catch (e: any) {
         errors.push(`NVIDIA: ${e.message}`)
         console.warn('[ai-quiz] NVIDIA failed:', e.message)
+      }
+    }
+
+    // 2. Cerebras — gpt-oss-120b → llama3.1-8b fallback
+    if (cerebrasKey) {
+      for (const model of ['gpt-oss-120b', 'llama3.1-8b']) {
+        try {
+          const quiz = await callCerebras(messages, cerebrasKey, model, 4000)
+          return NextResponse.json({ quiz, provider: `cerebras/${model}` })
+        } catch (e: any) {
+          errors.push(`Cerebras(${model}): ${e.message}`)
+          console.warn(`[ai-quiz] Cerebras(${model}) failed:`, e.message)
+        }
+      }
+    }
+
+    // 3. Together AI — free 15B model, good for quiz from notes
+    if (togetherKey) {
+      try {
+        const quiz = await callTogether(messages, togetherKey, 4000)
+        return NextResponse.json({ quiz, provider: 'together/apriel-15b' })
+      } catch (e: any) {
+        errors.push(`Together: ${e.message}`)
+        console.warn('[ai-quiz] Together failed:', e.message)
       }
     }
 
