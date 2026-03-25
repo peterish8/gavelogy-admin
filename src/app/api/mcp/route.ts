@@ -610,11 +610,17 @@ async function handleToolCall(name: string, args: Record<string, any>) {
     if (delError) throw new Error(`Failed to delete old questions: ${delError.message}`)
 
     // 3. Insert new questions
+    // options must be stored as [{letter, text}] to match the QuizOption format the UI expects.
+    // correct_answer must be a letter ('A','B','C','D'), not a number index.
+    const LETTERS = ['A', 'B', 'C', 'D', 'E']
     const rows = questions.map((q: any, i: number) => ({
       quiz_id,
       question_text: q.question,
-      options: q.options,
-      correct_answer: String(q.correct_index),
+      options: (q.options as string[]).map((text: string, idx: number) => ({
+        letter: LETTERS[idx] || String(idx + 1),
+        text,
+      })),
+      correct_answer: LETTERS[Number(q.correct_index)] || String(q.correct_index),
       explanation: q.explanation || null,
       question_type: 'single_choice',
       order_index: i,
