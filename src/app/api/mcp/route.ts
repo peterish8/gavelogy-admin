@@ -226,7 +226,7 @@ Example loop:
   },
   {
     name: 'list_quizzes',
-    description: 'List all quizzes in Gavelogy with id, title, description, subject.',
+    description: 'List all quizzes (attached_quizzes) in Gavelogy with id, title, note_item_id, passing_score.',
     inputSchema: { type: 'object', properties: {}, required: [] },
   },
   {
@@ -509,15 +509,16 @@ async function handleToolCall(name: string, args: Record<string, any>) {
   // ── list_quizzes ────────────────────────────────────────────────────────────
   if (name === 'list_quizzes') {
     const { data, error } = await db
-      .from('quizzes')
-      .select('id, title, description, order_index, subjects(name)')
-      .order('order_index')
+      .from('attached_quizzes')
+      .select('id, title, note_item_id, passing_score, quiz_questions(id)')
+      .order('created_at', { ascending: false })
     if (error) throw new Error(error.message)
     const rows = (data || []).map((q: any) => ({
       id: q.id,
       title: q.title,
-      description: q.description,
-      subject: q.subjects?.name || null,
+      note_item_id: q.note_item_id,
+      passing_score: q.passing_score,
+      question_count: Array.isArray(q.quiz_questions) ? q.quiz_questions.length : 0,
     }))
     return JSON.stringify(rows, null, 2)
   }
