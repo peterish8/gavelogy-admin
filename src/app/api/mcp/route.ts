@@ -167,19 +167,22 @@ async function dispatch(body: any) {
   const { method, params, id } = body
 
   if (method === 'initialize') {
+    // Echo back the client's requested protocol version (or latest supported)
+    const clientVersion = params?.protocolVersion || '2025-11-25'
     return {
       jsonrpc: '2.0',
       id,
       result: {
-        protocolVersion: '2024-11-05',
+        protocolVersion: clientVersion,
         capabilities: { tools: {} },
         serverInfo: { name: 'gavelogy-admin', version: '1.0.0' },
       },
     }
   }
 
-  if (method === 'notifications/initialized' || method === 'initialized') {
-    return null // notification — no response needed
+  // Notifications have no id — just ack silently
+  if (!id || method?.startsWith('notifications/')) {
+    return null
   }
 
   if (method === 'tools/list') {
@@ -244,9 +247,15 @@ export async function POST(request: NextRequest) {
 
   const result = await dispatch(body)
   if (result === null) {
-    return new NextResponse(null, { status: 204 })
+    return new NextResponse(null, { status: 202 })
   }
-  return NextResponse.json(result)
+  return NextResponse.json(result, {
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  })
 }
 
 // GET — health check / discovery
