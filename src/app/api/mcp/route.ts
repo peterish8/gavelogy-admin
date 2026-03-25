@@ -401,29 +401,42 @@ async function handleToolCall(name: string, args: Record<string, any>) {
     if (!res.ok) throw new Error(`Failed to fetch PDF from B2: ${res.status}`)
     const buffer = Buffer.from(await res.arrayBuffer())
 
-    // 3. Parse with pdf-parse — max:pageTo limits how many pages are processed (faster)
+    // 3. Parse full PDF text (max:0 = all pages)
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const pdfParse = require('pdf-parse') as (buf: Buffer, opts?: any) => Promise<{ text: string; numpages: number }>
-    const parsed = await pdfParse(buffer, { max: pageTo })
-    const totalPages = parsed.numpages || pageTo
+    const parsed = await pdfParse(buffer, { max: 0 })
+    const totalPages = parsed.numpages || 1
 
-    // 4. Split by form-feed (\f) — pdf-parse uses \f as page separator
-    const pages = parsed.text.split('\f')
-    // Take only pages [pageFrom-1 .. pageTo-1] (0-indexed)
-    const slice = pages.slice(pageFrom - 1, pageTo)
-    const chunkText = slice.join('\n\n--- PAGE BREAK ---\n\n').trim()
-
-    if (!chunkText) {
-      throw new Error('No text found in this page range — PDF may be image-based or scanned.')
+    if (!parsed.text?.trim()) {
+      throw new Error('No text extracted from PDF — the file may be scanned/image-based.')
     }
 
-    const hasMore = pageTo < totalPages
-    const nextPage = hasMore ? pageTo + 1 : null
+    // 4. Chunk by character position (works even when \f separators are absent)
+    //    Each "chunk" = 6000 chars. page_from/page_to are chunk numbers (1-indexed).
+    const CHUNK_SIZE = 6000
+    const fullText = parsed.text
+    const totalChunks = Math.ceil(fullText.length / CHUNK_SIZE)
+
+    const chunkFrom = pageFrom   // reuse page_from as chunk index
+    const chunkTo = Math.min(pageTo, totalChunks)
+
+    const start = (chunkFrom - 1) * CHUNK_SIZE
+    const end = chunkTo * CHUNK_SIZE
+    const chunkText = fullText.slice(start, end).trim()
+
+    if (!chunkText) {
+      return `=== ${item.title} ===\nChunks ${chunkFrom}–${chunkTo} of ${totalChunks} (${totalPages} PDF pages) — no content in this range.\nhas_more: false — END OF DOCUMENT`
+    }
+
+    const hasMore = chunkTo < totalChunks
+    const nextChunk = hasMore ? chunkTo + 1 : null
 
     const meta = [
       `=== ${item.title} ===`,
-      `Pages: ${pageFrom}–${Math.min(pageTo, totalPages)} of ${totalPages}`,
-      hasMore ? `has_more: true | next_page: ${nextPage} | Call: get_judgment_text(item_id="${item_id}", page_from=${nextPage}, page_to=${nextPage! + 19})` : 'has_more: false — END OF DOCUMENT',
+      `Chunk: ${chunkFrom}–${chunkTo} of ${totalChunks} | PDF pages: ${totalPages} | chars: ${start}–${end}`,
+      hasMore
+        ? `has_more: true | Call next: get_judgment_text(item_id="${item_id}", page_from=${nextChunk}, page_to=${nextChunk! + 19})`
+        : 'has_more: false — END OF DOCUMENT',
       '',
     ].join('\n')
 
