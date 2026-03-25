@@ -297,7 +297,7 @@ Example loop:
   },
   {
     name: 'get_pyq_questions',
-    description: 'Get all questions and passages for a PYQ test. Returns passages (with citation, subject) and questions (with options, correct answer, explanation, question_type).',
+    description: 'Get all questions for a PYQ test. Returns questions with option_a/b/c/d, correct_answer (A/B/C/D), explanation, and inline passage text.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -653,25 +653,19 @@ async function handleToolCall(name: string, args: Record<string, any>) {
   }
 
   // ── get_pyq_questions ───────────────────────────────────────────────────────
+  // pyq_questions has: id, test_id, order_index, question_text, option_a, option_b,
+  //   option_c, option_d, correct_answer, explanation, passage, marks
+  // There is NO pyq_passages table — passage text is stored inline on each question row.
   if (name === 'get_pyq_questions') {
     const { test_id } = args
     if (!test_id) throw new Error('test_id is required')
-    const [passagesRes, questionsRes] = await Promise.all([
-      db.from('pyq_passages')
-        .select('id, order_index, passage_text, citation, section_number, subject')
-        .eq('test_id', test_id)
-        .order('order_index'),
-      db.from('pyq_questions')
-        .select('id, order_index, passage_id, question_text, option_a, option_b, option_c, option_d, correct_answer, explanation, question_type, subject')
-        .eq('test_id', test_id)
-        .order('order_index'),
-    ])
-    if (passagesRes.error) throw new Error(passagesRes.error.message)
-    if (questionsRes.error) throw new Error(questionsRes.error.message)
-    return JSON.stringify({
-      passages: passagesRes.data || [],
-      questions: questionsRes.data || [],
-    }, null, 2)
+    const { data, error } = await db
+      .from('pyq_questions')
+      .select('id, order_index, question_text, option_a, option_b, option_c, option_d, correct_answer, explanation, passage, marks')
+      .eq('test_id', test_id)
+      .order('order_index')
+    if (error) throw new Error(error.message)
+    return JSON.stringify(data || [], null, 2)
   }
 
   throw new Error(`Unknown tool: ${name}`)
