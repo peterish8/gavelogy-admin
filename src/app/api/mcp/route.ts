@@ -52,33 +52,73 @@ STRUCTURE:
   [hr]  ← horizontal divider
 
 INLINE:
-  [b]bold[/b]   [i]italic[/i]   [u]underline[/u]
-  [hl:#ffff00]yellow[/hl]   [hl:#caffbf]green[/hl]   [hl:#a0c4ff]blue[/hl]
-  [hl:#ffd6a5]orange[/hl]   [hl:#ffc6ff]pink[/hl]
+  [b]bold[/b]   [i]italic[/i]
+  [hl:#ffff00]yellow highlight[/hl]   [hl:#caffbf]green highlight[/hl]
+  [hl:#a0c4ff]blue highlight[/hl]     [hl:#ffd6a5]orange highlight[/hl]
+  [hl:#ffc6ff]pink highlight[/hl]
+  ⚠ NEVER use [u]underline[/u] — use highlights instead for emphasis
 
 COLORED BOXES:
-  [box:blue]...[/box]   [box:green]...[/box]   [box:yellow]...[/box]
-  [box:red]...[/box]    [box:purple]...[/box]
+  [box:blue]...[/box]    ← citations, definitions, case identity
+  [box:green]...[/box]   ← ratio decidendi, held, key ruling
+  [box:yellow]...[/box]  ← warnings, important notes, caution
+  [box:red]...[/box]     ← dissent, criticism, opposing view
+  [box:purple]...[/box]  ← statutes, provisions, bare act text
 
 LISTS:
   [ul][li]item[/li][li]item[/li][/ul]
   [ol][li]first[/li][li]second[/li][/ol]
 
-EXAMPLE CASE LAW NOTE:
-  [h2]M.C. Mehta v. Union of India[/h2]
-  [box:blue][b]Citation:[/b] AIR 1987 SC 1086[/box]
-  [h3]Facts[/h3][p]...[/p]
-  [h3]Issue[/h3][p][hl:#ffff00]Key legal question here[/hl][/p]
-  [h3]Held[/h3][p]The court held that [b]important principle[/b]...[/p]
-  [box:green][b]Ratio:[/b] One-line ratio of the case[/box]
-  [h3]Key Principles[/h3]
-  [ul][li][hl:#caffbf]Principle 1[/hl][/li][li]Principle 2[/li][/ul]
+TABLES (for comparisons, multi-column data):
+  [table]
+  [tr][th]Column A[/th][th]Column B[/th][th]Column C[/th][/tr]
+  [tr][td]Value 1[/td][td]Value 2[/td][td]Value 3[/td][/tr]
+  [tr][td]Value 4[/td][td]Value 5[/td][td]Value 6[/td][/tr]
+  [/table]
+  Use tables for: comparing cases, section-by-section analysis, before/after comparisons.
+
+PDF CONNECTIONS (link note text to PDF judgment pages):
+  [link:LABEL]highlighted text that connects to PDF[/link]
+  - LABEL is a short descriptive slug: e.g. "holding", "ratio", "sec196", "fir-facts", "court-test"
+  - ALWAYS include 5–10 connections per note — they are mandatory, not optional
+  - Connect the most important legal phrases, holdings, and key facts
+  - Labels must be lowercase, hyphen-separated, max 20 chars
+  Example:
+    [p]The Court held that [link:main-holding][hl:#caffbf]prior sanction under Section 196 is mandatory[/hl][/link] before cognizance can be taken.[/p]
+    [p]The FIR alleged that [link:fir-facts]the poem promoted enmity between religious groups[/link] under Section 153A.[/p]
+
+EXAMPLE CASE LAW NOTE (showing all features):
+  [h2]Imran Pratapgadhi v. State of UP (2025)[/h2]
+  [box:blue][b]Citation:[/b] 2025 INSC 410 | [b]Bench:[/b] Abhay S. Oka & Ujjal Bhuyan JJ.[/box]
+  [box:purple][b]Sections:[/b] IPC 153A, 295A, 298, 504, 505 | CrPC 196, 197[/box]
+  [h3]Facts[/h3]
+  [p][link:fir-facts]The accused recited a poem at a rally which was alleged to promote communal enmity[/link]. An FIR was registered without prior sanction.[/p]
+  [h3]Key Issue[/h3]
+  [p][hl:#ffff00]Whether prior sanction under Section 196 CrPC is mandatory before registering an FIR for offences under Sections 153A and 505?[/hl][/p]
+  [h3]Held[/h3]
+  [p][link:main-holding][hl:#caffbf]Prior sanction under Section 196 is a condition precedent — FIR without it is void ab initio.[/hl][/link][/p]
+  [box:green][b]Ratio:[/b] [link:ratio]State cannot bypass the sanction requirement by registering FIR first and seeking sanction later.[/link][/box]
+  [h3]Court's Test for Section 153A[/h3]
+  [ol]
+  [li][link:test-1]Speech must [b]actually promote[/b] enmity — not merely offend[/link][/li]
+  [li][link:test-2]Context of speech must be examined holistically[/link][/li]
+  [li]Intent to promote disharmony is essential[/li]
+  [/ol]
+  [h3]Comparison: Section 153A vs 295A[/h3]
+  [table]
+  [tr][th]Aspect[/th][th]Section 153A[/th][th]295A[/th][/tr]
+  [tr][td]Target[/td][td]Groups/communities[/td][td]Religious feelings[/td][/tr]
+  [tr][td]Intent needed[/td][td]Yes[/td][td]Yes (deliberate)[/td][/tr]
+  [tr][td]Sanction required[/td][td]S.196 CrPC[/td][td]S.196 CrPC[/td][/tr]
+  [/table]
 
 RULES:
+  - NEVER use [u]...[/u] underline — always use [hl:color] for emphasis
   - Never nest [hl:] inside another [hl:]
   - Never use raw HTML (<strong>, <div>, etc.) — use bracket tags only
   - Always close every tag
-  - Use [box:blue] for citations/definitions, [box:green] for ratio/held, [box:yellow] for warnings`
+  - Always include 5–10 [link:LABEL]...[/link] connections — mandatory for every note
+  - Use [box:blue] for citations, [box:green] for ratio/held, [box:purple] for statutes, [box:yellow] for cautions`
 
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
