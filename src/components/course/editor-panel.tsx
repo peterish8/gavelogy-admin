@@ -1368,9 +1368,11 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
 
             // If the DB note was saved AFTER the local cache entry (e.g. saved via MCP/Claude),
             // discard the stale local cache so the fresh DB content is shown.
+            // Also discard if cache has no timestamp (legacy entries) and DB has content.
             const dbUpdatedAt = liveRes.data?.updated_at
-            const cacheIsStale = cachedNote && cachedNoteSavedAt && dbUpdatedAt
-                && new Date(dbUpdatedAt) > new Date(cachedNoteSavedAt)
+            const cacheIsStale = cachedNote && dbUpdatedAt && (
+                !cachedNoteSavedAt || new Date(dbUpdatedAt) > new Date(cachedNoteSavedAt)
+            )
             if (cacheIsStale) {
                 localCache.clearContent(itemId!)
             }
