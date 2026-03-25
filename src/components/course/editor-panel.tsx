@@ -18,7 +18,7 @@ import { Node, Mark, mergeAttributes } from '@tiptap/core'
 import { htmlToCustom, customToHtml, fixAiMistakes } from '@/lib/content-converter'
 import { fetchLinksForItem, insertLink, deleteLink } from '@/actions/judgment/links'
 import type { NotePdfLink } from '@/actions/judgment/links'
-import { saveNoteContent } from '@/actions/judgment/note-content'
+import { saveNoteContent, saveFlashcardsJson } from '@/actions/judgment/note-content'
 import { JudgmentPdfPanel, parseLinkMeta } from './judgment-pdf-panel'
 import type { ConnectionViz } from './judgment-pdf-panel'
 import { LineHeight } from '@/lib/line-height-extension'
@@ -32,7 +32,7 @@ import {
     Maximize2, Minimize2, ChevronRight, StickyNote, FileText,
     Highlighter, Braces, Sun, Moon,
     GripVertical, ChevronLeft, Loader2, MessageSquare, Minus, Link2, Unlink2, Wand2,
-    Table as TableIcon, Check, CreditCard, BookOpen,
+    Table as TableIcon, Check, CreditCard, Edit2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
@@ -301,7 +301,6 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   const [isAiFormatOpen, setIsAiFormatOpen] = useState(false)
   const [aiInstructions, setAiInstructions] = useState('')
   const [aiFormatting, setAiFormatting] = useState(false)
-  const [aiProvider, setAiProvider] = useState('')
   const [aiQuizzing, setAiQuizzing] = useState(false)
 
   const handleAiFormat = async (instructions: string) => {
@@ -321,7 +320,6 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
       if (!res.ok || data.error) throw new Error(data.error || 'AI failed')
       const html = customToHtml(data.formatted)
       editor.commands.setContent(html)
-      setAiProvider(data.provider || '')
       toast.success(`✨ Notes beautifully formatted!${data.provider ? ` (via ${data.provider})` : ''}`, { id: toastId })
     } catch (e: any) {
       toast.error(e.message || 'AI formatting failed', { id: toastId })
@@ -827,9 +825,13 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   const [flashcardIdx, setFlashcardIdx] = useState(0)
   const [flashcardFlipped, setFlashcardFlipped] = useState(false)
   const [aiFlashcarding, setAiFlashcarding] = useState(false)
+  const [flashcardEditing, setFlashcardEditing] = useState(false)
+  const [flashcardEditFront, setFlashcardEditFront] = useState('')
+  const [flashcardEditBack, setFlashcardEditBack] = useState('')
+  const [flashcardSaving, setFlashcardSaving] = useState(false)
 
-  // Preview nav tab — controls what's shown in each panel when in preview mode
-  const [jViewMode, setJViewMode] = useState<'notes' | 'quiz' | 'flashcards'>('notes')
+  // Right panel tab — controls what's shown in the right panel
+  const [jRightTab, setJRightTab] = useState<'judgment' | 'quiz' | 'flashcards'>('judgment')
 
   // Title Editing State (for inline rename)
   const [isEditingTitle, setIsEditingTitle] = useState(false)
@@ -917,7 +919,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
     setJConnectionViz(null)
     setJNoteMode('edit')
     setJNavigateToLinkId(null)
-    setJViewMode('notes')
+    setJRightTab('judgment')
     setFlashcards([])
     setFlashcardIdx(0)
     setFlashcardFlipped(false)
@@ -1052,6 +1054,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
 
     setJNavigateToLinkId(linkId)
     setJHighlightedLinkId(linkId)
+    setJRightTab('judgment') // Always show PDF when a connection is clicked
     setTimeout(() => setJHighlightedLinkId(null), 2000)
   }
 
@@ -1350,6 +1353,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
 
             // Check Local Cache First
             const cachedNote = localCache.getNoteContent(itemId!)
+            const cachedNoteSavedAt = localCache.getNoteContentSavedAt(itemId!)
             const cachedQuiz = localCache.getQuizContent(itemId!)
 
             // Fetch DB Data in Parallel
@@ -1362,10 +1366,20 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
 
             if (!isMounted) return
 
+            // If the DB note was saved AFTER the local cache entry (e.g. saved via MCP/Claude),
+            // discard the stale local cache so the fresh DB content is shown.
+            const dbUpdatedAt = liveRes.data?.updated_at
+            const cacheIsStale = cachedNote && cachedNoteSavedAt && dbUpdatedAt
+                && new Date(dbUpdatedAt) > new Date(cachedNoteSavedAt)
+            if (cacheIsStale) {
+                localCache.clearContent(itemId!)
+            }
+            const freshCachedNote = cacheIsStale ? undefined : cachedNote
+
             setFetchedData({
                 itemId,
-                source: cachedNote ? 'cache' : (draftRes.data ? 'draft' : 'live'),
-                content: cachedNote || draftRes.data?.draft_data?.content_html || liveRes.data?.content_html || '',
+                source: freshCachedNote ? 'cache' : (draftRes.data ? 'draft' : 'live'),
+                content: freshCachedNote || draftRes.data?.draft_data?.content_html || liveRes.data?.content_html || '',
                 publishedContent: liveRes.data?.content_html || '',
                 hasDraft: !!draftRes.data,
                 draftId: draftRes.data?.id || null,
@@ -1374,7 +1388,10 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                 // Quiz Data
                 quizSource: cachedQuiz ? 'cache' : 'db',
                 quizContent: cachedQuiz || null,
-                quizData: quizRes.data
+                quizData: quizRes.data,
+
+                // Flashcard Data (from note_contents.flashcards_json)
+                flashcardsJson: liveRes.data?.flashcards_json || null,
             })
             console.log('EditorPanel: [Fetch] Complete - setFetchedData called for', itemId)
             
@@ -1495,7 +1512,20 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
         setOriginalQuizContent('')
     }
 
-  }, [editor, fetchedData, itemId])
+    // 4. Load Flashcards from DB if available and not already in memory
+    if (fetchedData.flashcardsJson && flashcards.length === 0) {
+        try {
+            const parsed = JSON.parse(fetchedData.flashcardsJson)
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                setFlashcards(parsed)
+                setFlashcardIdx(0)
+                setFlashcardFlipped(false)
+            }
+        } catch { /* malformed JSON — ignore */ }
+    }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, fetchedData, itemId, flashcards.length])
 
   // Save to Draft (Cache) - NOTE Only
   const handleSaveDraft = async (silent = false) => {
@@ -1799,17 +1829,6 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
       } finally {
           setLoading(false)  // Always ensure loading is cleared
       }
-  }
-
-  // Toggle NoteBox
-  const toggleNote = (color: string) => {
-    if (!editor) return
-
-    if (editor.isActive('noteBox', { color })) {
-        (editor.commands as any).unsetNoteBox()
-    } else {
-        (editor.commands as any).toggleNoteBox({ color })
-    }
   }
 
   if (!itemId) {
@@ -2162,41 +2181,15 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                             )}
                             style={{ '--split-pct': `${jSplitPct}%` } as any}
                         >
-                            {/* Row 1: Edit mode = Connect + zoom + toggle | Preview mode = 4-tab nav */}
+                            {/* Row 1: Edit mode toolbar | Preview mode = simple Notes header */}
                             {jNoteMode === 'preview' ? (
-                                /* ── Preview Nav Bar: Notes | Judgment | Quiz | Flashcards ── */
-                                <div className="flex items-center border-b border-border bg-card shrink-0 px-2 py-1 gap-1">
-                                    {([
-                                        { id: 'notes',      icon: StickyNote,    label: 'Notes',       vm: 'notes' as const },
-                                        { id: 'judgment',   icon: FileText,      label: 'Judgment',    vm: 'notes' as const },
-                                        { id: 'quiz',       icon: MessageSquare, label: 'Quiz',        vm: 'quiz' as const },
-                                        { id: 'flashcards', icon: CreditCard,    label: 'Flashcards',  vm: 'flashcards' as const },
-                                    ] as const).map(({ id, icon: Icon, label, vm }) => {
-                                        const isActive = id === 'flashcards' ? jViewMode === 'flashcards'
-                                            : id === 'quiz' ? jViewMode === 'quiz'
-                                            : id === 'judgment' ? (jViewMode === 'notes')
-                                            : jViewMode === 'notes'
-                                        return (
-                                            <button
-                                                key={id}
-                                                onClick={() => setJViewMode(vm)}
-                                                className={cn(
-                                                    'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all',
-                                                    isActive
-                                                        ? 'bg-primary text-primary-foreground shadow-sm'
-                                                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                                                )}
-                                            >
-                                                <Icon className="w-3.5 h-3.5" />
-                                                {label}
-                                                {id === 'quiz' && quizContent && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
-                                                {id === 'flashcards' && flashcards.length > 0 && <span className="text-[10px] opacity-70">{flashcards.length}</span>}
-                                            </button>
-                                        )
-                                    })}
+                                /* ── Preview header bar — Notes is always left, always visible ── */
+                                <div className="flex items-center border-b border-border bg-card shrink-0 px-3 py-1.5 gap-2">
+                                    <StickyNote className="w-3.5 h-3.5 text-primary" />
+                                    <span className="text-xs font-bold text-foreground">Notes</span>
                                     <div className="flex-1" />
                                     <button
-                                        onClick={() => { switchJNoteMode('edit'); setJViewMode('notes') }}
+                                        onClick={() => { switchJNoteMode('edit') }}
                                         className="px-2 py-1 rounded text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
                                     >Edit</button>
                                 </div>
@@ -2269,8 +2262,8 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                     </div>
                                 </div>
 
-                                {/* Preview (read-only, linked text clickable) — hidden when quiz tab */}
-                                {jNoteMode === 'preview' && jViewMode !== 'quiz' && (
+                                {/* Preview — notes always visible in left panel */}
+                                {jNoteMode === 'preview' && (
                                     <div
                                         className="notes-editor-scroll flex-1 overflow-y-auto"
                                         onScroll={() => {
@@ -2285,23 +2278,6 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                         />
                                     </div>
                                 )}
-
-                                {/* Quiz View — shown when quiz tab active in preview mode */}
-                                {jNoteMode === 'preview' && jViewMode === 'quiz' && (
-                                    <div className="flex-1 overflow-y-auto">
-                                        {quizContent ? (
-                                            <QuizPreview
-                                                content={quizContent}
-                                                onContentChange={setQuizContent}
-                                            />
-                                        ) : (
-                                            <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-                                                <MessageSquare className="w-10 h-10 opacity-30" />
-                                                <p className="text-sm">No quiz yet — generate notes with AI to auto-create one.</p>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
                             </div>
                         </div>
 
@@ -2314,152 +2290,329 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                             <div className="w-0.5 h-8 rounded-full bg-border group-hover:bg-primary/60 transition-colors" />
                         </div>
 
-                        {/* Right: PDF Panel (hidden when flashcards tab active) */}
+                        {/* Right panel: Judgment / Quiz / Flashcards */}
                         <div
                            className={cn(
                                "flex-col min-w-0 overflow-hidden flex-1",
-                               mobileTagTab === 'pdf' ? "flex w-full" : "hidden lg:flex",
-                               jViewMode === 'flashcards' && "!hidden"
+                               mobileTagTab === 'pdf' ? "flex w-full" : "hidden lg:flex"
                            )}
                         >
-                            <JudgmentPdfPanel
-                                itemId={itemId!}
-                                links={jLinks}
-                                onLinksChange={setJLinks}
-                                connectMode={jConnectMode}
-                                connectStep={jConnectStep}
-                                connectNoteCapture={jConnectNoteCapture}
-                                connectPdfCapture={jConnectPdfCapture}
-                                onConnectPdfCapture={setJConnectPdfCapture}
-                                highlightedLinkId={jHighlightedLinkId}
-                                onHighlightedLinkIdChange={setJHighlightedLinkId}
-                                connectionViz={jConnectionViz}
-                                onConnectionVizChange={setJConnectionViz}
-                                getNoteLinkSpan={getNoteLinkSpan}
-                                getNoteText={getJNoteText}
-                                onDeleteLink={handleJDeleteLink}
-                                onConnectSave={handleJConnectSave}
-                                savingLink={jSavingLink}
-                                navigateToLinkId={jNavigateToLinkId}
-                                onNavigateComplete={() => setJNavigateToLinkId(null)}
-                                redrawTick={jRedrawTick}
-                                onAiNotesGenerated={(formatted, provider) => {
-                                    if (!editor) return
-                                    const html = customToHtml(formatted)
-                                    editor.commands.setContent(html)
-                                    toast.success(`✨ Case notes ready! Auto-generating quiz + flashcards…${provider ? ` (via ${provider})` : ''}`)
-                                    // Auto-generate quiz and flashcards after notes are set
-                                    const notesText = editor.getText()
-                                    setTimeout(() => {
-                                        handleAiQuiz()
-                                        handleAiFlashcards(notesText)
-                                    }, 300)
-                                }}
-                            />
-                        </div>
+                            {/* Right panel tab bar */}
+                            <div className="flex items-center border-b border-border bg-card shrink-0 px-2 py-1 gap-1">
+                                {([
+                                    { id: 'judgment'   as const, icon: FileText,      label: 'Judgment' },
+                                    { id: 'quiz'       as const, icon: MessageSquare, label: 'Quiz' },
+                                    { id: 'flashcards' as const, icon: CreditCard,    label: 'Flashcards' },
+                                ]).map(({ id, icon: Icon, label }) => (
+                                    <button
+                                        key={id}
+                                        onClick={() => setJRightTab(id)}
+                                        className={cn(
+                                            'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all',
+                                            jRightTab === id
+                                                ? 'bg-primary text-primary-foreground shadow-sm'
+                                                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                                        )}
+                                    >
+                                        <Icon className="w-3.5 h-3.5" />
+                                        {label}
+                                        {id === 'quiz' && quizContent && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+                                        {id === 'flashcards' && flashcards.length > 0 && <span className="text-[10px] opacity-70">{flashcards.length}</span>}
+                                    </button>
+                                ))}
+                            </div>
 
-                        {/* Right: Flashcard Viewer — shown when flashcards tab active */}
-                        {jViewMode === 'flashcards' && (
-                            <div className={cn(
-                                "flex-col min-w-0 overflow-hidden flex-1 bg-card",
-                                mobileTagTab === 'pdf' ? "flex w-full" : "hidden lg:flex"
-                            )}>
-                                {flashcards.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-                                        <CreditCard className="w-12 h-12 opacity-25" />
-                                        <p className="text-sm text-center px-8">No flashcards yet — generate notes with AI to auto-create them.</p>
-                                        <button
-                                            onClick={() => handleAiFlashcards()}
-                                            disabled={aiFlashcarding}
-                                            className="mt-1 px-3 py-1.5 rounded-md text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-all"
-                                        >
-                                            {aiFlashcarding ? 'Generating…' : 'Generate Flashcards'}
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div className="flex flex-col items-center justify-center h-full gap-5 px-8 select-none">
-                                        {/* Progress */}
-                                        <div className="flex items-center gap-1.5">
-                                            {flashcards.map((_, i) => (
-                                                <button
-                                                    key={i}
-                                                    onClick={() => { setFlashcardIdx(i); setFlashcardFlipped(false) }}
-                                                    className={cn(
-                                                        "w-2 h-2 rounded-full transition-all",
-                                                        i === flashcardIdx ? "bg-primary scale-125" : "bg-muted-foreground/30 hover:bg-muted-foreground/60"
-                                                    )}
-                                                />
-                                            ))}
+                            {/* Judgment PDF — mounted always, hidden when not active (preserves scroll) */}
+                            <div className={jRightTab === 'judgment' ? "flex flex-col flex-1 min-h-0 overflow-hidden" : "hidden"}>
+                                <JudgmentPdfPanel
+                                    itemId={itemId!}
+                                    links={jLinks}
+                                    onLinksChange={setJLinks}
+                                    connectMode={jConnectMode}
+                                    connectStep={jConnectStep}
+                                    connectNoteCapture={jConnectNoteCapture}
+                                    connectPdfCapture={jConnectPdfCapture}
+                                    onConnectPdfCapture={setJConnectPdfCapture}
+                                    highlightedLinkId={jHighlightedLinkId}
+                                    onHighlightedLinkIdChange={setJHighlightedLinkId}
+                                    connectionViz={jConnectionViz}
+                                    onConnectionVizChange={setJConnectionViz}
+                                    getNoteLinkSpan={getNoteLinkSpan}
+                                    getNoteText={getJNoteText}
+                                    onDeleteLink={handleJDeleteLink}
+                                    onConnectSave={handleJConnectSave}
+                                    savingLink={jSavingLink}
+                                    navigateToLinkId={jNavigateToLinkId}
+                                    onNavigateComplete={() => setJNavigateToLinkId(null)}
+                                    redrawTick={jRedrawTick}
+                                    onAiNotesGenerated={(formatted, provider) => {
+                                        if (!editor) return
+                                        const html = customToHtml(formatted)
+                                        editor.commands.setContent(html)
+                                        toast.success(`✨ Case notes ready! Auto-generating quiz + flashcards…${provider ? ` (via ${provider})` : ''}`)
+                                        const notesText = editor.getText()
+                                        setTimeout(() => {
+                                            handleAiQuiz()
+                                            handleAiFlashcards(notesText)
+                                        }, 300)
+                                    }}
+                                />
+                            </div>
+
+                            {/* Quiz — shown when quiz tab active */}
+                            {jRightTab === 'quiz' && (
+                                <div className="flex-1 overflow-y-auto">
+                                    {quizContent ? (
+                                        <QuizPreview
+                                            content={quizContent}
+                                            onContentChange={setQuizContent}
+                                        />
+                                    ) : (
+                                        <div className="flex flex-col items-center justify-center h-full gap-4">
+                                            <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">
+                                                <MessageSquare className="w-6 h-6 text-primary/50" />
+                                            </div>
+                                            <div className="text-center">
+                                                <p className="text-sm font-semibold text-foreground">No quiz yet</p>
+                                                <p className="text-xs text-muted-foreground mt-1">Generate AI notes first — quiz is built from them.</p>
+                                            </div>
                                         </div>
+                                    )}
+                                </div>
+                            )}
 
-                                        {/* Card */}
-                                        <div
-                                            className="w-full max-w-md cursor-pointer"
-                                            style={{ perspective: '1000px' }}
-                                            onClick={() => setFlashcardFlipped(f => !f)}
-                                        >
-                                            <div
-                                                className="relative transition-all duration-500"
-                                                style={{
-                                                    transformStyle: 'preserve-3d',
-                                                    transform: flashcardFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
-                                                    minHeight: '200px',
-                                                }}
+                            {/* Flashcards — shown when flashcards tab active */}
+                            {jRightTab === 'flashcards' && (
+                                <div className="flex-1 overflow-hidden flex flex-col">
+                                    {flashcards.length === 0 ? (
+                                        <div className="flex flex-col items-center justify-center h-full gap-4">
+                                            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
+                                                <CreditCard className="w-7 h-7 text-primary/50" />
+                                            </div>
+                                            <div className="text-center">
+                                                <p className="text-sm font-semibold text-foreground">No flashcards yet</p>
+                                                <p className="text-xs text-muted-foreground mt-1">Generate AI notes first — flashcards are built from them.</p>
+                                            </div>
+                                            <button
+                                                onClick={() => handleAiFlashcards()}
+                                                disabled={aiFlashcarding}
+                                                className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-all shadow-sm"
                                             >
-                                                {/* Front */}
-                                                <div
-                                                    className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl border border-border bg-background shadow-md p-7 text-center backface-hidden"
-                                                    style={{ backfaceVisibility: 'hidden' }}
-                                                >
-                                                    <span className="text-[10px] uppercase tracking-widest text-muted-foreground mb-3 font-semibold">Question</span>
-                                                    <p className="text-base font-semibold text-foreground leading-snug">{flashcards[flashcardIdx]?.front}</p>
-                                                    <span className="mt-4 text-[11px] text-muted-foreground/60">tap to reveal answer</span>
+                                                <CreditCard className="w-3.5 h-3.5" />
+                                                {aiFlashcarding ? 'Generating…' : 'Generate Flashcards'}
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="flex flex-col h-full">
+                                            {/* Header */}
+                                            <div className="flex items-center justify-between px-5 py-2.5 border-b border-border bg-background shrink-0">
+                                                <div className="flex items-center gap-2">
+                                                    <CreditCard className="w-4 h-4 text-primary" />
+                                                    <span className="text-sm font-bold text-foreground">Flashcards</span>
+                                                    <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-bold tabular-nums">
+                                                        {flashcards.length}
+                                                    </span>
                                                 </div>
-                                                {/* Back */}
+                                                <div className="flex items-center gap-2">
+                                                    {flashcardEditing ? (
+                                                        <>
+                                                            <button
+                                                                onClick={() => setFlashcardEditing(false)}
+                                                                className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-semibold border border-border hover:bg-muted text-muted-foreground transition-all"
+                                                            >
+                                                                Cancel
+                                                            </button>
+                                                            <button
+                                                                onClick={async () => {
+                                                                    if (!itemId) return
+                                                                    const updated = flashcards.map((c, i) =>
+                                                                        i === flashcardIdx
+                                                                            ? { front: flashcardEditFront, back: flashcardEditBack }
+                                                                            : c
+                                                                    )
+                                                                    setFlashcardSaving(true)
+                                                                    try {
+                                                                        await saveFlashcardsJson(itemId, updated)
+                                                                        setFlashcards(updated)
+                                                                        setFlashcardEditing(false)
+                                                                        toast.success('Flashcard saved')
+                                                                    } catch {
+                                                                        toast.error('Save failed')
+                                                                    } finally {
+                                                                        setFlashcardSaving(false)
+                                                                    }
+                                                                }}
+                                                                disabled={flashcardSaving}
+                                                                className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-all"
+                                                            >
+                                                                {flashcardSaving ? 'Saving…' : 'Save'}
+                                                            </button>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <button
+                                                                onClick={() => {
+                                                                    setFlashcardEditFront(flashcards[flashcardIdx]?.front ?? '')
+                                                                    setFlashcardEditBack(flashcards[flashcardIdx]?.back ?? '')
+                                                                    setFlashcardEditing(true)
+                                                                    setFlashcardFlipped(false)
+                                                                }}
+                                                                className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-semibold border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-all"
+                                                            >
+                                                                <Edit2 className="w-3 h-3" /> Edit
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleAiFlashcards()}
+                                                                disabled={aiFlashcarding}
+                                                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-semibold border border-border hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-50 transition-all"
+                                                            >
+                                                                <span className={aiFlashcarding ? 'animate-spin inline-block' : ''}>↻</span>
+                                                                {aiFlashcarding ? 'Regenerating…' : 'Regenerate'}
+                                                            </button>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Progress bar */}
+                                            <div className="h-1.5 bg-border shrink-0">
                                                 <div
-                                                    className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl border border-primary/40 bg-primary/5 shadow-md p-7 text-center"
-                                                    style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
-                                                >
-                                                    <span className="text-[10px] uppercase tracking-widest text-primary mb-3 font-semibold">Answer</span>
-                                                    <p className="text-sm text-foreground leading-relaxed">{flashcards[flashcardIdx]?.back}</p>
-                                                    <span className="mt-4 text-[11px] text-muted-foreground/60">tap to flip back</span>
+                                                    className="h-full bg-primary transition-all duration-300"
+                                                    style={{ width: `${((flashcardIdx + 1) / flashcards.length) * 100}%` }}
+                                                />
+                                            </div>
+
+                                            {/* Card area */}
+                                            <div className="flex-1 flex flex-col items-center justify-center px-6 py-6 gap-5 overflow-auto">
+
+                                                {/* Counter + dot nav */}
+                                                <div className="flex flex-col items-center gap-2 w-full">
+                                                    <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/60">
+                                                        Card {flashcardIdx + 1} of {flashcards.length}
+                                                    </span>
+                                                    <div className="flex items-center gap-1.5 flex-wrap justify-center">
+                                                        {flashcards.map((_, i) => (
+                                                            <button
+                                                                key={i}
+                                                                onClick={() => { setFlashcardIdx(i); setFlashcardFlipped(false); setFlashcardEditing(false) }}
+                                                                className={cn(
+                                                                    "rounded-full transition-all duration-200",
+                                                                    i === flashcardIdx
+                                                                        ? "w-6 h-2 bg-primary"
+                                                                        : "w-2 h-2 bg-muted-foreground/25 hover:bg-muted-foreground/50"
+                                                                )}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                </div>
+
+                                                {flashcardEditing ? (
+                                                    /* ── Edit mode ── */
+                                                    <div className="w-full flex flex-col gap-4" style={{ maxWidth: '560px' }}>
+                                                        <div className="rounded-2xl border border-primary/30 overflow-hidden shadow-xl">
+                                                            <div className="h-2 bg-linear-to-r from-primary via-primary/70 to-primary/30 shrink-0" />
+                                                            <div className="p-5 bg-background flex flex-col gap-3">
+                                                                <span className="px-3 py-1 rounded-full bg-primary/10 text-primary text-[10px] font-bold uppercase tracking-widest self-start">
+                                                                    Question (Front)
+                                                                </span>
+                                                                <textarea
+                                                                    value={flashcardEditFront}
+                                                                    onChange={e => setFlashcardEditFront(e.target.value)}
+                                                                    className="w-full resize-none text-base font-semibold text-foreground bg-muted/40 rounded-xl px-4 py-3 border border-border focus:outline-none focus:ring-2 focus:ring-primary/40 min-h-[100px]"
+                                                                    placeholder="Front of card (question / cue)…"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                        <div className="rounded-2xl border border-primary/40 overflow-hidden shadow-xl">
+                                                            <div className="h-2 bg-linear-to-r from-primary to-primary/40 shrink-0" />
+                                                            <div className="p-5 bg-primary/5 flex flex-col gap-3">
+                                                                <span className="px-3 py-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold uppercase tracking-widest self-start">
+                                                                    Answer (Back)
+                                                                </span>
+                                                                <textarea
+                                                                    value={flashcardEditBack}
+                                                                    onChange={e => setFlashcardEditBack(e.target.value)}
+                                                                    className="w-full resize-none text-base text-foreground bg-background/60 rounded-xl px-4 py-3 border border-border focus:outline-none focus:ring-2 focus:ring-primary/40 min-h-[120px]"
+                                                                    placeholder="Back of card (answer)…"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    /* ── Flip card ── */
+                                                    <div
+                                                        className="w-full cursor-pointer select-none"
+                                                        style={{ perspective: '1200px', maxWidth: '560px' }}
+                                                        onClick={() => setFlashcardFlipped(f => !f)}
+                                                    >
+                                                        <div
+                                                            className="relative transition-transform duration-500"
+                                                            style={{
+                                                                transformStyle: 'preserve-3d',
+                                                                transform: flashcardFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
+                                                                minHeight: '340px',
+                                                            }}
+                                                        >
+                                                            {/* Front */}
+                                                            <div
+                                                                className="absolute inset-0 flex flex-col rounded-2xl overflow-hidden shadow-xl border border-border"
+                                                                style={{ backfaceVisibility: 'hidden' }}
+                                                            >
+                                                                <div className="h-2 bg-linear-to-r from-primary via-primary/70 to-primary/30 shrink-0" />
+                                                                <div className="flex-1 flex flex-col items-center justify-center p-10 text-center bg-background gap-5">
+                                                                    <span className="px-3 py-1 rounded-full bg-primary/10 text-primary text-[10px] font-bold uppercase tracking-widest">
+                                                                        Question
+                                                                    </span>
+                                                                    <p className="text-xl font-bold text-foreground leading-snug">
+                                                                        {flashcards[flashcardIdx]?.front}
+                                                                    </p>
+                                                                    <span className="text-xs text-muted-foreground/50 mt-1">tap to reveal answer ↓</span>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Back */}
+                                                            <div
+                                                                className="absolute inset-0 flex flex-col rounded-2xl overflow-hidden shadow-xl border border-primary/40"
+                                                                style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
+                                                            >
+                                                                <div className="h-2 bg-linear-to-r from-primary to-primary/40 shrink-0" />
+                                                                <div className="flex-1 flex flex-col items-center justify-center p-10 text-center bg-primary/5 gap-5">
+                                                                    <span className="px-3 py-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold uppercase tracking-widest">
+                                                                        Answer
+                                                                    </span>
+                                                                    <p className="text-lg text-foreground leading-relaxed">
+                                                                        {flashcards[flashcardIdx]?.back}
+                                                                    </p>
+                                                                    <span className="text-xs text-muted-foreground/50 mt-1">tap to flip back ↑</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* Nav */}
+                                                <div className="flex items-center gap-4">
+                                                    <button
+                                                        onClick={() => { setFlashcardIdx(i => Math.max(0, i - 1)); setFlashcardFlipped(false); setFlashcardEditing(false) }}
+                                                        disabled={flashcardIdx === 0}
+                                                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-border bg-background hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-all text-sm font-semibold text-foreground shadow-sm"
+                                                    >
+                                                        <ChevronLeft className="w-4 h-4" /> Prev
+                                                    </button>
+                                                    <button
+                                                        onClick={() => { setFlashcardIdx(i => Math.min(flashcards.length - 1, i + 1)); setFlashcardFlipped(false); setFlashcardEditing(false) }}
+                                                        disabled={flashcardIdx === flashcards.length - 1}
+                                                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-border bg-background hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-all text-sm font-semibold text-foreground shadow-sm"
+                                                    >
+                                                        Next <ChevronRight className="w-4 h-4" />
+                                                    </button>
                                                 </div>
                                             </div>
                                         </div>
-
-                                        {/* Nav */}
-                                        <div className="flex items-center gap-4">
-                                            <button
-                                                onClick={() => { setFlashcardIdx(i => Math.max(0, i - 1)); setFlashcardFlipped(false) }}
-                                                disabled={flashcardIdx === 0}
-                                                className="p-2 rounded-lg border border-border hover:bg-muted disabled:opacity-30 transition-all"
-                                            >
-                                                <ChevronLeft className="w-4 h-4" />
-                                            </button>
-                                            <span className="text-xs text-muted-foreground tabular-nums">
-                                                {flashcardIdx + 1} / {flashcards.length}
-                                            </span>
-                                            <button
-                                                onClick={() => { setFlashcardIdx(i => Math.min(flashcards.length - 1, i + 1)); setFlashcardFlipped(false) }}
-                                                disabled={flashcardIdx === flashcards.length - 1}
-                                                className="p-2 rounded-lg border border-border hover:bg-muted disabled:opacity-30 transition-all"
-                                            >
-                                                <ChevronRight className="w-4 h-4" />
-                                            </button>
-                                        </div>
-
-                                        {/* Regenerate */}
-                                        <button
-                                            onClick={() => handleAiFlashcards()}
-                                            disabled={aiFlashcarding}
-                                            className="text-[11px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                                        >
-                                            {aiFlashcarding ? 'Regenerating…' : '↻ Regenerate'}
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        )}
+                                    )}
+                                </div>
+                            )}
+                        </div>
 
                         {/* SVG connection curve overlay */}
                         {jConnectionViz && (() => {

@@ -350,13 +350,36 @@ async function handleToolCall(name: string, args: Record<string, any>) {
     const { item_id, content_html } = args
     if (!item_id) throw new Error('item_id is required')
     if (content_html === undefined) throw new Error('content_html is required')
+    const now = new Date().toISOString()
+
+    // 1. Write to note_contents (the "published" content shown in the website)
     const { error } = await db
       .from('note_contents')
       .upsert(
-        { item_id, content_html, updated_at: new Date().toISOString() },
+        { item_id, content_html, updated_at: now },
         { onConflict: 'item_id' }
       )
     if (error) throw new Error(error.message)
+
+    // 2. Also update draft_content_cache so the editor loads the new content
+    //    (the editor prioritises draft over note_contents, so old draft would mask our save)
+    const { data: existingDraft } = await db
+      .from('draft_content_cache')
+      .select('id')
+      .eq('original_content_id', item_id)
+      .maybeSingle()
+
+    if (existingDraft) {
+      await db
+        .from('draft_content_cache')
+        .update({ draft_data: { content_html }, updated_at: now })
+        .eq('id', existingDraft.id)
+    } else {
+      await db
+        .from('draft_content_cache')
+        .insert({ original_content_id: item_id, draft_data: { content_html } })
+    }
+
     return `Note saved successfully for item ${item_id}`
   }
 
