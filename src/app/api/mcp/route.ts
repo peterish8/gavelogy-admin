@@ -9,7 +9,7 @@
  *   get_note              → fetch note content for an item
  *   save_note             → save/overwrite note content
  *   get_note_summary      → plain-text preview of a note (no tags)
- *   get_judgment_url      → signed B2 URL for the item's PDF judgment
+ *   get_judgment_text     → extract + return full PDF text server-side
  *   list_quizzes          → list all quizzes
  *   list_flashcards       → get flashcards JSON for an item
  *   save_flashcards       → save flashcards JSON for an item
@@ -22,6 +22,7 @@ import { createClient } from '@supabase/supabase-js'
 import { GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { b2Client, BUCKET } from '@/lib/b2-client'
+import { extractPdfText } from '@/lib/telegram'
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -160,8 +161,8 @@ const TOOLS = [
     },
   },
   {
-    name: 'get_judgment_url',
-    description: 'Get a signed URL (valid 24h) to open/read the PDF judgment attached to a structure item.',
+    name: 'get_judgment_text',
+    description: 'Extract and return the full text of the PDF judgment attached to a structure item. The PDF is fetched server-side from Backblaze B2 and parsed — Claude receives the plain text directly and can read, summarise, or answer questions about it.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -362,10 +363,12 @@ async function handleToolCall(name: string, args: Record<string, any>) {
     return `[Last updated: ${data.updated_at}]\n\n${preview}`
   }
 
-  // ── get_judgment_url ────────────────────────────────────────────────────────
-  if (name === 'get_judgment_url') {
+  // ── get_judgment_text ───────────────────────────────────────────────────────
+  if (name === 'get_judgment_text') {
     const { item_id } = args
     if (!item_id) throw new Error('item_id is required')
+
+    // 1. Get pdf_url (B2 storage key) from structure_items
     const { data, error } = await db
       .from('structure_items')
       .select('pdf_url, title')
@@ -374,9 +377,20 @@ async function handleToolCall(name: string, args: Record<string, any>) {
     if (error) throw new Error(error.message)
     const item = data as any
     if (!item?.pdf_url) return '(No PDF judgment attached to this item)'
+
+    // 2. Generate a short-lived signed URL to fetch the PDF from B2
     const command = new GetObjectCommand({ Bucket: BUCKET, Key: item.pdf_url })
-    const url = await getSignedUrl(b2Client, command, { expiresIn: 86400 })
-    return `Title: ${item.title}\nSigned URL (valid 24h): ${url}`
+    const signedUrl = await getSignedUrl(b2Client, command, { expiresIn: 300 })
+
+    // 3. Fetch PDF bytes server-side (Vercel → B2, no browser restriction)
+    const res = await fetch(signedUrl)
+    if (!res.ok) throw new Error(`Failed to fetch PDF from B2: ${res.status}`)
+    const buffer = Buffer.from(await res.arrayBuffer())
+
+    // 4. Extract text using the existing Vercel-safe pdf-parse wrapper
+    const text = await extractPdfText(buffer)
+
+    return `=== ${item.title} ===\n\n${text}`
   }
 
   // ── list_quizzes ────────────────────────────────────────────────────────────
