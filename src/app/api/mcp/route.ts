@@ -297,7 +297,7 @@ Example loop:
   },
   {
     name: 'get_pyq_questions',
-    description: 'Get all questions and passages for a PYQ test. Returns passages (with citation, subject) and questions (with options, correct answer, explanation, question_type).',
+    description: 'Get all questions for a PYQ test. Returns questions with option_a/b/c/d, correct_answer (A/B/C/D), explanation, and inline passage text.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -501,13 +501,16 @@ async function handleToolCall(name: string, args: Record<string, any>) {
       throw new Error('No text extracted from PDF — the file may be scanned/image-based.')
     }
 
-    // 4. Chunk by character position (works even when \f separators are absent)
-    //    Each "chunk" = 6000 chars. page_from/page_to are chunk numbers (1-indexed).
-    const CHUNK_SIZE = 6000
+    // 4. Chunk by character position.
+    //    CHUNK_SIZE is chosen so that a 54-page judgment (~180k chars) gives ~54 chunks
+    //    matching PDF page numbers 1-1. page_from/page_to map to chunk indices.
     const fullText = parsed.text
-    const totalChunks = Math.ceil(fullText.length / CHUNK_SIZE)
+    const totalChars = fullText.length
+    // Aim for ~totalPages chunks so chunk numbers ≈ page numbers
+    const CHUNK_SIZE = Math.max(1000, Math.ceil(totalChars / Math.max(totalPages, 1)))
+    const totalChunks = Math.ceil(totalChars / CHUNK_SIZE)
 
-    const chunkFrom = pageFrom   // reuse page_from as chunk index
+    const chunkFrom = Math.min(pageFrom, totalChunks)
     const chunkTo = Math.min(pageTo, totalChunks)
 
     const start = (chunkFrom - 1) * CHUNK_SIZE
@@ -523,9 +526,9 @@ async function handleToolCall(name: string, args: Record<string, any>) {
 
     const meta = [
       `=== ${item.title} ===`,
-      `Chunk: ${chunkFrom}–${chunkTo} of ${totalChunks} | PDF pages: ${totalPages} | chars: ${start}–${end}`,
+      `Pages: ${chunkFrom}–${chunkTo} of ${totalPages} | chars: ${start}–${Math.min(end, totalChars)}`,
       hasMore
-        ? `has_more: true | Call next: get_judgment_text(item_id="${item_id}", page_from=${nextChunk}, page_to=${nextChunk! + 19})`
+        ? `has_more: true | next_page: ${nextChunk} | Call: get_judgment_text(item_id="${item_id}", page_from=${nextChunk}, page_to=${nextChunk! + 19})`
         : 'has_more: false — END OF DOCUMENT',
       '',
     ].join('\n')
@@ -607,11 +610,17 @@ async function handleToolCall(name: string, args: Record<string, any>) {
     if (delError) throw new Error(`Failed to delete old questions: ${delError.message}`)
 
     // 3. Insert new questions
+    // options must be stored as [{letter, text}] to match the QuizOption format the UI expects.
+    // correct_answer must be a letter ('A','B','C','D'), not a number index.
+    const LETTERS = ['A', 'B', 'C', 'D', 'E']
     const rows = questions.map((q: any, i: number) => ({
       quiz_id,
       question_text: q.question,
-      options: q.options,
-      correct_answer: String(q.correct_index),
+      options: (q.options as string[]).map((text: string, idx: number) => ({
+        letter: LETTERS[idx] || String(idx + 1),
+        text,
+      })),
+      correct_answer: LETTERS[Number(q.correct_index)] || String(q.correct_index),
       explanation: q.explanation || null,
       question_type: 'single_choice',
       order_index: i,
@@ -644,25 +653,19 @@ async function handleToolCall(name: string, args: Record<string, any>) {
   }
 
   // ── get_pyq_questions ───────────────────────────────────────────────────────
+  // pyq_questions has: id, test_id, order_index, question_text, option_a, option_b,
+  //   option_c, option_d, correct_answer, explanation, passage, marks
+  // There is NO pyq_passages table — passage text is stored inline on each question row.
   if (name === 'get_pyq_questions') {
     const { test_id } = args
     if (!test_id) throw new Error('test_id is required')
-    const [passagesRes, questionsRes] = await Promise.all([
-      db.from('pyq_passages')
-        .select('id, order_index, passage_text, citation, section_number, subject')
-        .eq('test_id', test_id)
-        .order('order_index'),
-      db.from('pyq_questions')
-        .select('id, order_index, passage_id, question_text, option_a, option_b, option_c, option_d, correct_answer, explanation, question_type, subject')
-        .eq('test_id', test_id)
-        .order('order_index'),
-    ])
-    if (passagesRes.error) throw new Error(passagesRes.error.message)
-    if (questionsRes.error) throw new Error(questionsRes.error.message)
-    return JSON.stringify({
-      passages: passagesRes.data || [],
-      questions: questionsRes.data || [],
-    }, null, 2)
+    const { data, error } = await db
+      .from('pyq_questions')
+      .select('id, order_index, question_text, option_a, option_b, option_c, option_d, correct_answer, explanation, passage, marks')
+      .eq('test_id', test_id)
+      .order('order_index')
+    if (error) throw new Error(error.message)
+    return JSON.stringify(data || [], null, 2)
   }
 
   throw new Error(`Unknown tool: ${name}`)
