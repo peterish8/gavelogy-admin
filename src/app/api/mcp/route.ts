@@ -501,13 +501,16 @@ async function handleToolCall(name: string, args: Record<string, any>) {
       throw new Error('No text extracted from PDF — the file may be scanned/image-based.')
     }
 
-    // 4. Chunk by character position (works even when \f separators are absent)
-    //    Each "chunk" = 6000 chars. page_from/page_to are chunk numbers (1-indexed).
-    const CHUNK_SIZE = 6000
+    // 4. Chunk by character position.
+    //    CHUNK_SIZE is chosen so that a 54-page judgment (~180k chars) gives ~54 chunks
+    //    matching PDF page numbers 1-1. page_from/page_to map to chunk indices.
     const fullText = parsed.text
-    const totalChunks = Math.ceil(fullText.length / CHUNK_SIZE)
+    const totalChars = fullText.length
+    // Aim for ~totalPages chunks so chunk numbers ≈ page numbers
+    const CHUNK_SIZE = Math.max(1000, Math.ceil(totalChars / Math.max(totalPages, 1)))
+    const totalChunks = Math.ceil(totalChars / CHUNK_SIZE)
 
-    const chunkFrom = pageFrom   // reuse page_from as chunk index
+    const chunkFrom = Math.min(pageFrom, totalChunks)
     const chunkTo = Math.min(pageTo, totalChunks)
 
     const start = (chunkFrom - 1) * CHUNK_SIZE
@@ -523,9 +526,9 @@ async function handleToolCall(name: string, args: Record<string, any>) {
 
     const meta = [
       `=== ${item.title} ===`,
-      `Chunk: ${chunkFrom}–${chunkTo} of ${totalChunks} | PDF pages: ${totalPages} | chars: ${start}–${end}`,
+      `Pages: ${chunkFrom}–${chunkTo} of ${totalPages} | chars: ${start}–${Math.min(end, totalChars)}`,
       hasMore
-        ? `has_more: true | Call next: get_judgment_text(item_id="${item_id}", page_from=${nextChunk}, page_to=${nextChunk! + 19})`
+        ? `has_more: true | next_page: ${nextChunk} | Call: get_judgment_text(item_id="${item_id}", page_from=${nextChunk}, page_to=${nextChunk! + 19})`
         : 'has_more: false — END OF DOCUMENT',
       '',
     ].join('\n')
