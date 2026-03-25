@@ -107,8 +107,8 @@ async function handleToolCall(name: string, args: Record<string, string>) {
   if (name === 'list_courses') {
     const { data, error } = await db
       .from('courses')
-      .select('id, title, subject')
-      .order('title')
+      .select('id, name, icon, description')
+      .order('name')
     if (error) throw new Error(error.message)
     return JSON.stringify(data, null, 2)
   }
