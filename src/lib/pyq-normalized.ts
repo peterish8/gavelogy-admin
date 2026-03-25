@@ -210,7 +210,7 @@ export function parsePyqJson(raw: string): PyqDraftBundle {
       subject: String(item.subject || '').trim(),
       _expanded: false,
     }))
-    .filter((question) => question.question_text.length > 3)
+    .filter((question: PyqQuestionDraft) => question.question_text.length > 3)
 
   for (const question of questions) {
     const questionError = validateQuestionDraft(question)
