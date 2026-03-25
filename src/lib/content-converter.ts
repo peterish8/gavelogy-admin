@@ -20,6 +20,8 @@
  * - [ol]Content[/ol]               <-> <ol>Content</ol>
  */
 
+// Converts Tiptap HTML to the app's custom bracket-tag format (e.g. [b], [hl:#fff], [box:blue]);
+// must run client-side only as it uses DOMParser. Processes nodes deepest-first to preserve nesting.
 export function htmlToCustom(html: string): string {
     if (!html) return ''
     if (typeof window === 'undefined') return html // Server-side fallback (should satisfy build)
@@ -114,7 +116,19 @@ export function htmlToCustom(html: string): string {
 
     // ========== CONTAINERS ==========
 
-    // 10. Note Boxes (process last so children are already converted)
+    // 10. Tables (process before note boxes so nested content is already converted)
+    const ths = Array.from(doc.querySelectorAll('th'))
+    ths.forEach(el => el.outerHTML = `[th]${el.innerHTML}[/th]`)
+    const tds = Array.from(doc.querySelectorAll('td'))
+    tds.forEach(el => el.outerHTML = `[td]${el.innerHTML}[/td]`)
+    const trs = Array.from(doc.querySelectorAll('tr'))
+    trs.forEach(el => el.outerHTML = `[tr]${el.innerHTML}[/tr]`)
+    const tables = Array.from(doc.querySelectorAll('table'))
+    tables.forEach(el => el.outerHTML = `[table]${el.innerHTML}[/table]`)
+    // Strip tbody/thead wrappers (TipTap wraps rows in these)
+    // Already handled by removing the tbody tag via the table replacement above
+
+    // 11. Note Boxes (process last so children are already converted)
     const noteBoxes = Array.from(doc.querySelectorAll('div.note-box'))
     noteBoxes.forEach(el => {
         let color = 'blue'
@@ -135,6 +149,8 @@ export function htmlToCustom(html: string): string {
     return content
 }
 
+// Converts the app's custom bracket-tag format back to standard HTML for loading into the Tiptap editor.
+// Pure string replace — safe to call on server side (no DOM).
 export function customToHtml(text: string): string {
     if (!text) return ''
     
@@ -196,6 +212,17 @@ export function customToHtml(text: string): string {
 
     // 10. Horizontal Rule
     html = html.replace(/\[hr\]/g, '<hr class="content-hr">')
+
+    // 11. Tables
+    // [table][tr][th]Header[/th][th]Header2[/th][/tr][tr][td]Cell[/td][td]Cell2[/td][/tr][/table]
+    html = html.replace(/\[table\]/g, '<table class="note-table"><tbody>')
+    html = html.replace(/\[\/table\]/g, '</tbody></table>')
+    html = html.replace(/\[tr\]/g, '<tr>')
+    html = html.replace(/\[\/tr\]/g, '</tr>')
+    html = html.replace(/\[th\]/g, '<th>')
+    html = html.replace(/\[\/th\]/g, '</th>')
+    html = html.replace(/\[td\]/g, '<td>')
+    html = html.replace(/\[\/td\]/g, '</td>')
 
     // 11. Forgiving pass — catch AI typos like [li> or [b> (angle bracket instead of square bracket close)
     html = html.replace(/\[li>/g, '<li>')
@@ -406,4 +433,22 @@ export function fixAiMistakes(html: string): string {
     h = h.replace(/\[\/?\w+(?::[^\]>]*)?&gt;/g, '')
 
     return h
+}
+
+/**
+ * fixNestedHighlights — strips inner [hl:Y] when nested inside [hl:X].
+ * The AI system prompt forbids nesting but still produces it occasionally.
+ * Runs in a loop until no more nesting exists (handles multi-level nesting).
+ * Pure string operation — safe to call on server side.
+ */
+export function fixNestedHighlights(content: string): string {
+  let prev = ''
+  while (prev !== content) {
+    prev = content
+    content = content.replace(
+      /\[hl:(#[a-fA-F0-9]+)\]([^\[]*?)\[hl:(#[a-fA-F0-9]+)\]([\s\S]*?)\[\/hl\]([^\[]*?)\[\/hl\]/g,
+      '[hl:$1]$2$4$5[/hl]'
+    )
+  }
+  return content
 }
