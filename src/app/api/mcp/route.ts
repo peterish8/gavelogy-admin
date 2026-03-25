@@ -264,6 +264,33 @@ Example loop:
     },
   },
   {
+    name: 'save_quiz',
+    description: 'Save/overwrite MCQ questions for an attached quiz. Deletes existing questions and inserts the new ones. Use quiz_id from list_quizzes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        quiz_id: { type: 'string', description: 'UUID of the attached quiz (from list_quizzes)' },
+        title: { type: 'string', description: 'Quiz title to update (optional)' },
+        passing_score: { type: 'number', description: 'Passing score percentage e.g. 70 (optional)' },
+        questions: {
+          type: 'array',
+          description: 'Array of MCQ questions to save',
+          items: {
+            type: 'object',
+            properties: {
+              question: { type: 'string', description: 'The question text' },
+              options: { type: 'array', items: { type: 'string' }, description: 'Array of 4 option strings' },
+              correct_index: { type: 'number', description: '0-based index of the correct option' },
+              explanation: { type: 'string', description: 'Explanation of the correct answer' },
+            },
+            required: ['question', 'options', 'correct_index'],
+          },
+        },
+      },
+      required: ['quiz_id', 'questions'],
+    },
+  },
+  {
     name: 'list_pyq_tests',
     description: 'List all PYQ (Previous Year Question) mock tests with id, title, exam_name, year, question_count, is_published.',
     inputSchema: { type: 'object', properties: {}, required: [] },
@@ -558,6 +585,41 @@ async function handleToolCall(name: string, args: Record<string, any>) {
       )
     if (error) throw new Error(error.message)
     return `Saved ${flashcards.length} flashcard(s) for item ${item_id}`
+  }
+
+  // ── save_quiz ────────────────────────────────────────────────────────────────
+  if (name === 'save_quiz') {
+    const { quiz_id, title, passing_score, questions } = args
+    if (!quiz_id) throw new Error('quiz_id is required')
+    if (!Array.isArray(questions)) throw new Error('questions must be an array')
+
+    // 1. Optionally update quiz metadata
+    if (title !== undefined || passing_score !== undefined) {
+      const updates: Record<string, unknown> = {}
+      if (title !== undefined) updates.title = title
+      if (passing_score !== undefined) updates.passing_score = passing_score
+      const { error } = await db.from('attached_quizzes').update(updates).eq('id', quiz_id)
+      if (error) throw new Error(`Failed to update quiz metadata: ${error.message}`)
+    }
+
+    // 2. Delete existing questions
+    const { error: delError } = await db.from('quiz_questions').delete().eq('quiz_id', quiz_id)
+    if (delError) throw new Error(`Failed to delete old questions: ${delError.message}`)
+
+    // 3. Insert new questions
+    const rows = questions.map((q: any, i: number) => ({
+      quiz_id,
+      question_text: q.question,
+      options: q.options,
+      correct_answer: String(q.correct_index),
+      explanation: q.explanation || null,
+      question_type: 'single_choice',
+      order_index: i,
+    }))
+    const { error: insError } = await db.from('quiz_questions').insert(rows)
+    if (insError) throw new Error(`Failed to insert questions: ${insError.message}`)
+
+    return `Saved ${questions.length} question(s) to quiz ${quiz_id}`
   }
 
   // ── list_pyq_tests ──────────────────────────────────────────────────────────
