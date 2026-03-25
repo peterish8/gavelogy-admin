@@ -22,7 +22,6 @@ import { createClient } from '@supabase/supabase-js'
 import { GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { b2Client, BUCKET } from '@/lib/b2-client'
-import { extractPdfText } from '@/lib/telegram'
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -162,11 +161,25 @@ const TOOLS = [
   },
   {
     name: 'get_judgment_text',
-    description: 'Extract and return the full text of the PDF judgment attached to a structure item. The PDF is fetched server-side from Backblaze B2 and parsed — Claude receives the plain text directly and can read, summarise, or answer questions about it.',
+    description: `Extract and return the text of the PDF judgment attached to a structure item, page by page.
+
+IMPORTANT — HOW TO READ A FULL PDF:
+1. Call get_judgment_text with just item_id (no page_from/page_to). The response includes total_pages.
+2. If has_more is true, call again with page_from=next_page and page_to=next_page+19 (20-page chunks).
+3. Keep looping until has_more is false. You will then have read the entire judgment.
+
+DO NOT ask the user to do this manually — loop through all chunks automatically.
+
+Example loop:
+  chunk1 = get_judgment_text(item_id)        → pages 1-20, next_page=21
+  chunk2 = get_judgment_text(item_id, 21, 40) → pages 21-40, next_page=41
+  chunk3 = get_judgment_text(item_id, 41, 60) → pages 41-60, has_more=false → done`,
     inputSchema: {
       type: 'object',
       properties: {
         item_id: { type: 'string', description: 'UUID of the structure item' },
+        page_from: { type: 'number', description: 'Start page (1-indexed, default: 1)' },
+        page_to: { type: 'number', description: 'End page inclusive (default: 20). Use chunks of 20 pages.' },
       },
       required: ['item_id'],
     },
@@ -365,10 +378,13 @@ async function handleToolCall(name: string, args: Record<string, any>) {
 
   // ── get_judgment_text ───────────────────────────────────────────────────────
   if (name === 'get_judgment_text') {
-    const { item_id } = args
+    const { item_id, page_from = 1, page_to = 20 } = args
     if (!item_id) throw new Error('item_id is required')
 
-    // 1. Get pdf_url (B2 storage key) from structure_items
+    const pageFrom = Math.max(1, Number(page_from))
+    const pageTo = Math.max(pageFrom, Number(page_to))
+
+    // 1. Get pdf_url from structure_items
     const { data, error } = await db
       .from('structure_items')
       .select('pdf_url, title')
@@ -378,19 +394,40 @@ async function handleToolCall(name: string, args: Record<string, any>) {
     const item = data as any
     if (!item?.pdf_url) return '(No PDF judgment attached to this item)'
 
-    // 2. Generate a short-lived signed URL to fetch the PDF from B2
+    // 2. Generate signed URL and fetch PDF bytes from B2
     const command = new GetObjectCommand({ Bucket: BUCKET, Key: item.pdf_url })
     const signedUrl = await getSignedUrl(b2Client, command, { expiresIn: 300 })
-
-    // 3. Fetch PDF bytes server-side (Vercel → B2, no browser restriction)
     const res = await fetch(signedUrl)
     if (!res.ok) throw new Error(`Failed to fetch PDF from B2: ${res.status}`)
     const buffer = Buffer.from(await res.arrayBuffer())
 
-    // 4. Extract text using the existing Vercel-safe pdf-parse wrapper
-    const text = await extractPdfText(buffer)
+    // 3. Parse with pdf-parse — max:pageTo limits how many pages are processed (faster)
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pdfParse = require('pdf-parse') as (buf: Buffer, opts?: any) => Promise<{ text: string; numpages: number }>
+    const parsed = await pdfParse(buffer, { max: pageTo })
+    const totalPages = parsed.numpages || pageTo
 
-    return `=== ${item.title} ===\n\n${text}`
+    // 4. Split by form-feed (\f) — pdf-parse uses \f as page separator
+    const pages = parsed.text.split('\f')
+    // Take only pages [pageFrom-1 .. pageTo-1] (0-indexed)
+    const slice = pages.slice(pageFrom - 1, pageTo)
+    const chunkText = slice.join('\n\n--- PAGE BREAK ---\n\n').trim()
+
+    if (!chunkText) {
+      throw new Error('No text found in this page range — PDF may be image-based or scanned.')
+    }
+
+    const hasMore = pageTo < totalPages
+    const nextPage = hasMore ? pageTo + 1 : null
+
+    const meta = [
+      `=== ${item.title} ===`,
+      `Pages: ${pageFrom}–${Math.min(pageTo, totalPages)} of ${totalPages}`,
+      hasMore ? `has_more: true | next_page: ${nextPage} | Call: get_judgment_text(item_id="${item_id}", page_from=${nextPage}, page_to=${nextPage! + 19})` : 'has_more: false — END OF DOCUMENT',
+      '',
+    ].join('\n')
+
+    return meta + chunkText
   }
 
   // ── list_quizzes ────────────────────────────────────────────────────────────
