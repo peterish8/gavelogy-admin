@@ -14,6 +14,7 @@ export function useStructureSync(courseId: string | null) {
   const { subscribeToTable, isConnected } = useRealtime()
   const courseStore = useCourseStore()
 
+  // Applies incoming structure_items realtime events into the cached structure for the active course.
   const handleStructureChange = useCallback((payload: any) => {
     if (!courseId) return
     
@@ -30,6 +31,7 @@ export function useStructureSync(courseId: string | null) {
     const currentItems = courseStore.structures[courseId] || []
     let updatedItems = [...currentItems]
 
+    // Mirrors inserts, updates, and deletes into the local cache so other admins' changes appear instantly.
     switch (eventType) {
       case 'INSERT':
         // Add new item if it doesn't already exist locally
@@ -59,6 +61,7 @@ export function useStructureSync(courseId: string | null) {
     courseStore.setStructure(courseId, updatedItems)
   }, [courseId, courseStore])
 
+  // Attaches and cleans up the course-specific structure_items subscription when realtime is available.
   useEffect(() => {
     if (!isConnected || !courseId) return
 
@@ -88,6 +91,7 @@ export function useCourseSync() {
   const { subscribeToTable, isConnected } = useRealtime()
   const courseStore = useCourseStore()
 
+  // Applies realtime course list mutations into the cached courses array used by the dashboard/studio.
   const handleCourseChange = useCallback((payload: any) => {
     const { eventType, new: newRecord, old: oldRecord } = payload
 
@@ -118,6 +122,7 @@ export function useCourseSync() {
     courseStore.setCourses(updatedCourses)
   }, [courseStore])
 
+  // Attaches and cleans up the global courses-table subscription.
   useEffect(() => {
     if (!isConnected) return
 

@@ -18,6 +18,7 @@ interface SubjectCardProps {
   onDelete?: (id: string) => void
 }
 
+// Sortable subject/module card with inline title editing and admin overlay controls.
 export function SubjectCard({ subject, courseId, isAdmin, onEdit, onDelete }: SubjectCardProps) {
   const [isEditing, setIsEditing] = useState(false)
 
@@ -38,7 +39,7 @@ export function SubjectCard({ subject, courseId, isAdmin, onEdit, onDelete }: Su
     transition
   }
 
-  // Deterministic color for icon
+  // Picks a stable icon background accent from the subject order.
   const colorClass = ['blue', 'green', 'pink', 'amber'][(subject.order_index || 0) % 4]
 
   return (
@@ -141,6 +142,7 @@ interface SubjectListProps {
   emptyMessage?: string
 }
 
+// List wrapper that renders subject cards or an empty-state message.
 export function SubjectList({
   subjects,
   courseId,

@@ -21,6 +21,7 @@ interface AdminProviderProps {
 }
 
 // Simplified: receives props from Server Component, no more client-side Supabase calls
+// Provides server-derived admin/session flags to the client tree without extra client-side auth queries.
 export function AdminProvider({ children, isAdmin, userId }: AdminProviderProps) {
   return (
     <AdminContext.Provider value={{ isAdmin, isLoading: false, userId }}>
@@ -29,6 +30,7 @@ export function AdminProvider({ children, isAdmin, userId }: AdminProviderProps)
   )
 }
 
+// Reads the current admin context and enforces that callers sit under AdminProvider.
 export function useAdmin() {
   const context = useContext(AdminContext)
   if (!context) {
@@ -37,4 +39,5 @@ export function useAdmin() {
   return context
 }
 
+// Exposes the raw context for advanced cases that need direct provider wiring.
 export { AdminContext }

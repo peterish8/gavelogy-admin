@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import AdminLayoutClient from './admin-layout-client'
 
+// Server layout that guards all admin routes, loads the signed-in admin record, and hands it to the client shell.
 export default async function AdminLayout({
   children,
 }: {
@@ -27,6 +28,7 @@ export default async function AdminLayout({
   }
 
   // Pass admin data down to client layout — no more client-side auth checks!
+  // Passes the verified admin profile into the client layout so it can render without extra auth fetches.
   return (
     <AdminLayoutClient
       adminUser={{

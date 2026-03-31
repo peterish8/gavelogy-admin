@@ -3,9 +3,14 @@
  *
  * Tools:
  *   list_courses          → list all courses
+ *   create_course         → create a new top-level course
  *   list_items            → list structure_items for a course
  *   search_items          → search items by title keyword
  *   get_item_details      → full metadata for one structure item
+ *   create_item           → create a new file or folder item in a course
+ *   rename_item           → rename an existing item by id
+ *   delete_item           → delete an item and all its associated data
+ *   move_item             → move an item to a different parent or course
  *   get_note              → fetch note content for an item
  *   save_note             → save/overwrite note content
  *   get_note_summary      → plain-text preview of a note (no tags)
@@ -23,11 +28,22 @@ import { GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { b2Client, BUCKET } from '@/lib/b2-client'
 
+// ─── PDF in-memory cache ───────────────────────────────────────────────────────
+// Prevents re-downloading + re-parsing the same PDF for every chunk call.
+// Keyed by B2 object key. Limited to 10 entries to bound memory usage.
+const _pdfCache = new Map<string, string>()
+const PDF_CACHE_MAX = 10
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 function isAuthorized(request: NextRequest): boolean {
   const secret = process.env.MCP_SECRET_KEY
-  if (!secret) return true
+  if (!secret) {
+    // Fail-safe: if secret is missing from env, deny ALL requests.
+    // An MCP server with full DB write access must never be open by default.
+    console.error('[MCP] MCP_SECRET_KEY env var is not set — denying request. Set it in .env.local and Vercel.')
+    return false
+  }
   const auth = request.headers.get('authorization') || ''
   return auth === `Bearer ${secret}`
 }
@@ -163,6 +179,70 @@ const TOOLS = [
     },
   },
   {
+    name: 'create_course',
+    description: 'Create a new top-level course in Gavelogy. Returns the new course id and details.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Course name (e.g. "Case Laws 2025")' },
+        icon: { type: 'string', description: 'Optional emoji icon for the course (e.g. "⚖️")' },
+        description: { type: 'string', description: 'Optional description of the course' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'create_item',
+    description: 'Create a new structure item (file or folder) inside a course. Pass parent_id to nest under a folder, or omit it for a top-level item. Returns the new item id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        course_id: { type: 'string', description: 'UUID of the course this item belongs to' },
+        title: { type: 'string', description: 'Title of the new item (e.g. "Gayatri Balasamy v. ISG Novasoft")' },
+        item_type: { type: 'string', enum: ['file', 'folder'], description: '"file" for a case/chapter, "folder" for a section/module' },
+        parent_id: { type: 'string', description: 'Optional UUID of the parent folder. Omit (or pass null) for a top-level item in the course.' },
+        description: { type: 'string', description: 'Optional description for the item' },
+      },
+      required: ['course_id', 'title', 'item_type'],
+    },
+  },
+  {
+    name: 'rename_item',
+    description: 'Rename an existing structure item (case, chapter, folder). Updates the title by item_id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        item_id: { type: 'string', description: 'UUID of the structure item to rename' },
+        title: { type: 'string', description: 'New title for the item' },
+      },
+      required: ['item_id', 'title'],
+    },
+  },
+  {
+    name: 'delete_item',
+    description: 'Delete a structure item and ALL its associated data (note, flashcards, quizzes, PDF links). This is irreversible. Always confirm the item_id is correct before calling.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        item_id: { type: 'string', description: 'UUID of the structure item to delete' },
+      },
+      required: ['item_id'],
+    },
+  },
+  {
+    name: 'move_item',
+    description: 'Move a structure item to a different parent folder or to the top level of a course. Pass new_parent_id=null to make it top-level. Optionally pass new_course_id for cross-course moves.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        item_id: { type: 'string', description: 'UUID of the structure item to move' },
+        new_parent_id: { type: ['string', 'null'], description: 'UUID of the new parent folder, or null to make this item top-level in the course' },
+        new_course_id: { type: 'string', description: 'Optional: UUID of the target course (only needed for cross-course moves; defaults to the item\'s current course)' },
+      },
+      required: ['item_id', 'new_parent_id'],
+    },
+  },
+  {
     name: 'get_note',
     description: 'Fetch the current note for a structure item in Gavelogy bracket-tag format (e.g. [h2]Title[/h2], [box:blue]...[/box]).',
     inputSchema: {
@@ -205,21 +285,20 @@ const TOOLS = [
 
 IMPORTANT — HOW TO READ A FULL PDF:
 1. Call get_judgment_text with just item_id (no page_from/page_to). The response includes total_pages.
-2. If has_more is true, call again with page_from=next_page and page_to=next_page+19 (20-page chunks).
+2. If has_more is true, call again with page_from=next_page and page_to=next_page+99 (100-page chunks).
 3. Keep looping until has_more is false. You will then have read the entire judgment.
 
 DO NOT ask the user to do this manually — loop through all chunks automatically.
 
 Example loop:
-  chunk1 = get_judgment_text(item_id)        → pages 1-20, next_page=21
-  chunk2 = get_judgment_text(item_id, 21, 40) → pages 21-40, next_page=41
-  chunk3 = get_judgment_text(item_id, 41, 60) → pages 41-60, has_more=false → done`,
+  chunk1 = get_judgment_text(item_id)          → pages 1-100, next_page=101
+  chunk2 = get_judgment_text(item_id, 101, 200) → pages 101-200, has_more=false → done`,
     inputSchema: {
       type: 'object',
       properties: {
         item_id: { type: 'string', description: 'UUID of the structure item' },
         page_from: { type: 'number', description: 'Start page (1-indexed, default: 1)' },
-        page_to: { type: 'number', description: 'End page inclusive (default: 20). Use chunks of 20 pages.' },
+        page_to: { type: 'number', description: 'End page inclusive (default: 100). Use chunks of 100 pages.' },
       },
       required: ['item_id'],
     },
@@ -398,6 +477,177 @@ async function handleToolCall(name: string, args: Record<string, any>) {
     }, null, 2)
   }
 
+  // ── create_course ───────────────────────────────────────────────────────────
+  if (name === 'create_course') {
+    const { name: courseName, icon, description } = args
+    if (!courseName) throw new Error('name is required')
+
+    // Compute next order_index
+    const { data: maxRow } = await db
+      .from('courses')
+      .select('order_index')
+      .order('order_index', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const nextOrder = maxRow ? (maxRow.order_index ?? 0) + 1 : 0
+
+    const { data, error } = await db
+      .from('courses')
+      .insert({ name: courseName, icon: icon || null, description: description || null, order_index: nextOrder, is_active: true })
+      .select('id, name, icon, description, order_index')
+      .single()
+    if (error) throw new Error(error.message)
+    return JSON.stringify(data, null, 2)
+  }
+
+  // ── create_item ─────────────────────────────────────────────────────────────
+  if (name === 'create_item') {
+    const { course_id, title, item_type, parent_id = null, description } = args
+    if (!course_id) throw new Error('course_id is required')
+    if (!title) throw new Error('title is required')
+    if (!item_type || !['file', 'folder'].includes(item_type)) throw new Error('item_type must be "file" or "folder"')
+
+    // Compute next order_index among siblings
+    let siblingQuery = db
+      .from('structure_items')
+      .select('order_index')
+      .eq('course_id', course_id)
+      .order('order_index', { ascending: false })
+      .limit(1)
+    if (parent_id) {
+      siblingQuery = siblingQuery.eq('parent_id', parent_id)
+    } else {
+      siblingQuery = siblingQuery.is('parent_id', null)
+    }
+    const { data: maxSibling } = await siblingQuery.maybeSingle()
+    const nextOrder = maxSibling ? (maxSibling.order_index ?? 0) + 1 : 0
+
+    const { data, error } = await db
+      .from('structure_items')
+      .insert({
+        course_id,
+        title,
+        item_type,
+        parent_id: parent_id || null,
+        description: description || null,
+        order_index: nextOrder,
+        is_active: true,
+      })
+      .select('id, title, item_type, course_id, parent_id, order_index')
+      .single()
+    if (error) throw new Error(error.message)
+    return JSON.stringify(data, null, 2)
+  }
+
+  // ── rename_item ─────────────────────────────────────────────────────────────
+  if (name === 'rename_item') {
+    const { item_id, title } = args
+    if (!item_id) throw new Error('item_id is required')
+    if (!title) throw new Error('title is required')
+
+    // Fetch current title for feedback
+    const { data: existing, error: fetchError } = await db
+      .from('structure_items')
+      .select('title')
+      .eq('id', item_id)
+      .single()
+    if (fetchError) throw new Error(fetchError.message)
+    if (!existing) throw new Error(`Item ${item_id} not found`)
+
+    const { error } = await db
+      .from('structure_items')
+      .update({ title, updated_at: new Date().toISOString() })
+      .eq('id', item_id)
+    if (error) throw new Error(error.message)
+    return `Renamed "${existing.title}" → "${title}" (id: ${item_id})`
+  }
+
+  // ── delete_item ─────────────────────────────────────────────────────────────
+  if (name === 'delete_item') {
+    const { item_id } = args
+    if (!item_id) throw new Error('item_id is required')
+
+    // Fetch item details for the confirmation message
+    const { data: existing, error: fetchError } = await db
+      .from('structure_items')
+      .select('title, item_type')
+      .eq('id', item_id)
+      .single()
+    if (fetchError) throw new Error(fetchError.message)
+    if (!existing) throw new Error(`Item ${item_id} not found`)
+
+    // FK cascades (add_fk_cascades.sql) handle note_contents, attached_quizzes,
+    // note_pdf_links, and draft_content_cache automatically on delete.
+    const { error } = await db
+      .from('structure_items')
+      .delete()
+      .eq('id', item_id)
+    if (error) throw new Error(error.message)
+    return `Deleted item "${existing.title}" (${existing.item_type}, id: ${item_id}) and all associated notes, flashcards, quizzes, and PDF links.`
+  }
+
+  // ── move_item ────────────────────────────────────────────────────────────────
+  if (name === 'move_item') {
+    const { item_id, new_parent_id, new_course_id } = args
+    if (!item_id) throw new Error('item_id is required')
+    if (!('new_parent_id' in args)) throw new Error('new_parent_id is required (pass null for top-level)')
+
+    // 1. Fetch item to get current course_id and title
+    const { data: item, error: itemError } = await db
+      .from('structure_items')
+      .select('title, course_id, parent_id')
+      .eq('id', item_id)
+      .single()
+    if (itemError) throw new Error(itemError.message)
+    if (!item) throw new Error(`Item ${item_id} not found`)
+
+    const targetCourseId = new_course_id || item.course_id
+    const targetParentId = new_parent_id || null
+
+    // 2. If targeting a specific parent folder, verify it exists in the target course
+    if (targetParentId) {
+      const { data: parentItem, error: parentError } = await db
+        .from('structure_items')
+        .select('id, item_type, course_id')
+        .eq('id', targetParentId)
+        .single()
+      if (parentError) throw new Error(parentError.message)
+      if (!parentItem) throw new Error(`Parent folder ${targetParentId} not found`)
+      if (parentItem.item_type !== 'folder') throw new Error(`Target parent ${targetParentId} is not a folder`)
+    }
+
+    // 3. Compute new order_index among target siblings
+    let sibQuery = db
+      .from('structure_items')
+      .select('order_index')
+      .eq('course_id', targetCourseId)
+      .order('order_index', { ascending: false })
+      .limit(1)
+    if (targetParentId) {
+      sibQuery = sibQuery.eq('parent_id', targetParentId)
+    } else {
+      sibQuery = sibQuery.is('parent_id', null)
+    }
+    const { data: maxSib } = await sibQuery.maybeSingle()
+    const nextOrder = maxSib ? (maxSib.order_index ?? 0) + 1 : 0
+
+    // 4. Update item
+    const { error } = await db
+      .from('structure_items')
+      .update({
+        parent_id: targetParentId,
+        course_id: targetCourseId,
+        order_index: nextOrder,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', item_id)
+    if (error) throw new Error(error.message)
+
+    const fromDesc = item.parent_id ? `parent ${item.parent_id}` : 'top-level'
+    const toDesc = targetParentId ? `folder ${targetParentId}` : 'top-level'
+    return `Moved "${item.title}" from ${fromDesc} → ${toDesc} in course ${targetCourseId} (order_index: ${nextOrder})`
+  }
+
   // ── get_note ────────────────────────────────────────────────────────────────
   if (name === 'get_note') {
     const { item_id } = args
@@ -468,7 +718,7 @@ async function handleToolCall(name: string, args: Record<string, any>) {
 
   // ── get_judgment_text ───────────────────────────────────────────────────────
   if (name === 'get_judgment_text') {
-    const { item_id, page_from = 1, page_to = 20 } = args
+    const { item_id, page_from = 1, page_to = 100 } = args
     if (!item_id) throw new Error('item_id is required')
 
     const pageFrom = Math.max(1, Number(page_from))
@@ -484,30 +734,44 @@ async function handleToolCall(name: string, args: Record<string, any>) {
     const item = data as any
     if (!item?.pdf_url) return '(No PDF judgment attached to this item)'
 
-    // 2. Generate signed URL and fetch PDF bytes from B2
-    const command = new GetObjectCommand({ Bucket: BUCKET, Key: item.pdf_url })
-    const signedUrl = await getSignedUrl(b2Client, command, { expiresIn: 300 })
-    const res = await fetch(signedUrl)
-    if (!res.ok) throw new Error(`Failed to fetch PDF from B2: ${res.status}`)
-    const buffer = Buffer.from(await res.arrayBuffer())
+    // 2. Download + parse PDF, using cache to avoid re-downloading on multi-chunk sessions
+    let fullText: string
+    if (_pdfCache.has(item.pdf_url)) {
+      // Cache hit — skip the S3 download and pdf-parse entirely
+      fullText = _pdfCache.get(item.pdf_url)!
+    } else {
+      // Cache miss — download from B2 and parse
+      const command = new GetObjectCommand({ Bucket: BUCKET, Key: item.pdf_url })
+      const signedUrl = await getSignedUrl(b2Client, command, { expiresIn: 300 })
+      const res = await fetch(signedUrl)
+      if (!res.ok) throw new Error(`Failed to fetch PDF from B2: ${res.status}`)
+      const buffer = Buffer.from(await res.arrayBuffer())
 
-    // 3. Parse full PDF text (max:0 = all pages)
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const pdfParse = require('pdf-parse') as (buf: Buffer, opts?: any) => Promise<{ text: string; numpages: number }>
-    const parsed = await pdfParse(buffer, { max: 0 })
-    const totalPages = parsed.numpages || 1
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const pdfParse = require('pdf-parse') as (buf: Buffer, opts?: any) => Promise<{ text: string; numpages: number }>
+      const parsed = await pdfParse(buffer, { max: 0 })
+      if (!parsed.text?.trim()) {
+        throw new Error('No text extracted from PDF — the file may be scanned/image-based.')
+      }
 
-    if (!parsed.text?.trim()) {
-      throw new Error('No text extracted from PDF — the file may be scanned/image-based.')
+      fullText = parsed.text
+
+      // Evict oldest entry if cache is full
+      if (_pdfCache.size >= PDF_CACHE_MAX) {
+        const firstKey = _pdfCache.keys().next().value
+        if (firstKey) _pdfCache.delete(firstKey)
+      }
+      _pdfCache.set(item.pdf_url, fullText)
     }
-
-    // 4. Chunk by character position.
+    // 3. Chunk by character position.
     //    CHUNK_SIZE is chosen so that a 54-page judgment (~180k chars) gives ~54 chunks
     //    matching PDF page numbers 1-1. page_from/page_to map to chunk indices.
-    const fullText = parsed.text
     const totalChars = fullText.length
     // Aim for ~totalPages chunks so chunk numbers ≈ page numbers
-    const CHUNK_SIZE = Math.max(1000, Math.ceil(totalChars / Math.max(totalPages, 1)))
+    // We need totalPages — parse it from the cached text length or re-parse lightly.
+    // For chunk sizing, use the cached fullText length-based heuristic.
+    const totalPagesEst = Math.max(1, Math.ceil(totalChars / 3000))  // ~3000 chars/page heuristic
+    const CHUNK_SIZE = Math.max(1000, Math.ceil(totalChars / totalPagesEst))
     const totalChunks = Math.ceil(totalChars / CHUNK_SIZE)
 
     const chunkFrom = Math.min(pageFrom, totalChunks)
@@ -518,7 +782,7 @@ async function handleToolCall(name: string, args: Record<string, any>) {
     const chunkText = fullText.slice(start, end).trim()
 
     if (!chunkText) {
-      return `=== ${item.title} ===\nChunks ${chunkFrom}–${chunkTo} of ${totalChunks} (${totalPages} PDF pages) — no content in this range.\nhas_more: false — END OF DOCUMENT`
+      return `=== ${item.title} ===\nChunks ${chunkFrom}–${chunkTo} of ${totalChunks} (~${totalPagesEst} PDF pages est.) — no content in this range.\nhas_more: false — END OF DOCUMENT`
     }
 
     const hasMore = chunkTo < totalChunks
@@ -526,9 +790,9 @@ async function handleToolCall(name: string, args: Record<string, any>) {
 
     const meta = [
       `=== ${item.title} ===`,
-      `Pages: ${chunkFrom}–${chunkTo} of ${totalPages} | chars: ${start}–${Math.min(end, totalChars)}`,
+      `Pages: ${chunkFrom}–${chunkTo} of ~${totalPagesEst} (est.) | chars: ${start}–${Math.min(end, totalChars)}`,
       hasMore
-        ? `has_more: true | next_page: ${nextChunk} | Call: get_judgment_text(item_id="${item_id}", page_from=${nextChunk}, page_to=${nextChunk! + 19})`
+        ? `has_more: true | next_page: ${nextChunk} | Call: get_judgment_text(item_id="${item_id}", page_from=${nextChunk}, page_to=${nextChunk! + 99})`
         : 'has_more: false — END OF DOCUMENT',
       '',
     ].join('\n')

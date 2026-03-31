@@ -89,6 +89,7 @@ interface AdminLayoutClientProps {
   adminUser: AdminUser
 }
 
+// Client-side admin shell that renders the sidebar, header, presence UI, and sign-out flow around all admin pages.
 export default function AdminLayoutClient({
   children,
   adminUser,
@@ -101,6 +102,7 @@ export default function AdminLayoutClient({
   const router = useRouter()
   const supabase = createClient()
 
+  // Tracks viewport width so the sidebar can switch between desktop and mobile behavior.
   useEffect(() => {
     const checkScreen = () => {
       setIsMobile(window.innerWidth < 1024)
@@ -115,6 +117,7 @@ export default function AdminLayoutClient({
   }, [])
 
   // Listen for sign-out events only
+  // Watches auth state so external sign-outs still kick the admin back to the login page.
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event: string, session: any) => {
@@ -129,6 +132,7 @@ export default function AdminLayoutClient({
     }
   }, [router, supabase])
 
+  // Closes the dialog, navigates away immediately, and finishes Supabase sign-out in the background.
   const handleLogout = async () => {
     // Close dialog immediately for instant feedback
     setIsLogoutOpen(false)
@@ -154,6 +158,7 @@ export default function AdminLayoutClient({
     >
     <div className="min-h-screen bg-bg-muted flex font-sans">
       {/* Mobile Sidebar Overlay */}
+        {/* Mobile overlay that dismisses the sidebar when tapping outside it. */}
       {isMobile && isSidebarOpen && (
         <div 
           className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 transition-opacity"
@@ -162,6 +167,7 @@ export default function AdminLayoutClient({
       )}
 
       {/* Floating Menu Toggle (Visible only when sidebar is closed on desktop) */}
+      {/* Desktop floating toggle shown only when the sidebar is collapsed. */}
       {!isSidebarOpen && !isMobile && (
         <button
           onClick={() => setIsSidebarOpen(true)}
@@ -173,6 +179,7 @@ export default function AdminLayoutClient({
       )}
 
       {/* Sidebar */}
+      {/* Main sidebar navigation plus the admin profile dropdown. */}
       <aside 
         className={cn(
           "fixed lg:static inset-y-0 left-0 z-50 w-[240px] bg-card border-r border-border shadow-sm flex flex-col transition-all duration-300 ease-in-out overflow-hidden",
@@ -287,6 +294,7 @@ export default function AdminLayoutClient({
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+        {/* Sticky top bar that hosts page-specific header actions, theme toggle, and presence indicators. */}
         <header className="h-16 bg-card/80 backdrop-blur-md border-b border-border/50 flex items-center justify-between px-4 lg:px-8 z-10 sticky top-0">
           <div className="flex items-center gap-3">
             <button
@@ -328,6 +336,7 @@ export default function AdminLayoutClient({
           </div>
         </header>
 
+        {/* Main page frame switches padding/scroll mode for studio, tag, and preview workspaces. */}
         <main className={cn(
           "flex-1 bg-muted/50",
           // The main list page should scroll normally

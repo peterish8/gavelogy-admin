@@ -31,6 +31,7 @@ interface NewCourseDeclarationModalProps {
   onComplete: () => void
 }
 
+// Recursive tree component that renders the parsed course structure with expand/collapse and optional per-item delete.
 function TreePreview({ 
   items, 
   depth = 0,
@@ -102,6 +103,7 @@ function TreePreview({
   )
 }
 
+// Modal for importing a course from a JSON declaration (AI-generated structure); validates, previews, then saves to Supabase.
 export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCourseDeclarationModalProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -112,6 +114,7 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
   const [step, setStep] = useState<'input' | 'preview'>('input')
   const [copied, setCopied] = useState(false) // Add copied state
 
+  // Parses and validates the pasted JSON declaration, advancing to the preview step on success.
   const handleParse = useCallback(() => {
     try {
       const data = JSON.parse(jsonInput) as CourseDeclaration
@@ -135,6 +138,7 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
     }
   }, [jsonInput])
 
+  // Recursively counts total folders and files across the parsed structure for the preview stats bar.
   const countItems = useCallback((items: CourseDeclarationItem[]): { folders: number; files: number } => {
     let folders = 0, files = 0
     const count = (list: CourseDeclarationItem[]) => {
@@ -148,7 +152,7 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
     return { folders, files }
   }, [])
 
-  // Delete item and promote children to parent level
+  // Removes a node from the preview tree; its children are promoted up one level rather than deleted.
   const handleDeleteItem = useCallback((idToDelete: string) => {
     if (!parsedData) return
 
@@ -184,7 +188,7 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
     toast.success('Item removed. Children promoted to parent level.')
   }, [parsedData])
 
-  // DIRECT SAVE TO SUPABASE - No draft store, immediate save
+  // Inserts the course row and all structure items directly to Supabase in 1000-item chunks, then navigates to the studio.
   const handleSave = async () => {
     if (!parsedData) return
     setSaving(true)

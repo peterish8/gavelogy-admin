@@ -16,6 +16,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 
+// Floating save bar that appears when the draft store has pending changes to commit or discard.
 export function SaveBar() {
   const {
     hasUnsavedChanges,
@@ -29,6 +30,7 @@ export function SaveBar() {
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [showDiscardDialog, setShowDiscardDialog] = useState(false)
 
+  // Confirms and commits all queued draft changes through the shared save-bar hook.
   const handleSave = async () => {
     setShowSaveDialog(false)
     const result = await commitChanges()
@@ -38,6 +40,7 @@ export function SaveBar() {
     }
   }
 
+  // Closes the discard dialog and clears all queued draft changes.
   const handleDiscard = () => {
     setShowDiscardDialog(false)
     discardChanges()
@@ -45,6 +48,7 @@ export function SaveBar() {
 
   return (
     <>
+      {/* Animated bottom bar that only appears while there are unsaved changes. */}
       <AnimatePresence>
         {hasUnsavedChanges && (
           <motion.div
@@ -109,7 +113,7 @@ export function SaveBar() {
         )}
       </AnimatePresence>
 
-      {/* Save Confirmation Dialog */}
+      {/* Confirms publishing the queued changes to live data. */}
       <AlertDialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -128,7 +132,7 @@ export function SaveBar() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Discard Confirmation Dialog */}
+      {/* Confirms throwing away all pending draft changes. */}
       <AlertDialog open={showDiscardDialog} onOpenChange={setShowDiscardDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>

@@ -48,6 +48,7 @@ interface CourseDetailClientProps {
   initialStructure: any[]
 }
 
+// Course detail studio: resizable sidebar with DnD structure tree + editor panel for notes/quizzes, with URL-persisted selection.
 export default function CourseDetailPage({ courseId, initialCourse, initialStructure }: CourseDetailClientProps) {
   // Seed the store with server data on mount (avoids setState-during-render)
   const store = useCourseStore()
@@ -101,7 +102,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
     })
   )
 
-  // --- Stats Calculation ---
+  // Counts folders, files, notes, and quizzes visible under the current search filter.
   const stats = useMemo(() => {
     let folders = 0
     let files = 0
@@ -141,6 +142,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
     return null
   }
   
+  // Filters and expands the tree to show only items matching the search query; clears filter when query is empty.
   const handleSearch = (query: string) => {
     setSearchQuery(query)
     
@@ -190,7 +192,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
     setFilteredIds(newVisibleIds)
   }
 
-  // Handle Resize Logic
+  // Starts sidebar resize drag by capturing the sidebar's left edge position.
   const startResizing = useCallback((e: React.MouseEvent) => {
     e.preventDefault() // prevent text selection
     if (sidebarRef.current) {
@@ -227,7 +229,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
     }
   }, [isResizing, resize, stopResizing])
 
-  // 1. Init from URL on Mount
+  // Reads itemId and fullscreen URL params on first mount to restore the previously selected item.
   const hydratedRef = useRef(false)
   
   useEffect(() => {
@@ -246,7 +248,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
     hydratedRef.current = true
   }, [searchParams]) // Read-only on mount/URL change
 
-  // 2. Sync State to URL
+  // Keeps the URL query params (itemId, fullscreen) in sync with component state via router.replace.
   useEffect(() => {
     // Determine target URL state
     const currentParams = new URLSearchParams(searchParams.toString())
@@ -281,7 +283,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, fullscreen, pathname, router]) // Removed searchParams to break cycle
 
-  // Helper to find item in tree
+  // Recursively searches the nested tree for an item by ID; returns the item or null if not found.
   const findItem = useCallback((items: StructureItem[], id: string): StructureItem | null => {
     for (const item of items) {
       if (item.id === id) return item
@@ -293,7 +295,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
     return null
   }, [])
 
-  // Auto-Expand on Hover Logic
+  // Auto-expands a folder when an item is dragged over it, so the user can drop into it.
   const handleDragOver = useCallback((event: DragOverEvent) => {
     const { over, active } = event
     
@@ -324,7 +326,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
     }
   }, [items, findItem])
 
-  // Helper to find parent items (returns array for root)
+  // Returns the sibling array containing the given item ID (root array or a children array).
   const findContainerItems = (id: string, currentItems: StructureItem[]): StructureItem[] | undefined => {
     // Check if in root
     if (currentItems.find(i => i.id === id)) return currentItems
@@ -339,7 +341,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
     return undefined
   }
 
-  // Helper to find the parent object of an ID
+  // Returns the immediate parent StructureItem for the given ID, or null if the item is at root level.
   const findParent = (id: string, currentItems: StructureItem[], parent: StructureItem | null = null): StructureItem | null => {
       if (currentItems.find(i => i.id === id)) return parent;
       
@@ -354,7 +356,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
 
   const selectedItem = selectedId ? findItem(items, selectedId) : null
 
-  // --- DND HANDLER ---
+  // Handles drop: moves item into a container (empty folder zone) or reorders it within the same parent, then refetches structure.
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
     
@@ -369,7 +371,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
         if (active.id === newParentId) return
         
         // Move to end of that folder
-        moveItem(active.id as string, newParentId, 999999) // Append
+        moveItem(active.id as string, newParentId, 999999).then(() => refetchStructure())
         toast.success("Moved to folder.")
         return
     }
@@ -444,12 +446,13 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
                  if (desiredOrder <= 0) desiredOrder = 100
             }
 
-            moveItem(active.id as string, newParentId, desiredOrder)
+            moveItem(active.id as string, newParentId, desiredOrder).then(() => refetchStructure())
             toast.success("Moved and reordered.")
         }
     }
   }
 
+  // Creates a new folder or file under the currently selected item (or at root), then selects and enters inline edit mode for it.
   const handleCreateItem = async (type: 'folder' | 'file') => {
     let parentId: string | null = null
 
@@ -473,7 +476,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
     setEditingId(newItemId)
   }
 
-  // Legacy handler passed to tree's specific "Add" dropdown actions
+  // Creates an item under an explicitly provided parentId; used by the tree's context-menu Add buttons.
   const handleAddItemSpecific = async (parentId: string | null, type: 'folder' | 'file') => {
     const newItemId = await createItem({
       course_id: courseId,
@@ -486,6 +489,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
     setEditingId(newItemId)
   }
 
+  // Recursively collects all descendant IDs, confirms with the user, then deletes them all; clears selection if the deleted item was selected.
   const handleDeleteItem = (item: StructureItem) => {
     if (confirm(`Delete '${item.title}'? ${item.children && item.children.length > 0 ? 'All contents inside will be permanently deleted.' : ''}`)) {
       
@@ -513,7 +517,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
     setSelectedId(id)
   }
 
-  // --- Copy JSON Feature ---
+  // Copies the structure tree (or a stripped template version) as JSON to the clipboard for backup or import.
   const handleCopyJson = (mode: 'current' | 'template') => {
     if (!course || !items) return
 
@@ -768,7 +772,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
                     )}
                     </div>
                 ) : (
-                    <StructureTree 
+                    <StructureTree
                         items={items}
                         isAdmin={isAdmin}
                         onAdd={handleAddItemSpecific}
@@ -780,6 +784,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
                         setEditingId={setEditingId}
                         expandedIds={expandedIds}
                         searchQuery={searchQuery}
+                        filteredIds={filteredIds}
                     />
                 )}
             </div>

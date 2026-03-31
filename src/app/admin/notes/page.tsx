@@ -27,6 +27,7 @@ interface GroupedNotes {
   notes: NoteItem[]
 }
 
+// Server page that lists note-bearing structure items, grouped by course and filterable by search.
 export default async function NotesPage({
   searchParams,
 }: {
@@ -46,6 +47,7 @@ export default async function NotesPage({
     .order('course_id')
     .order('order_index')
 
+  // Normalizes the joined Supabase rows into a simpler note list shape for rendering.
   const notes: NoteItem[] = (data || []).map((item: any) => ({
     id: item.id,
     title: item.title,
@@ -55,6 +57,7 @@ export default async function NotesPage({
   }))
 
   // Filter by search query  
+  // Applies the title/course search filter when a query is present.
   const filteredNotes = query
     ? notes.filter(note =>
         note.title.toLowerCase().includes(query.toLowerCase()) ||
@@ -63,6 +66,7 @@ export default async function NotesPage({
     : notes
 
   // Group by course
+  // Groups notes by course so the page can render one section per course.
   const groups: Map<string, GroupedNotes> = new Map()
   filteredNotes.forEach(note => {
     if (!note.courses) return

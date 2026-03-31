@@ -3,6 +3,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { customToHtml } from '@/lib/content-converter'
 
+// Creates a service-role Supabase client for server-side news reads/writes that bypass normal client auth.
 function getAdminClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -87,6 +88,7 @@ export interface NewsDateGroup {
 
 // ─── Queries ───────────────────────────────────────────────────────────────
 
+// Fetches the daily_news table and aggregates counts per date for the admin date picker/list view.
 export async function fetchNewsGroupedByDate(): Promise<NewsDateGroup[]> {
   const supabase = getAdminClient()
   const { data, error } = await supabase
@@ -100,6 +102,7 @@ export async function fetchNewsGroupedByDate(): Promise<NewsDateGroup[]> {
     throw error
   }
 
+  // Collapses raw rows into one summary object per date with total/published/draft counters.
   const map = new Map<string, NewsDateGroup>()
   for (const row of data || []) {
     const key = row.date as string
@@ -114,6 +117,7 @@ export async function fetchNewsGroupedByDate(): Promise<NewsDateGroup[]> {
   return Array.from(map.values())
 }
 
+// Fetches every news card for a single date in display order for the editor and reader screens.
 export async function fetchNewsByDate(date: string): Promise<NewsCard[]> {
   const supabase = getAdminClient()
   const { data, error } = await supabase
@@ -131,12 +135,14 @@ export async function fetchNewsByDate(date: string): Promise<NewsCard[]> {
 
 // ─── Mutations ─────────────────────────────────────────────────────────────
 
+// Inserts a batch of news cards, deriving HTML from custom markup and retrying with legacy columns if needed.
 export async function saveNewsCards(
   cards: Omit<NewsCard, 'id' | 'content_html' | 'created_at' | 'updated_at'>[],
   status: 'draft' | 'published' = 'draft'
 ): Promise<{ ids: string[] }> {
   const supabase = getAdminClient()
 
+  // Prepares each outgoing row with derived HTML and optional reader/metadata fields normalized to null.
   const rows = cards.map((card, i) => ({
     date: card.date,
     title: card.title,
@@ -171,7 +177,7 @@ export async function saveNewsCards(
     .insert(rows)
     .select('id')
 
-  // If a new column doesn't exist yet, retry with only the base columns
+  // Falls back to the older schema when newer optional columns have not been added yet.
   if (error && error.code === '42703') {
     const baseRows = rows.map(r => ({
       date: r.date, title: r.title, content_custom: r.content_custom,
@@ -189,6 +195,7 @@ export async function saveNewsCards(
   return { ids: (data || []).map((r: any) => r.id) }
 }
 
+// Updates editable fields for a single news card and regenerates HTML when the custom content changes.
 export async function updateNewsCard(
   id: string,
   patch: Partial<Pick<NewsCard, 'title' | 'content_custom' | 'summary' | 'keywords' | 'category' | 'status'>>
@@ -208,6 +215,7 @@ export async function updateNewsCard(
   if (error) throw error
 }
 
+// Bulk-publishes the selected news cards so they become visible in published views.
 export async function publishNewsCards(ids: string[]): Promise<void> {
   const supabase = getAdminClient()
   const { error } = await supabase
@@ -218,6 +226,7 @@ export async function publishNewsCards(ids: string[]): Promise<void> {
   if (error) throw error
 }
 
+// Moves the selected news cards back to draft status without deleting their content.
 export async function unpublishNewsCards(ids: string[]): Promise<void> {
   const supabase = getAdminClient()
   const { error } = await supabase
@@ -228,6 +237,7 @@ export async function unpublishNewsCards(ids: string[]): Promise<void> {
   if (error) throw error
 }
 
+// Permanently removes a news card row from the daily_news table.
 export async function deleteNewsCard(id: string): Promise<void> {
   const supabase = getAdminClient()
   const { error } = await supabase

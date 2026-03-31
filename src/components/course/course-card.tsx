@@ -30,6 +30,7 @@ interface CourseCardProps {
   activeAdmins?: AdminPresence[]
 }
 
+// Rich course card used in the studio list, with inline editing, drag/drop, visibility toggles, and presence badges.
 export function CourseCard({ course, isAdmin, onEdit, onDelete, activeAdmins }: CourseCardProps) {
   const [editingField, setEditingField] = useState<'name' | 'description' | 'icon' | null>(null)
 
@@ -50,16 +51,18 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete, activeAdmins }: 
     transition
   }
 
-  // Deterministic color assignment based on name length
+  // Picks a stable accent color based on the course name so cards feel varied but deterministic.
   const colorIndex = course.name.length % 4
   const colorClass = ['blue', 'green', 'pink', 'amber'][colorIndex]
 
+  // Enters inline-edit mode for a specific field without triggering card navigation.
   const handleEditStart = (field: 'name' | 'description' | 'icon') => (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
     setEditingField(field)
   }
 
+  // Persists a field edit through the parent callback, then exits edit mode.
   const handleEditSave = (field: 'name' | 'description' | 'icon', value: string) => {
     onEdit?.(course.id, { [field]: value })
     setEditingField(null)
@@ -68,12 +71,14 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete, activeAdmins }: 
   const [showDisableDialog, setShowDisableDialog] = useState(false)
   // const [isTogglingActive, setIsTogglingActive] = useState(false)
 
+  // Opens the visibility confirmation dialog instead of toggling immediately.
   const handleToggleActive = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
     setShowDisableDialog(true)
   }
 
+  // Writes the live/hidden toggle directly to Supabase, then mirrors it through the parent update callback.
   const confirmToggle = async () => {
     // setIsTogglingActive(true) // Unused
     setShowDisableDialog(false)
@@ -103,6 +108,7 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete, activeAdmins }: 
 
   const isEnabling = !course.is_active
 
+  // Shared card body reused inside either a Link wrapper or a plain div while editing.
   const linkContent = (
     <>
       <div className="flex items-start justify-between mb-4">
@@ -341,6 +347,7 @@ interface CourseNavItemProps {
   onDelete?: (id: string) => void
 }
 
+// Compact sidebar/navigation row for a course.
 export function CourseNavItem({ course, isActive, isAdmin, onEdit, onDelete }: CourseNavItemProps) {
   return (
     <Link

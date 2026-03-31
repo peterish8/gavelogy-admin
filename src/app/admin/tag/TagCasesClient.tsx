@@ -19,13 +19,16 @@ interface Props {
   linkCounts: Record<string, number>
 }
 
+// Lists all tag-eligible cases with PDF upload and tag navigation; tracks optimistic PDF URL state per case.
 export default function TagCasesClient({ cases, linkCounts }: Props) {
   const [localPdfUrls, setLocalPdfUrls] = useState<Record<string, string>>({})
   const [uploadingId, setUploadingId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  // Hidden file inputs are stored per caseId so we can trigger them from the Upload button.
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map())
   const supabase = createClient()
 
+  // Posts the selected file to the judgment upload API and stores the returned object key locally.
   async function handlePdfUpload(caseId: string, file: File) {
     const formData = new FormData()
     formData.append('file', file)
@@ -44,6 +47,7 @@ export default function TagCasesClient({ cases, linkCounts }: Props) {
     setLocalPdfUrls(prev => ({ ...prev, [caseId]: result.objectKey }))
   }
 
+  // Triggered when a file is chosen; calls handlePdfUpload, shows toast, and resets the input.
   async function handleFileChange(caseId: string, e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -63,6 +67,7 @@ export default function TagCasesClient({ cases, linkCounts }: Props) {
     }
   }
 
+  // Client-side filter: narrows the case list to titles matching the search query.
   const filtered = cases.filter(c =>
     c.title.toLowerCase().includes(search.toLowerCase())
   )

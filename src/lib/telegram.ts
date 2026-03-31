@@ -6,7 +6,6 @@ const API_BASE = `https://api.telegram.org/bot${BOT_TOKEN}`
 // ── Service-role Supabase (bypasses RLS) ──────────────────────────────
 // Singleton — reused across calls in same serverless instance for speed
 // typed as `any` to avoid losing the ungenericized SupabaseClient overloads
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _sb: any = null
 function getServiceSupabase() {
   if (!_sb) {
@@ -27,7 +26,10 @@ export async function tg(method: string, body: object) {
     body: JSON.stringify(body),
   })
   const data = await res.json()
-  if (!data.ok) console.warn(`[tg] ${method} failed:`, data.description)
+  // Suppress benign Telegram errors that are handled by callers
+  if (!data.ok && !data.description?.includes('message is not modified')) {
+    console.warn(`[tg] ${method} failed:`, data.description)
+  }
   return data
 }
 
@@ -46,19 +48,33 @@ export async function sendMessage(
 }
 
 // ── Edit an existing message ──────────────────────────────────────────
+// Falls back to sendMessage if:
+//   • messageId is missing/falsy
+//   • The message is older than 48 hours (Telegram edit window)
+//   • "message is not modified" (identical content — silently ignored)
 export async function editMessage(
   chatId: number,
-  messageId: number,
+  messageId: number | undefined,
   text: string,
   keyboard?: InlineKeyboardButton[][]
 ) {
-  return tg('editMessageText', {
+  if (!messageId) {
+    return sendMessage(chatId, text, keyboard)
+  }
+  const res = await tg('editMessageText', {
     chat_id: chatId,
     message_id: messageId,
     text,
     parse_mode: 'HTML',
     ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
   })
+  // "message is not modified" — benign, nothing changed
+  if (!res.ok && res.description?.includes('message is not modified')) return res
+  // Message too old to edit (>48h) — send a fresh message instead
+  if (!res.ok && (res.description?.includes('message to edit not found') || res.description?.includes('MESSAGE_ID_INVALID'))) {
+    return sendMessage(chatId, text, keyboard)
+  }
+  return res
 }
 
 // ── Answer a callback query (removes loading spinner) ─────────────────
@@ -217,12 +233,155 @@ export async function getNoteContent(itemId: string): Promise<string | null> {
   return (data as any)?.content_html ?? null
 }
 
+export async function getExistingContent(itemId: string): Promise<{ hasNotes: boolean; hasQuiz: boolean; hasFlashcards: boolean }> {
+  const sb = getServiceSupabase()
+  const [noteRes, quizRes] = await Promise.all([
+    sb.from('note_contents').select('content_html, flashcards_json').eq('item_id', itemId).maybeSingle(),
+    sb.from('attached_quizzes').select('id').eq('note_item_id', itemId).maybeSingle(),
+  ])
+  const note = (noteRes.data as any)
+  return {
+    hasNotes: !!(note?.content_html),
+    hasQuiz: !!(quizRes.data),
+    hasFlashcards: !!(note?.flashcards_json),
+  }
+}
+
 export async function saveNoteContent(itemId: string, contentHtml: string) {
   const sb = getServiceSupabase()
   await (sb.from('note_contents') as any).upsert(
     { item_id: itemId, content_html: contentHtml, updated_at: new Date().toISOString() },
     { onConflict: 'item_id' }
   )
+}
+
+export async function saveFlashcardsContent(itemId: string, flashcards: { front: string; back: string }[]) {
+  const sb = getServiceSupabase()
+  const json = JSON.stringify(flashcards)
+  // Always UPDATE — note_contents row is guaranteed to exist because saveNoteContent runs first.
+  // Never upsert here: Supabase upsert would NULL out content_html if not included in payload.
+  const { error } = await (sb.from('note_contents') as any)
+    .update({ flashcards_json: json, updated_at: new Date().toISOString() })
+    .eq('item_id', itemId)
+  if (error) console.error('[telegram] saveFlashcardsContent error:', error.message, error.details)
+  else console.log('[telegram] saveFlashcardsContent: saved', flashcards.length, 'cards for', itemId)
+}
+
+export async function saveQuizContent(itemId: string, quizText: string) {
+  const sb = getServiceSupabase()
+
+  // Parse the plain-text quiz into structured questions
+  interface QuizOption { letter: string; text: string }
+  interface QuizQuestion { questionText: string; options: QuizOption[]; correctAnswer: string; explanation: string }
+
+  function parseQuizText(text: string): { title?: string; questions: QuizQuestion[] } {
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+    const questions: QuizQuestion[] = []
+    let cur: Partial<QuizQuestion> | null = null
+    let title: string | undefined
+
+    const titleIdx = lines.findIndex(l => /^Title_display\s*:/i.test(l))
+    if (titleIdx !== -1) title = lines[titleIdx].replace(/^Title_display\s*:\s*/i, '').trim()
+
+    const firstQ = lines.findIndex(l => /^Q\d*[.:]\s/i.test(l))
+    const qLines = firstQ >= 0 ? lines.slice(firstQ) : lines
+
+    for (const line of qLines) {
+      const qMatch = line.match(/^Q(\d*)[.:]\s*(.*)/)
+      if (qMatch) {
+        if (cur?.questionText) questions.push(cur as QuizQuestion)
+        cur = { questionText: qMatch[2].trim(), options: [], correctAnswer: '', explanation: '' }
+        continue
+      }
+      const ansMatch = line.match(/^(?:correct_ans|Answer|Correct\s*Answer)\s*:\s*([A-D])/i)
+      if (ansMatch && cur) { cur.correctAnswer = ansMatch[1].toUpperCase(); continue }
+      const expMatch = line.match(/^Explanation\s*:\s*(.+)/i)
+      if (expMatch && cur) { cur.explanation = expMatch[1].trim(); continue }
+      const optMatch = line.match(/^([A-D])[.)]\s+(.+)/i)
+      if (optMatch && cur && !cur.correctAnswer) {
+        cur.options = cur.options ?? []
+        cur.options.push({ letter: optMatch[1].toUpperCase(), text: optMatch[2].trim() })
+        continue
+      }
+      if (cur?.explanation) cur.explanation += ' ' + line
+    }
+    if (cur?.questionText) questions.push(cur as QuizQuestion)
+    return { title, questions }
+  }
+
+  const parsed = parseQuizText(quizText)
+  if (parsed.questions.length === 0) return // nothing to save
+
+  // Upsert attached_quizzes row
+  const { data: existing } = await sb
+    .from('attached_quizzes')
+    .select('id')
+    .eq('note_item_id', itemId)
+    .maybeSingle()
+
+  let quizId: string
+  if (existing) {
+    await (sb.from('attached_quizzes') as any)
+      .update({ title: parsed.title ?? 'AI Quiz', updated_at: new Date().toISOString() })
+      .eq('id', (existing as any).id)
+    quizId = (existing as any).id
+  } else {
+    const { data: newQuiz, error } = await (sb.from('attached_quizzes') as any)
+      .insert({ note_item_id: itemId, title: parsed.title ?? 'AI Quiz' })
+      .select('id')
+      .single()
+    if (error || !newQuiz) return
+    quizId = (newQuiz as any).id
+  }
+
+  // Replace questions
+  await (sb.from('quiz_questions') as any).delete().eq('quiz_id', quizId)
+  const rows = parsed.questions.map((q, i) => ({
+    quiz_id: quizId,
+    question_text: q.questionText,
+    options: q.options,
+    correct_answer: q.correctAnswer,
+    explanation: q.explanation,
+    order_index: i,
+  }))
+  if (rows.length > 0) await (sb.from('quiz_questions') as any).insert(rows)
+}
+
+export async function getFlashcardsFromDb(itemId: string): Promise<{ front: string; back: string }[] | null> {
+  const sb = getServiceSupabase()
+  const { data } = await sb
+    .from('note_contents')
+    .select('flashcards_json')
+    .eq('item_id', itemId)
+    .single()
+  const json = (data as any)?.flashcards_json
+  if (!json) return null
+  try {
+    const parsed = JSON.parse(json)
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null
+  } catch { return null }
+}
+
+export async function getQuizFromDb(itemId: string): Promise<{ questionText: string; options: { letter: string; text: string }[]; correctAnswer: string; explanation: string }[] | null> {
+  const sb = getServiceSupabase()
+  const { data: quiz } = await sb
+    .from('attached_quizzes')
+    .select('id')
+    .eq('note_item_id', itemId)
+    .maybeSingle()
+  if (!quiz) return null
+  const { data: questions } = await sb
+    .from('quiz_questions')
+    .select('question_text, options, correct_answer, explanation, order_index')
+    .eq('quiz_id', (quiz as any).id)
+    .order('order_index')
+  if (!questions || (questions as any[]).length === 0) return null
+  return (questions as any[]).map(q => ({
+    questionText: q.question_text,
+    options: q.options ?? [],
+    correctAnswer: q.correct_answer,
+    explanation: q.explanation,
+  }))
 }
 
 export async function updateItemPdfUrl(itemId: string, pdfUrl: string) {
@@ -320,20 +479,23 @@ export async function expandId(table: string, shortId: string): Promise<string> 
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(shortId)) {
     return shortId
   }
-  // Retry up to 3 times — Vercel cold-start can cause transient fetch failures
+  // Performance: use a server-side LIKE prefix query instead of fetching all rows.
+  // This is O(index) rather than O(n) and scales regardless of table size.
   let lastError: string = 'unknown'
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const sb = getServiceSupabase()
-      const { data, error } = await sb.from(table).select('id')
+      const { data, error } = await sb
+        .from(table)
+        .select('id')
+        .ilike('id', `${shortId}%`)
+        .limit(1)
+        .single()
       if (error || !data) {
         lastError = error?.message ?? 'no data'
         continue
       }
-      const rows = data as { id: string }[]
-      const match = rows.find(row => row.id.startsWith(shortId))
-      if (!match) throw new Error(`[expandId] No match for "${shortId}" in "${table}"`)
-      return match.id
+      return (data as { id: string }).id
     } catch (e: any) {
       lastError = e.message
       if (attempt < 2) await new Promise(r => setTimeout(r, 300 * (attempt + 1)))

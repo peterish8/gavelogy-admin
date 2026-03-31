@@ -6,30 +6,35 @@ import { XIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
+// Thin Radix root wrapper for modal dialog state.
 function Dialog({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />
 }
 
+// Radix trigger wrapper for opening a dialog.
 function DialogTrigger({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
   return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />
 }
 
+// Portal wrapper that renders dialog content at the document root.
 function DialogPortal({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Portal>) {
   return <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />
 }
 
+// Close wrapper for consumers that need an explicit Radix close control.
 function DialogClose({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Close>) {
   return <DialogPrimitive.Close data-slot="dialog-close" {...props} />
 }
 
+// Shared backdrop overlay used behind all dialogs.
 function DialogOverlay({
   className,
   ...props
@@ -46,6 +51,7 @@ function DialogOverlay({
   )
 }
 
+// Main dialog panel with optional built-in close button and shared positioning styles.
 function DialogContent({
   className,
   children,
@@ -80,6 +86,7 @@ function DialogContent({
   )
 }
 
+// Header layout helper for dialog titles and descriptions.
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -90,6 +97,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+// Footer layout helper that stacks actions on mobile and aligns them on desktop.
 function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -103,6 +111,7 @@ function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+// Styled dialog title wrapper.
 function DialogTitle({
   className,
   ...props
@@ -116,6 +125,7 @@ function DialogTitle({
   )
 }
 
+// Styled dialog description wrapper.
 function DialogDescription({
   className,
   ...props

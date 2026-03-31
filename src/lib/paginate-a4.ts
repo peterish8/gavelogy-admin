@@ -13,8 +13,11 @@ const FOOTER_ZONE = 60
 const HEADER_ZONE = 60
 const USABLE_HEIGHT = PAGE_HEIGHT - FOOTER_ZONE - HEADER_ZONE
 
+// Guard flag to prevent concurrent pagination runs triggered by rapid editor updates.
 let _paginating = false
 
+// Pushes editor child elements down with margin-top so they never overlap A4 page footer/header zones.
+// Call after every editor content change that may affect layout.
 export function paginateA4(proseMirrorEl: HTMLElement | null) {
   if (!proseMirrorEl || _paginating) {
     console.log('[A4] Skipped: el=', !!proseMirrorEl, 'busy=', _paginating)

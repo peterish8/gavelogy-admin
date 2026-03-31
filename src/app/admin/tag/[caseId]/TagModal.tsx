@@ -19,6 +19,7 @@ interface TagModalProps {
   onClose: () => void
 }
 
+// Modal for creating a new PDF highlight tag on a selected region; shows link ID suggestions from the note content.
 export default function TagModal({
   region,
   existingLinkIds,
@@ -33,6 +34,7 @@ export default function TagModal({
 
   const isDuplicate = linkId.trim() !== '' && existingLinkIds.includes(linkId.trim())
 
+  // Validates the link ID (required, non-duplicate) then calls onSave to persist the tag.
   async function handleSave() {
     const trimmed = linkId.trim()
     if (!trimmed) {

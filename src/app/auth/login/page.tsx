@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { Loader2, ShieldAlert, Lock, Mail, Eye, EyeOff } from 'lucide-react'
 
+// Admin login page that authenticates with Supabase, verifies admin access, and redirects to the dashboard.
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -14,6 +15,7 @@ export default function LoginPage() {
   const router = useRouter()
   const supabase = createClient()
 
+  // Handles the full login flow: auth sign-in, admin-role check, redirect, and error state updates.
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -53,6 +55,7 @@ export default function LoginPage() {
         throw new Error('Access denied. You do not have admin privileges.')
       }
 
+      // Step 3: Admin verified - redirect to dashboard
       // Step 3: Admin verified - redirect to dashboard
       router.push('/admin/dashboard')
       router.refresh()

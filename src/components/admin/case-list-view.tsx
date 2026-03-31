@@ -18,8 +18,9 @@ interface CaseListViewProps {
   cases: CaseItem[]
 }
 
+// Grouped case list view that organizes case entries by year and links into the notes editor.
 export function CaseListView({ cases }: CaseListViewProps) {
-  // Group cases by year
+  // Groups incoming cases by year so the UI can render collapsible year sections.
   const casesByYear = cases.reduce((acc, item) => {
     const year = item.year || 'Unknown'
     if (!acc[year]) {
@@ -29,10 +30,10 @@ export function CaseListView({ cases }: CaseListViewProps) {
     return acc
   }, {} as Record<string, CaseItem[]>)
 
-  // Sort years descending
+  // Sorts years newest-first for an exam-style archive view.
   const years = Object.keys(casesByYear).sort((a, b) => b.localeCompare(a))
 
-  // Color mapping for years (simulated based on screenshot sequence)
+  // Assigns a repeating accent palette and mock progress value to each year block.
   const getYearStyles = (year: string, index: number) => {
     // 2025 (Index 0 in desc) -> Purple
     // 2024 (Index 1) -> Green
@@ -58,6 +59,7 @@ export function CaseListView({ cases }: CaseListViewProps) {
   )
 }
 
+// Expandable section for one year's cases, including mocked category chrome and item actions.
 function YearSection({ year, cases, styles }: { year: string, cases: CaseItem[], styles: any }) {
   const [isOpen, setIsOpen] = useState(year === '2025') // Default open 2025 for demo
 

@@ -1,8 +1,8 @@
 /**
  * quiz-parser.ts
- * 
+ *
  * Parses plain-text quiz format into structured data for the QuizPreview component.
- * 
+ *
  * Supported Format:
  * Q1. Question text here
  * A. Option A text
@@ -47,12 +47,12 @@ export function parseQuizText(text: string): ParsedQuiz {
   let title = ''
   let questionId = 0
 
-  // Check for passage and title at the start (before first Q)
+  // Extracts optional Title_display and Passage text that appears before the first question.
   const firstQuestionIndex = lines.findIndex(line => /^Q\d*[.:]?\s/i.test(line))
-  
+
   if (firstQuestionIndex > 0) {
      const preQuestionLines = lines.slice(0, firstQuestionIndex)
-     
+
      // 1. Extract Title
      const titleLineIndex = preQuestionLines.findIndex(line => /^Title_display\s*:\s*/i.test(line))
      if (titleLineIndex !== -1) {
@@ -68,6 +68,7 @@ export function parseQuizText(text: string): ParsedQuiz {
 
   const questionLines = firstQuestionIndex >= 0 ? lines.slice(firstQuestionIndex) : lines
 
+  // Main parsing loop: processes each line to identify questions, options, answers, and explanations.
   for (const line of questionLines) {
     // 1. Check for Question (Start of new question)
     // Match question: Q1. or Q. or Q1: or just Q followed by text
@@ -106,12 +107,12 @@ export function parseQuizText(text: string): ParsedQuiz {
     if (optionMatch && currentQuestion) {
       // Logic to prevent duplicate parsing
       if (currentQuestion.correctAnswer || currentQuestion.explanation) {
-          // If we already have answer/explanation, assume this isn't an option 
+          // If we already have answer/explanation, assume this isn't an option
           // (unless specifically "Option A" format, but let's be safe).
       } else {
           const letter = optionMatch[1].toUpperCase()
           const text = optionMatch[2].trim()
-          
+
           currentQuestion.options = currentQuestion.options || []
           const existingIndex = currentQuestion.options.findIndex(o => o.letter === letter)
           if (existingIndex >= 0) {
@@ -152,6 +153,7 @@ export function parseQuizText(text: string): ParsedQuiz {
   }
 }
 
+// Fills in default empty strings for any unpopulated question fields and assigns the numeric ID.
 function finalizeQuestion(q: Partial<QuizQuestion>, id: number): QuizQuestion {
   return {
     id,

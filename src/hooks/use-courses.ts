@@ -14,6 +14,8 @@ declare global {
   }
 }
 
+// Fetches all courses from Supabase with a global dedup lock to prevent concurrent fetches across HMR reloads.
+// Returns courses array, loading/fetching state, error, and a force-refetch function.
 export function useCourses() {
   const store = useCourseStore()
   const [error, setError] = useState<string | null>(null)
@@ -27,6 +29,7 @@ export function useCourses() {
   const timeoutRef = useRef<NodeJS.Timeout | null>(null)
   const hasFetchedRef = useRef(false)
 
+  // Fetches the course list once, with HMR-safe locking and timeouts to avoid duplicate client queries.
   const fetchCourses = useCallback(async (force = false) => {
     // Check global lock (survives HMR)
     if (typeof window !== 'undefined') {
@@ -124,7 +127,7 @@ export function useCourses() {
     }
   }, [store])
 
-  // Initial fetch - always fetch on mount
+  // Kicks off the initial course fetch and clears the timeout guard on unmount.
   useEffect(() => {
     console.log('useCourses: mount, fetching...')
     fetchCourses()
@@ -148,6 +151,7 @@ export function useCourses() {
   }
 }
 
+// Fetches a single course by ID, merging cache + draft store overrides so the latest unsaved edits are visible.
 export function useCourse(courseId: string) {
   const store = useCourseStore()
   const [error, setError] = useState<string | null>(null)
@@ -156,9 +160,10 @@ export function useCourse(courseId: string) {
   const getChangeForEntity = useDraftStore((state) => state.getChangeForEntity)
   const setCourseDetail = store.setCourseDetail // Extract stable reference
 
-  // 1. Try to find in cache (from list or details)
+  // Reads the course from either the list cache or the dedicated detail cache for instant first render.
   const cachedCourse = store.courses.find(c => c.id === courseId) || store.courseDetails[courseId]
   
+  // Loads the latest course row unless this course only exists as a pending draft creation.
   const fetchCourse = useCallback(async () => {
     if (!courseId) return
     
@@ -213,7 +218,7 @@ export function useCourse(courseId: string) {
       fetchCourse()
   }, [courseId, fetchCourse])
 
-  // Logic to return: Cache + Draft Overrides
+  // Merges cached course data with any pending draft change so editors see unsaved values immediately.
   const mergedCourse = useMemo(() => {
       // Logic: Start with Cache or Null
       // Warning: draftChange is used in logic but not dependency above? 
@@ -244,14 +249,14 @@ export function useCourse(courseId: string) {
   }
 }
 
-// Hook for CRUD operations (uses draft store)
-// Hook for CRUD operations (Direct DB - Instant Save)
+// Provides async create/update/delete/reorder actions that write directly to Supabase (instant save, no draft queue).
 export function useCourseActions() {
     // Note: create and delete are now handled directly in page.tsx for better optimistic control
     // taking them out here or keeping them as legacy wrappers isn't ideal. 
     // Let's refactor to keep logic central if possible, but for Page's specific needs we did inline.
     // For consistency, let's make these powerful async functions too.
 
+  // Inserts a new course row immediately and returns the generated temporary ID used throughout the UI.
   const createCourse = useCallback(async (courseData: Partial<Course>) => {
       // NOTE: This is used by some components, better to have a central async version
       const supabase = createClient()
@@ -274,6 +279,7 @@ export function useCourseActions() {
       return tempId
   }, [])
 
+  // Persists partial course updates directly to Supabase for instant-save interactions.
   const updateCourse = useCallback(async (courseId: string, updates: Partial<Course>) => {
     try {
         const supabase = createClient()
@@ -292,12 +298,14 @@ export function useCourseActions() {
     }
   }, [])
 
+  // Deletes the course row from Supabase; callers handle any surrounding UI cleanup.
   const deleteCourse = useCallback(async (courseId: string) => {
       const supabase = createClient()
       const { error } = await supabase.from('courses').delete().eq('id', courseId)
       if (error) throw error
   }, [])
 
+  // Updates a course's display order in Supabase after drag/drop or manual reordering.
   const reorderCourse = useCallback(async (courseId: string, newIndex: number) => {
     try {
        const supabase = createClient()

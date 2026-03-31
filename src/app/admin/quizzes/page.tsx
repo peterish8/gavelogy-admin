@@ -26,6 +26,7 @@ interface GroupedQuizzes {
   quizzes: QuizItem[]
 }
 
+// Server page that lists all quizzes, grouped by course and filterable by search.
 export default async function QuizzesPage({
   searchParams,
 }: {
@@ -35,6 +36,7 @@ export default async function QuizzesPage({
   const query = (await searchParams).q || ''
 
   // Fetch attached quizzes with question counts
+  // Fetches quiz rows together with their existing question counts.
   const { data: quizData } = await supabase
     .from('attached_quizzes')
     .select(`
@@ -43,6 +45,7 @@ export default async function QuizzesPage({
     `)
 
   // Get structure items and courses for these quizzes
+  // Resolves the owning structure items and courses for each attached quiz.
   const itemIds = (quizData || []).map((q: any) => q.note_item_id).filter(Boolean)
 
   let quizzes: QuizItem[] = []
@@ -74,6 +77,7 @@ export default async function QuizzesPage({
   }
 
   // Filter by search query
+  // Applies the title/course search filter when a query is present.
   const filteredQuizzes = query
     ? quizzes.filter(quiz =>
         quiz.itemTitle?.toLowerCase().includes(query.toLowerCase()) ||
@@ -82,6 +86,7 @@ export default async function QuizzesPage({
     : quizzes
 
   // Group by course
+  // Groups quizzes by course so the page can render one section per course.
   const groups: Map<string, GroupedQuizzes> = new Map()
   filteredQuizzes.forEach(quiz => {
     if (!quiz.course) return

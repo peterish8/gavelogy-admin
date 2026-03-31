@@ -6,12 +6,14 @@ import { insertLink, deleteLink, clearItemPdfUrl } from '@/actions/judgment/link
 import { saveNoteContent } from '@/actions/judgment/note-content'
 import type { NotePdfLink } from '@/actions/judgment/links'
 import { customToHtml, htmlToCustom } from '@/lib/content-converter'
+import { encodeLinkMeta, parseLinkMeta, DEFAULT_LINK_COLOR } from '@/components/course/judgment-pdf-panel'
+import { hexToRgba, buildPageFlat, searchOnPage, findTextInPageData } from '@/lib/pdf-search'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import TagModal from './TagModal'
 import {
   ArrowLeft, Upload, Save, Link2, X, Loader2, FileText, Trash2, CheckCircle, Trash,
-  ChevronDown, Unlink, Eye, Pencil,
+  ChevronDown, Unlink, Eye, Pencil, Wand2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
@@ -34,6 +36,7 @@ interface Props {
   noteContentHtml: string
 }
 
+// Full split-panel workspace: editable case law note on the left, pdfjs judgment viewer on the right with drag-tag and link overlay.
 export default function NoteJudgmentEditor({
   caseId,
   caseTitle,
@@ -49,6 +52,7 @@ export default function NoteJudgmentEditor({
   // Snapshot of editor HTML captured when switching to preview (ref becomes null after unmount)
   const [previewHtml, setPreviewHtml] = useState(() => customToHtml(noteContentHtml))
 
+  // Captures the current editor HTML before switching to preview so the rendered view stays in sync.
   function switchNoteMode(mode: 'edit' | 'preview') {
     if (mode === 'preview' && noteEditorRef.current) {
       setPreviewHtml(noteEditorRef.current.innerHTML)
@@ -83,6 +87,7 @@ export default function NoteJudgmentEditor({
   const containerRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef(false)
 
+  // Tracks mouse drag on the divider handle to resize the note/PDF split percentage (clamped 28%–72%).
   useEffect(() => {
     function onMove(e: MouseEvent) {
       if (!draggingRef.current || !containerRef.current) return
@@ -150,12 +155,16 @@ export default function NoteJudgmentEditor({
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [generatingNotes, setGeneratingNotes] = useState(false)
+
   // ── Note handlers ──────────────────────────────────────────────────
+  // Marks the note as having unsaved changes when the user types in the contenteditable editor.
   function handleNoteInput() {
     setNoteDirty(true)
     setSelToolbar(null)
   }
 
+  // On text selection in the note: in connect mode wraps the selection in a linked-text span; otherwise shows the floating link toolbar.
   function handleNoteMouseUp() {
     const sel = window.getSelection()
     if (!sel || sel.isCollapsed || !sel.toString().trim()) {
@@ -209,6 +218,7 @@ export default function NoteJudgmentEditor({
     setLinkIdInput(autoLinkId(text))
   }
 
+  // Computes viewport coordinates for both the note span and the PDF region so the SVG connection line can be drawn.
   function computeConnection(linkId: string): typeof connectionViz {
     const link = links.find(l => l.link_id === linkId)
     if (!link) return null
@@ -247,6 +257,7 @@ export default function NoteJudgmentEditor({
     pdfContainer.scrollTo({ top: target, behavior: 'smooth' })
   }
 
+  // Clicking a linked-text span scrolls the PDF to the matched region and draws the connection line for 4 seconds.
   function handleNoteEditorClick(e: React.MouseEvent) {
     if (connectMode) return
     const span = (e.target as HTMLElement).closest('.linked-text') as HTMLElement | null
@@ -281,9 +292,9 @@ export default function NoteJudgmentEditor({
   // When highlightedLinkId clears, also clear the viz
   useLayoutEffect(() => {
     if (!highlightedLinkId) setConnectionViz(null)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightedLinkId])
 
+  // On hover over a linked-text span shows a tooltip and draws a preview connection line.
   function handleNoteEditorMouseMove(e: React.MouseEvent) {
     if (connectMode || highlightedLinkId) return
     const span = (e.target as HTMLElement).closest('.linked-text') as HTMLElement | null
@@ -295,7 +306,7 @@ export default function NoteJudgmentEditor({
     const link = links.find(l => l.link_id === linkId)
     if (link) {
       setTooltip({
-        text: `→ Jump to page ${link.pdf_page}${link.label ? ` · ${link.label}` : ''}`,
+        text: `→ Jump to page ${link.pdf_page}${link.label ? ` · ${parseLinkMeta(link.label).text}` : ''}`,
         x: e.clientX + 14,
         y: e.clientY - 36,
       })
@@ -310,6 +321,7 @@ export default function NoteJudgmentEditor({
     setTooltip(null)
   }
 
+  // Derives a URL-safe link ID from the first three words of the selected text (e.g. "link-ratio-held-case").
   function autoLinkId(text: string): string {
     const base = text
       .toLowerCase()
@@ -321,6 +333,7 @@ export default function NoteJudgmentEditor({
     return `link-${base || Date.now()}`
   }
 
+  // Wraps the current selection in a linked-text span with the typed link ID and enters linking mode waiting for a PDF drag.
   function handleStartLinking() {
     const id = linkIdInput.trim()
     if (!id || !selToolbar) return
@@ -347,6 +360,108 @@ export default function NoteJudgmentEditor({
     setSelToolbar(null)
     setNoteDirty(true)
     toast.info(`Drag on the PDF to connect "${id}"`)
+  }
+
+  // Injects [link:id] around the note anchor text found in the formatted string; headings take priority, longer anchors processed first.
+  // Longer anchors are processed first to avoid partial matches.
+  function injectLinkAnchors(
+    formatted: string,
+    connections: { linkId: string; noteAnchor: string }[],
+  ): string {
+    let result = formatted
+    const sorted = [...connections].sort((a, b) => b.noteAnchor.length - a.noteAnchor.length)
+    for (const conn of sorted) {
+      if (!conn.noteAnchor || result.includes(`[link:${conn.linkId}]`)) continue
+      const escaped = conn.noteAnchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const headingRe = new RegExp(`(\\[h[123]\\])(${escaped})(\\[/h[123]\\])`, 'i')
+      if (headingRe.test(result)) {
+        result = result.replace(headingRe, `$1[link:${conn.linkId}]$2[/link]$3`)
+      } else {
+        result = result.replace(new RegExp(escaped, 'i'), `[link:${conn.linkId}]${conn.noteAnchor}[/link]`)
+      }
+    }
+    return result
+  }
+
+  async function handleGenerateFromPdf() {
+    if (!pdfDocRef.current) { toast.error('Load a PDF first'); return }
+    if (noteEditorRef.current?.textContent?.trim()) {
+      if (!confirm('This will replace your existing notes and connections. Continue?')) return
+    }
+    setGeneratingNotes(true)
+    const toastId = toast.loading('📄 Extracting PDF text…')
+    try {
+      // Extract text + item positions for coordinate search
+      const parts: string[] = []
+      const pageData: { pageNum: number; items: any[] }[] = []
+      for (let p = 1; p <= pdfDocRef.current.numPages; p++) {
+        const page = await pdfDocRef.current.getPage(p)
+        const content = await page.getTextContent()
+        const items = content.items as any[]
+        pageData.push({ pageNum: p, items })
+        parts.push(`[Page ${p}]\n${items.map((it: any) => it.str).join(' ')}`)
+      }
+
+      toast.loading('✨ AI is generating notes…', { id: toastId })
+
+      const res = await fetch('/api/ai-summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdfText: parts.join('\n\n') }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json.formatted) throw new Error(json.error || 'AI returned no content')
+
+      toast.loading('🔗 Creating connections…', { id: toastId })
+
+      const aiConnections: any[] = Array.isArray(json.connections) ? json.connections : []
+
+      await Promise.allSettled(links.map(l => deleteLink(l.id)))
+
+      // Find real PDF coordinates for each connection and insert
+      let formattedWithLinks = json.formatted
+      const createdLinks: NotePdfLink[] = []
+      for (const conn of aiConnections) {
+        try {
+          const pos = findTextInPageData(pageData, conn.pdfSearchText ?? '', conn.pdfPage)
+          if (!pos) { console.debug('[generate] not found:', conn.linkId, conn.pdfSearchText); continue }
+          const label = encodeLinkMeta(conn.label ?? '', conn.color ?? DEFAULT_LINK_COLOR)
+          const newLink = await insertLink({
+            item_id: caseId,
+            link_id: conn.linkId,
+            pdf_page: pos.page,
+            x: pos.x,
+            y: pos.y,
+            width: pos.width,
+            height: pos.height,
+            label,
+          })
+          createdLinks.push(newLink)
+        } catch (err) {
+          console.warn('[generate] connection failed:', conn.linkId, err)
+        }
+      }
+
+      // Inject [link:] anchors into note text
+      const connectedLinks = createdLinks.map(l => ({ linkId: l.link_id, noteAnchor: aiConnections.find(c => c.linkId === l.link_id)?.noteAnchor ?? '' }))
+      formattedWithLinks = injectLinkAnchors(formattedWithLinks, connectedLinks)
+
+      const html = customToHtml(formattedWithLinks)
+      if (noteEditorRef.current) noteEditorRef.current.innerHTML = html
+      setPreviewHtml(html)
+      await saveNoteContent(caseId, formattedWithLinks)
+      setNoteDirty(false)
+      setLinks(createdLinks)
+
+      const msg = createdLinks.length > 0
+        ? `✨ Notes + ${createdLinks.length} connections created!`
+        : '✨ Notes generated'
+      toast.success(msg + (json.provider ? ` via ${json.provider}` : ''), { id: toastId })
+    } catch (err: any) {
+      toast.error(err.message || 'Generation failed', { id: toastId })
+    } finally {
+      setGeneratingNotes(false)
+    }
   }
 
   async function handleSaveNote() {
@@ -832,6 +947,18 @@ export default function NoteJudgmentEditor({
               <>
                 <Button
                   size="sm"
+                  variant="outline"
+                  onClick={handleGenerateFromPdf}
+                  disabled={generatingNotes || !signedUrl}
+                  className="border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-950/30"
+                >
+                  {generatingNotes
+                    ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                    : <Wand2 className="w-4 h-4 mr-1.5" />}
+                  {generatingNotes ? 'Generating…' : 'Generate Notes'}
+                </Button>
+                <Button
+                  size="sm"
                   variant={connectMode ? 'default' : 'outline'}
                   onClick={connectMode ? exitConnectMode : startConnectMode}
                   className={connectMode
@@ -1018,6 +1145,7 @@ export default function NoteJudgmentEditor({
                 links.map(link => {
                   const noteText = getNoteText(link.link_id)
                   const isActive = connectionViz?.linkId === link.link_id || highlightedLinkId === link.link_id
+                  const { text: linkLabel, color: linkColor } = parseLinkMeta(link.label)
                   return (
                     <div
                       key={link.id}
@@ -1027,23 +1155,18 @@ export default function NoteJudgmentEditor({
                         setTimeout(() => setConnectionViz(computeConnection(link.link_id)), 650)
                         setTimeout(() => { setHighlightedLinkId(null); setConnectionViz(null) }, 4000)
                       }}
-                      className={cn(
-                        'flex items-center gap-3 px-4 py-2.5 cursor-pointer group transition-colors',
-                        isActive
-                          ? 'bg-amber-50 dark:bg-amber-950/20'
-                          : 'hover:bg-muted/50'
-                      )}
+                      className="flex items-center gap-3 px-4 py-2.5 cursor-pointer group transition-colors hover:bg-muted/50"
+                      style={isActive ? { backgroundColor: hexToRgba(linkColor, 0.08) } : undefined}
                     >
-                      {/* Left dot */}
-                      <div className={cn(
-                        'w-2 h-2 rounded-full shrink-0 transition-colors',
-                        isActive ? 'bg-amber-500' : 'bg-amber-300 dark:bg-amber-700'
-                      )} />
+                      <div
+                        className="w-2 h-2 rounded-full shrink-0 transition-colors"
+                        style={{ backgroundColor: isActive ? linkColor : hexToRgba(linkColor, 0.45) }}
+                      />
 
                       {/* Text info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="text-xs font-medium text-amber-700 dark:text-amber-400 truncate">
+                          <span className="text-xs font-medium truncate" style={{ color: linkColor }}>
                             "{noteText}"
                           </span>
                           <span className="text-muted-foreground/40 text-xs shrink-0">→</span>
@@ -1284,23 +1407,24 @@ export default function NoteJudgmentEditor({
                           const isActive = linking?.linkId === link.link_id
                           const isHighlighted = highlightedLinkId === link.link_id
                           const isConnected = connectionViz?.linkId === link.link_id
+                          const { text: ovLabel, color: ovColor } = parseLinkMeta(link.label)
 
                           return (
                             <div
                               key={link.id}
-                              title={`${link.link_id}${link.label ? ` — ${link.label}` : ''}`}
+                              title={`${link.link_id}${ovLabel ? ` — ${ovLabel}` : ''}`}
                               className={cn('absolute group', isHighlighted && 'link-flash')}
                               style={{
                                 left: sx, top: sy, width: sw, height: sh,
                                 background: isHighlighted
-                                  ? 'rgba(245,158,11,0.35)'
+                                  ? hexToRgba(ovColor, 0.35)
                                   : isConnected
-                                  ? 'rgba(245,158,11,0.22)'
+                                  ? hexToRgba(ovColor, 0.22)
                                   : isActive
-                                  ? 'rgba(245,158,11,0.28)'
-                                  : 'rgba(245,158,11,0.12)',
-                                border: `${isHighlighted || isConnected ? '2' : '1.5'}px solid ${isHighlighted || isConnected || isActive ? '#f59e0b' : 'rgba(245,158,11,0.45)'}`,
-                                boxShadow: isConnected || isHighlighted ? '0 0 0 3px rgba(245,158,11,0.2)' : undefined,
+                                  ? hexToRgba(ovColor, 0.28)
+                                  : hexToRgba(ovColor, 0.12),
+                                border: `${isHighlighted || isConnected ? '2' : '1.5'}px solid ${isHighlighted || isConnected || isActive ? ovColor : hexToRgba(ovColor, 0.45)}`,
+                                boxShadow: isConnected || isHighlighted ? `0 0 0 3px ${hexToRgba(ovColor, 0.2)}` : undefined,
                                 borderRadius: 3,
                                 zIndex: isConnected ? 7 : 5,
                                 pointerEvents: inPdfSelectStep ? 'none' : 'all',
@@ -1318,7 +1442,7 @@ export default function NoteJudgmentEditor({
                                   </button>
                                   <div className="absolute bottom-full left-0 mb-1 px-2 py-1 rounded-md text-xs font-mono whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20 bg-popover text-popover-foreground border border-border shadow-md">
                                     {link.link_id}
-                                    {link.label && <span className="text-muted-foreground"> — {link.label}</span>}
+                                    {link.label && <span className="text-muted-foreground"> — {parseLinkMeta(link.label).text}</span>}
                                   </div>
                                 </>
                               )}

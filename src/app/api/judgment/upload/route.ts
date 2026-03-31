@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js'
 import { b2Client, BUCKET } from '@/lib/b2-client'
 import { updateItemPdfUrl } from '@/actions/judgment/links'
 
+// POST handler: verifies admin auth, uploads a PDF to Backblaze B2, stores the object key, and returns a signed URL.
 export async function POST(req: NextRequest) {
   // Verify the request comes from an authenticated admin
   const authHeader = req.headers.get('authorization')
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  // Parse form data
+  // Parses the multipart form body containing the uploaded PDF and target case/item ID.
   let formData: FormData
   try {
     formData = await req.formData()
@@ -57,11 +58,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'File must be a PDF' }, { status: 400 })
   }
 
-  // Build object key
+  // Security: reject oversized files before buffering into RAM (§2 File Upload Validation)
+  const MAX_PDF_BYTES = 50 * 1024 * 1024  // 50MB
+  if (file.size > MAX_PDF_BYTES) {
+    return NextResponse.json({ error: 'File too large (max 50MB)' }, { status: 413 })
+  }
+
+  // Builds a stable object-storage key under the case/item folder using a sanitized filename.
   const safeName = file.name.replace(/\s+/g, '-')
   const objectKey = `${caseId}/${safeName}`
 
-  // Upload to B2
+  // Uploads the PDF bytes to Backblaze B2 using the shared S3-compatible client.
   try {
     const buffer = Buffer.from(await file.arrayBuffer())
     await b2Client.send(new PutObjectCommand({
@@ -72,22 +79,23 @@ export async function POST(req: NextRequest) {
     }))
   } catch (err: any) {
     console.error('B2 upload error:', err)
-    return NextResponse.json({ error: 'Upload failed: ' + err.message }, { status: 500 })
+    // §8: Don't expose internal error details to client
+    return NextResponse.json({ error: 'Upload failed. Please try again.' }, { status: 500 })
   }
 
-  // Save object key to Supabase
+  // Persists the uploaded object key onto the owning structure item for future lookup.
   try {
     await updateItemPdfUrl(caseId, objectKey)
   } catch (err: any) {
     console.error('Supabase update error:', err)
-    return NextResponse.json({ error: 'DB update failed: ' + err.message }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to update record. Please try again.' }, { status: 500 })
   }
 
-  // Generate a signed URL immediately so the client can display it right away
+  // Generates an immediate signed URL so the client can preview the uploaded PDF without another round-trip.
   let signedUrl: string | null = null
   try {
     const command = new GetObjectCommand({ Bucket: BUCKET, Key: objectKey })
-    signedUrl = await getSignedUrl(b2Client, command, { expiresIn: 86400 })
+    signedUrl = await getSignedUrl(b2Client, command, { expiresIn: 7200 })  // 2 hours max
   } catch {
     // Non-fatal — client can fall back to the signed-url API
   }

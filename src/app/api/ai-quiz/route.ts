@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isAdminRequest, unauthorizedResponse, checkPayloadSize } from '@/lib/admin-auth'
 
 const SYSTEM_PROMPT = `You are Gavelogy's Quiz Engine. Your job is to read a completed Gavelogy case law note and generate exactly 10 MCQ questions from it, strictly following the CLAT PG question pattern.
 
@@ -111,6 +112,12 @@ QUALITY RULES — NEVER VIOLATE
 5. For Q8/Q9: never use facts near-identical to the actual case. The student must APPLY the ratio to a new situation, not recall it from the facts.
 6. Output all 10 questions in one response. Do not ask for confirmation between questions.`
 
+// Strip <think>…</think> blocks that some reasoning models (Apriel, Kimi) emit before their actual answer
+function stripThinking(raw: string): string {
+  return raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+}
+
+// Calls Cerebras and returns the cleaned plain-text quiz output.
 async function callCerebras(messages: any[], apiKey: string, model: string, maxTokens = 4000): Promise<string> {
   const res = await fetch('https://api.cerebras.ai/v1/chat/completions', {
     method: 'POST',
@@ -119,9 +126,10 @@ async function callCerebras(messages: any[], apiKey: string, model: string, maxT
   })
   if (!res.ok) throw new Error(`Cerebras(${model}) ${res.status}: ${await res.text()}`)
   const data = await res.json()
-  return data.choices[0].message.content as string
+  return stripThinking(data.choices[0].message.content as string)
 }
 
+// Calls Together AI's Apriel model as a quiz-generation fallback.
 async function callTogether(messages: any[], apiKey: string, maxTokens = 4000): Promise<string> {
   // Free model: ServiceNow Apriel 15B — suitable for quiz generation from notes
   const res = await fetch('https://api.together.xyz/v1/chat/completions', {
@@ -131,9 +139,10 @@ async function callTogether(messages: any[], apiKey: string, maxTokens = 4000): 
   })
   if (!res.ok) throw new Error(`Together ${res.status}: ${await res.text()}`)
   const data = await res.json()
-  return data.choices[0].message.content as string
+  return stripThinking(data.choices[0].message.content as string)
 }
 
+// Calls NVIDIA's Kimi model, the preferred provider for quiz generation.
 async function callNvidia(messages: any[], apiKey: string, maxTokens = 4000): Promise<string> {
   const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
@@ -142,9 +151,10 @@ async function callNvidia(messages: any[], apiKey: string, maxTokens = 4000): Pr
   })
   if (!res.ok) throw new Error(`NVIDIA ${res.status}: ${await res.text()}`)
   const data = await res.json()
-  return data.choices[0].message.content as string
+  return stripThinking(data.choices[0].message.content as string)
 }
 
+// Calls Groq as a faster low-context fallback for MCQ generation.
 async function callGroq(messages: any[], apiKey: string, maxTokens = 2000): Promise<string> {
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -153,9 +163,10 @@ async function callGroq(messages: any[], apiKey: string, maxTokens = 2000): Prom
   })
   if (!res.ok) throw new Error(`Groq ${res.status}: ${await res.text()}`)
   const data = await res.json()
-  return data.choices[0].message.content as string
+  return stripThinking(data.choices[0].message.content as string)
 }
 
+// Calls a specific OpenRouter model and returns the cleaned quiz text.
 async function callOpenRouter(messages: any[], apiKey: string, model: string, maxTokens = 3000): Promise<string> {
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -169,14 +180,20 @@ async function callOpenRouter(messages: any[], apiKey: string, model: string, ma
   })
   if (!res.ok) throw new Error(`OpenRouter(${model}) ${res.status}: ${await res.text()}`)
   const data = await res.json()
-  return data.choices[0].message.content as string
+  return stripThinking(data.choices[0].message.content as string)
 }
 
+// POST handler: generates a 10-question quiz from note text, falling back across multiple AI providers.
 export async function POST(req: NextRequest) {
+  if (!isAdminRequest(req)) return unauthorizedResponse()
+  const sizeError = checkPayloadSize(req, 500_000)  // 500KB max
+  if (sizeError) return sizeError
+
   try {
     const { notesText } = await req.json()
     if (!notesText?.trim()) return NextResponse.json({ error: 'No notes text provided' }, { status: 400 })
 
+    // Builds the shared provider payload from the fixed system prompt plus the trimmed note text.
     const messages = [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: `Generate exactly 10 MCQ questions from these case notes:\n\n${notesText.slice(0, 8000)}` },
@@ -190,6 +207,7 @@ export async function POST(req: NextRequest) {
     const orKey = process.env.OPENROUTER_API_KEY
 
     // 1. NVIDIA Kimi K2.5 — highest priority
+    // Tries configured providers in order and returns the first successful quiz response.
     if (nvidiaKey) {
       try {
         const quiz = await callNvidia(messages, nvidiaKey, 4000)
@@ -260,6 +278,6 @@ export async function POST(req: NextRequest) {
 
   } catch (err: any) {
     console.error('[ai-quiz] Unexpected error:', err)
-    return NextResponse.json({ error: err.message || 'AI quiz generation failed' }, { status: 500 })
+    return NextResponse.json({ error: 'AI quiz generation failed. Please try again.' }, { status: 500 })
   }
 }

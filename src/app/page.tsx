@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 
+// Landing server page that redirects authenticated admins to the dashboard and sends everyone else to login.
 export default async function Home() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -9,7 +10,7 @@ export default async function Home() {
     redirect('/auth/login')
   }
 
-  // Check if admin
+  // Verifies the signed-in user also has the admin flag in the public users table.
   const { data: userData } = await supabase
     .from('users')
     .select('is_admin')
@@ -19,7 +20,7 @@ export default async function Home() {
   if (userData?.is_admin) {
     redirect('/admin/dashboard')
   } else {
-    // Not admin - go to login
+    // Signs out non-admin users so they cannot remain in an authenticated-but-forbidden session.
     await supabase.auth.signOut()
     redirect('/auth/login')
   }

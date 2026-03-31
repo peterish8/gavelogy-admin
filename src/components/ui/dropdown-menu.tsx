@@ -6,12 +6,14 @@ import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
+// Thin Radix root wrapper for dropdown-menu state.
 function DropdownMenu({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
   return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />
 }
 
+// Portal wrapper that renders dropdown content outside normal stacking contexts.
 function DropdownMenuPortal({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Portal>) {
@@ -20,6 +22,7 @@ function DropdownMenuPortal({
   )
 }
 
+// Trigger wrapper for opening a dropdown menu.
 function DropdownMenuTrigger({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Trigger>) {
@@ -31,6 +34,7 @@ function DropdownMenuTrigger({
   )
 }
 
+// Shared dropdown panel with animation, border, and scrolling styles.
 function DropdownMenuContent({
   className,
   sideOffset = 4,
@@ -51,6 +55,7 @@ function DropdownMenuContent({
   )
 }
 
+// Group wrapper for logically related dropdown items.
 function DropdownMenuGroup({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Group>) {
@@ -59,6 +64,7 @@ function DropdownMenuGroup({
   )
 }
 
+// Standard dropdown item with optional destructive styling and inset support.
 function DropdownMenuItem({
   className,
   inset,
@@ -82,6 +88,7 @@ function DropdownMenuItem({
   )
 }
 
+// Checkbox-style dropdown item with a leading check indicator.
 function DropdownMenuCheckboxItem({
   className,
   children,
@@ -108,6 +115,7 @@ function DropdownMenuCheckboxItem({
   )
 }
 
+// Radio-group wrapper for mutually exclusive dropdown options.
 function DropdownMenuRadioGroup({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.RadioGroup>) {
@@ -119,6 +127,7 @@ function DropdownMenuRadioGroup({
   )
 }
 
+// Radio-style dropdown item with a filled-circle indicator.
 function DropdownMenuRadioItem({
   className,
   children,
@@ -143,6 +152,7 @@ function DropdownMenuRadioItem({
   )
 }
 
+// Section label used inside dropdown menus.
 function DropdownMenuLabel({
   className,
   inset,
@@ -163,6 +173,7 @@ function DropdownMenuLabel({
   )
 }
 
+// Divider line used between dropdown sections.
 function DropdownMenuSeparator({
   className,
   ...props
@@ -176,6 +187,7 @@ function DropdownMenuSeparator({
   )
 }
 
+// Right-aligned shortcut hint text for menu items.
 function DropdownMenuShortcut({
   className,
   ...props
@@ -192,12 +204,14 @@ function DropdownMenuShortcut({
   )
 }
 
+// Root wrapper for nested submenus.
 function DropdownMenuSub({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Sub>) {
   return <DropdownMenuPrimitive.Sub data-slot="dropdown-menu-sub" {...props} />
 }
 
+// Trigger row that opens a nested submenu and shows a chevron affordance.
 function DropdownMenuSubTrigger({
   className,
   inset,
@@ -222,6 +236,7 @@ function DropdownMenuSubTrigger({
   )
 }
 
+// Floating panel rendered for nested submenu content.
 function DropdownMenuSubContent({
   className,
   ...props

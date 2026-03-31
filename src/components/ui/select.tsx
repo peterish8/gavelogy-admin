@@ -6,24 +6,28 @@ import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
+// Thin Radix root wrapper for select state.
 function Select({
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Root>) {
   return <SelectPrimitive.Root data-slot="select" {...props} />
 }
 
+// Group wrapper for related select items.
 function SelectGroup({
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Group>) {
   return <SelectPrimitive.Group data-slot="select-group" {...props} />
 }
 
+// Value wrapper that renders the current selected option label.
 function SelectValue({
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Value>) {
   return <SelectPrimitive.Value data-slot="select-value" {...props} />
 }
 
+// Shared select trigger with size variants and the default chevron icon.
 function SelectTrigger({
   className,
   size = "default",
@@ -50,6 +54,7 @@ function SelectTrigger({
   )
 }
 
+// Portal-backed select dropdown with shared animation and popper sizing styles.
 function SelectContent({
   className,
   children,
@@ -87,6 +92,7 @@ function SelectContent({
   )
 }
 
+// Styled label row used inside select dropdown groups.
 function SelectLabel({
   className,
   ...props
@@ -100,6 +106,7 @@ function SelectLabel({
   )
 }
 
+// Styled select option with a right-aligned checkmark indicator.
 function SelectItem({
   className,
   children,
@@ -124,6 +131,7 @@ function SelectItem({
   )
 }
 
+// Divider used between groups of select options.
 function SelectSeparator({
   className,
   ...props
@@ -137,6 +145,7 @@ function SelectSeparator({
   )
 }
 
+// Scroll-up affordance for tall select menus.
 function SelectScrollUpButton({
   className,
   ...props
@@ -155,6 +164,7 @@ function SelectScrollUpButton({
   )
 }
 
+// Scroll-down affordance for tall select menus.
 function SelectScrollDownButton({
   className,
   ...props

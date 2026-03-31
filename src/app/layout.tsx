@@ -44,6 +44,7 @@ export const metadata: Metadata = {
   },
 };
 
+// Root app layout that loads the global fonts, theme provider, and shared document shell.
 export default function RootLayout({
   children,
 }: Readonly<{

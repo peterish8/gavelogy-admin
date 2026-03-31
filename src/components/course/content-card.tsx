@@ -47,6 +47,7 @@ interface ContentCardProps {
   onClick?: () => void
 }
 
+// Sortable content-item card that routes to the correct editor and exposes admin edit/delete controls.
 export function ContentCard({
   content,
   courseId,
@@ -78,7 +79,7 @@ export function ContentCard({
     transition
   }
 
-  // Generate the appropriate link based on content type
+  // Maps each content type to the admin route that should open when the card is clicked.
   const getContentLink = () => {
     const basePath = `/admin/studio/${courseId}/${subjectId}`
     switch (content.content_type) {
@@ -93,6 +94,7 @@ export function ContentCard({
     }
   }
 
+  // Shared card body reused for either a custom click handler or a normal Link wrapper.
   const CardContent = (
     <div className="flex items-center gap-3 p-3">
       {/* Admin drag handle */}
@@ -188,6 +190,7 @@ interface ContentListProps {
   emptyMessage?: string
 }
 
+// List wrapper that renders content cards or an empty-state prompt.
 export function ContentList({
   items,
   courseId,

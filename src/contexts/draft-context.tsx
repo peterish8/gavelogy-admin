@@ -15,10 +15,11 @@ interface DraftProviderProps {
   children: React.ReactNode
 }
 
+// Provides a simple context wrapper for the save-bar dirty state used across admin pages.
 export function DraftProvider({ children }: DraftProviderProps) {
   const hasUnsavedChanges = useHasUnsavedChanges()
 
-  // Add beforeunload warning when there are unsaved changes
+  // Warns before a browser/tab close when the draft store still has unsaved changes.
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (hasUnsavedChanges) {
@@ -42,6 +43,7 @@ export function DraftProvider({ children }: DraftProviderProps) {
   )
 }
 
+// Reads the current draft context and guards against usage outside DraftProvider.
 export function useDraft() {
   const context = useContext(DraftContext)
   if (!context) {
@@ -50,5 +52,5 @@ export function useDraft() {
   return context
 }
 
-// Re-export the store hooks for convenience
+// Re-exports the underlying draft store helpers so most consumers can import from one place.
 export { useDraftStore, useHasUnsavedChanges, useSaveBar } from '@/lib/stores/draft-store'

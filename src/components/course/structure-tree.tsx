@@ -44,10 +44,11 @@ interface StructureTreeProps {
   filteredIds?: Set<string> | null
 }
 
-export function StructureTree({ 
-  items, 
+// Recursive DnD-sortable tree that renders structure items; uses SortableContext per level and a Droppable container for empty-folder drops.
+export function StructureTree({
+  items,
   parentId = null,
-  depth = 0, 
+  depth = 0,
   isAdmin, 
   onAdd, 
   onEdit, 
@@ -117,10 +118,11 @@ export function StructureTree({
   )
 }
 
-function StructureItemRow({ 
-  item, 
-  depth, 
-  isAdmin, 
+// Renders a single folder or file row with drag handle, expand/collapse, inline rename, and admin context-menu actions.
+function StructureItemRow({
+  item,
+  depth,
+  isAdmin,
   onAdd, 
   onEdit, 
   onDelete,
@@ -192,11 +194,13 @@ function StructureItemRow({
     position: 'relative' as const,
   }
 
+  // Toggles the open/closed state of a folder without propagating the click to row selection.
   const handleToggle = (e: React.MouseEvent) => {
     e.stopPropagation()
     setIsOpen(!isOpen)
   }
 
+  // Selects the item and auto-expands a folder if it was closed.
   const handleRowClick = () => {
     onSelect(item.id)
     if (isFolder && !isOpen) {
@@ -204,17 +208,19 @@ function StructureItemRow({
     }
   }
 
+  // Enters inline-edit mode, using the controlled editingId prop when available.
   const startEditing = () => {
     if (setEditingId) setEditingId(item.id)
     else setLocalEditing(true)
   }
 
+  // Exits inline-edit mode.
   const stopEditing = () => {
     if (setEditingId) setEditingId(null)
     else setLocalEditing(false)
   }
 
-  // Helper for highlighting text
+  // Wraps matching search query substrings in a yellow highlight span.
   const renderTitle = (title: string) => {
       if (!searchQuery) return title
       

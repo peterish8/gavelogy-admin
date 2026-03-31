@@ -6,12 +6,14 @@ import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog"
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
 
+// Thin Radix root wrapper for destructive/confirm dialog state.
 function AlertDialog({
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
   return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />
 }
 
+// Trigger wrapper for opening an alert dialog.
 function AlertDialogTrigger({
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Trigger>) {
@@ -20,6 +22,7 @@ function AlertDialogTrigger({
   )
 }
 
+// Portal wrapper that renders alert-dialog content at the document root.
 function AlertDialogPortal({
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Portal>) {
@@ -28,6 +31,7 @@ function AlertDialogPortal({
   )
 }
 
+// Shared backdrop overlay used behind alert dialogs.
 function AlertDialogOverlay({
   className,
   ...props
@@ -44,6 +48,7 @@ function AlertDialogOverlay({
   )
 }
 
+// Main alert-dialog panel with shared positioning and animation styles.
 function AlertDialogContent({
   className,
   ...props
@@ -63,6 +68,7 @@ function AlertDialogContent({
   )
 }
 
+// Header layout helper for alert-dialog titles and descriptions.
 function AlertDialogHeader({
   className,
   ...props
@@ -76,6 +82,7 @@ function AlertDialogHeader({
   )
 }
 
+// Footer layout helper that stacks actions on mobile and aligns them on desktop.
 function AlertDialogFooter({
   className,
   ...props
@@ -92,6 +99,7 @@ function AlertDialogFooter({
   )
 }
 
+// Styled alert-dialog title wrapper.
 function AlertDialogTitle({
   className,
   ...props
@@ -105,6 +113,7 @@ function AlertDialogTitle({
   )
 }
 
+// Styled alert-dialog description wrapper.
 function AlertDialogDescription({
   className,
   ...props
@@ -118,6 +127,7 @@ function AlertDialogDescription({
   )
 }
 
+// Primary confirmation action styled like the shared button component.
 function AlertDialogAction({
   className,
   ...props
@@ -130,6 +140,7 @@ function AlertDialogAction({
   )
 }
 
+// Secondary cancel action styled with the shared outline button variant.
 function AlertDialogCancel({
   className,
   ...props

@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import StudioClient from './studio-client'
 
+// Studio landing server page that fetches the course list once and hands it to the client studio shell.
 export default async function StudioPage() {
   const supabase = await createClient()
   

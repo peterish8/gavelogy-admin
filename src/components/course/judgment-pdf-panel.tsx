@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
+import { buildPageFlat, searchOnPage, findTextInPageData } from '@/lib/pdf-search'
 
 const SCALE = 1.3
 
@@ -42,6 +43,7 @@ export const LINK_COLORS = [
 ]
 export const DEFAULT_LINK_COLOR = '#c9922a'
 
+// Decodes a link label that may be plain text or a JSON object containing { text, color }.
 export function parseLinkMeta(label: string | null): { text: string; color: string } {
   if (!label) return { text: '', color: DEFAULT_LINK_COLOR }
   try {
@@ -53,10 +55,12 @@ export function parseLinkMeta(label: string | null): { text: string; color: stri
   return { text: label, color: DEFAULT_LINK_COLOR }
 }
 
+// Encodes display text and hex color into the JSON label format stored on a link row.
 export function encodeLinkMeta(text: string, color: string): string {
   return JSON.stringify({ text, color })
 }
 
+// Converts a hex color string to an "r,g,b" comma-separated string for use in rgba() CSS values.
 function hexToRgb(hex: string): string {
   const h = hex.replace('#', '')
   const r = parseInt(h.slice(0, 2), 16)
@@ -98,6 +102,7 @@ interface JudgmentPdfPanelProps {
   onAiNotesGenerated?: (formatted: string, provider: string) => void
 }
 
+// PDF panel for the course editor: renders a lazy-loaded pdfjs PDF with drag-to-tag, link overlays, AI notes generation, and connection-line visualization.
 export function JudgmentPdfPanel({
   itemId,
   links,
@@ -211,6 +216,7 @@ export function JudgmentPdfPanel({
   }, [itemId])
 
   // ── Connection viz computation ─────────────────────────────────────
+  // Calculates the viewport coordinates of both the note span and the PDF region overlay so a line can be drawn between them.
   function computeConnection(linkId: string): ConnectionViz | null {
     const link = links.find(l => l.link_id === linkId)
     if (!link) return null
@@ -253,6 +259,7 @@ export function JudgmentPdfPanel({
     }
   }
 
+  // Smoothly scrolls the PDF container so the given link's PDF region is near the top of the viewport.
   function scrollToLink(link: NotePdfLink) {
     const pdfContainer = pdfScrollRef.current
     const pageEl = pageContainerRefs.current.get(link.pdf_page)
@@ -267,13 +274,14 @@ export function JudgmentPdfPanel({
     pdfContainer.scrollTo({ top: target, behavior: 'smooth' })
   }
 
+  // Triggers a rAF-deferred recomputation of the active connection line coordinates.
   function redrawConnection(activeId?: string | null) {
     const id = activeId ?? highlightedLinkId ?? connectionViz?.linkId
     if (!id) return
     requestAnimationFrame(() => onConnectionVizChange(computeConnection(id)))
   }
 
-  // ── PDF rendering ──────────────────────────────────────────────────
+  // Renders a PDF page onto its canvas and builds a pdfjs TextLayer for text selection; skips already-rendered pages.
   const renderPage = useCallback(async (pageNum: number) => {
     if (!pdfDocRef.current || renderedPages.current.has(pageNum)) return
     renderedPages.current.add(pageNum)
@@ -352,7 +360,7 @@ export function JudgmentPdfPanel({
     return () => observer.disconnect()
   }, [numPages, renderPage])
 
-  // ── PDF upload/delete ──────────────────────────────────────────────
+  // Uploads a PDF file to the judgment upload API and updates the proxy URL to trigger a re-render of the PDF.
   async function handlePdfUpload(file: File) {
     setUploadingPdf(true)
     try {
@@ -377,6 +385,7 @@ export function JudgmentPdfPanel({
     }
   }
 
+  // Clears the PDF object key from DB and resets all local PDF state; existing link coordinates are preserved.
   async function handleDeletePdf() {
     if (!confirm('Remove this PDF? Tag coordinates are kept.')) return
     setDeletingPdf(true)
@@ -395,7 +404,7 @@ export function JudgmentPdfPanel({
     }
   }
 
-  // ── Drag handlers (normal mode only) ──────────────────────────────
+  // Starts a drag selection in normal (non-connect) mode, recording start coords adjusted for zoom level.
   function handleMouseDown(e: React.MouseEvent<HTMLDivElement>, pageNum: number) {
     if (connectMode) return
     e.preventDefault()
@@ -507,67 +516,6 @@ export function JudgmentPdfPanel({
   }
 
   // ── AI helpers ────────────────────────────────────────────────────
-
-  /** Build a flat text string + offset map for one page's items. */
-  function buildPageFlat(items: any[]): { flat: string; offsets: { start: number; item: any }[] } {
-    let flat = ''
-    const offsets: { start: number; item: any }[] = []
-    for (const item of items) {
-      const s = (item.str ?? '') + ' '
-      offsets.push({ start: flat.length, item })
-      flat += s
-    }
-    return { flat, offsets }
-  }
-
-  /** Search ONE page for searchText. Returns coordinates or null. */
-  function searchOnPage(
-    items: any[],
-    pageNum: number,
-    needle: string,
-  ): { page: number; x: number; y: number; width: number; height: number } | null {
-    const { flat, offsets } = buildPageFlat(items)
-    const idx = flat.toLowerCase().indexOf(needle.toLowerCase())
-    if (idx === -1) return null
-    let found: any = null
-    for (let i = offsets.length - 1; i >= 0; i--) {
-      if (offsets[i].start <= idx) { found = offsets[i].item; break }
-    }
-    if (!found?.transform) return null
-    const x = found.transform[4] as number
-    const y = found.transform[5] as number
-    const w = Math.max((found.width as number) ?? 80, 40)
-    const h = Math.max((found.height as number) ?? 12, 8)
-    return { page: pageNum, x: Math.max(x, 0), y: Math.max(y - h, 0), width: w, height: h + 2 }
-  }
-
-  /** Search PDF pages for `searchText`.
-   *  If `preferPage` is given, tries that page FIRST (AI told us which page it came from).
-   *  Falls back to all pages with progressively shorter needles (6→4→3 words). */
-  function findTextInPageData(
-    pageData: { pageNum: number; items: any[] }[],
-    searchText: string,
-    preferPage?: number,
-  ): { page: number; x: number; y: number; width: number; height: number } | null {
-    if (!searchText?.trim()) return null
-    const norm = searchText.replace(/\s+/g, ' ').trim()
-    const words = norm.split(' ').filter(Boolean)
-
-    // Sort: try preferred page first, then the rest in order
-    const ordered = preferPage
-      ? [...pageData].sort((a, b) => (a.pageNum === preferPage ? -1 : b.pageNum === preferPage ? 1 : 0))
-      : pageData
-
-    // Try matching with progressively fewer words (6 → 4 → 3)
-    for (let take = Math.min(words.length, 6); take >= 3; take--) {
-      const needle = words.slice(0, take).join(' ')
-      for (const { pageNum, items } of ordered) {
-        const hit = searchOnPage(items, pageNum, needle)
-        if (hit) return hit
-      }
-    }
-    return null
-  }
 
   /** Strip custom tags from a string to get plain text. */
   function stripTags(s: string): string {

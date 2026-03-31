@@ -25,6 +25,7 @@ interface PageState {
   height: number
 }
 
+// Renders every PDF page onto individual <canvas> elements (lazy via IntersectionObserver) and lets the user drag-select a highlight region.
 export default function TaggingCanvas({
   pdfUrl,
   existingLinks,
@@ -51,6 +52,7 @@ export default function TaggingCanvas({
   const observerRef = useRef<IntersectionObserver | null>(null)
   const renderedPages = useRef<Set<number>>(new Set())
 
+  // Renders a single PDF page to its canvas at the configured SCALE; skips pages already rendered.
   const renderPage = useCallback(async (pageNum: number) => {
     if (!pdfDocRef.current || renderedPages.current.has(pageNum)) return
     renderedPages.current.add(pageNum)
@@ -75,7 +77,7 @@ export default function TaggingCanvas({
     }
   }, [])
 
-  // Load PDF
+  // Dynamically imports pdfjs-dist and loads the PDF document from the signed URL.
   useEffect(() => {
     let cancelled = false
 
@@ -105,7 +107,7 @@ export default function TaggingCanvas({
     return () => { cancelled = true }
   }, [pdfUrl])
 
-  // Set up IntersectionObserver after pages are known
+  // Observes each page container and triggers renderPage when it scrolls into the viewport (lazy rendering).
   useEffect(() => {
     if (numPages === 0) return
 
@@ -132,7 +134,7 @@ export default function TaggingCanvas({
     return () => observerRef.current?.disconnect()
   }, [numPages, renderPage])
 
-  // Drag handlers
+  // Starts a drag selection on the page, recording the mouse-down coordinates relative to the page container.
   function handleMouseDown(e: React.MouseEvent<HTMLDivElement>, pageNum: number) {
     e.preventDefault()
     const rect = e.currentTarget.getBoundingClientRect()
@@ -141,6 +143,7 @@ export default function TaggingCanvas({
     setDragState({ pageNum, startX: x, startY: y, currentX: x, currentY: y, active: true })
   }
 
+  // Updates the live selection rectangle as the mouse moves during a drag.
   function handleMouseMove(e: React.MouseEvent<HTMLDivElement>) {
     if (!dragState?.active) return
     const rect = e.currentTarget.getBoundingClientRect()
@@ -155,6 +158,7 @@ export default function TaggingCanvas({
     )
   }
 
+  // Finalises the drag, converts screen coords to PDF units (accounting for SCALE and Y-flip), and calls onRegionSelected.
   function handleMouseUp(e: React.MouseEvent<HTMLDivElement>) {
     if (!dragState?.active) return
 
@@ -190,11 +194,12 @@ export default function TaggingCanvas({
     setDragState(null)
   }
 
+  // Cancels any active drag when the cursor leaves the page container.
   function handleMouseLeave() {
     setDragState(null)
   }
 
-  // Compute selection rect for display
+  // Returns the normalised bounding box (top-left origin) of the active drag in screen pixels for the live overlay.
   function getSelectionRect() {
     if (!dragState?.active) return null
     const x = Math.min(dragState.startX, dragState.currentX)

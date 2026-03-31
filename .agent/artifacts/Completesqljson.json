@@ -366,6 +366,18 @@
         "nullable": "NO"
       },
       {
+        "type": "integer",
+        "column": "exam_rank",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "integer",
+        "column": "read_seconds",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
         "type": "jsonb",
         "column": "doctrine",
         "default": null,
@@ -446,6 +458,12 @@
       {
         "type": "text",
         "column": "source_paper",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "source_url",
         "default": null,
         "nullable": "YES"
       },
@@ -997,6 +1015,12 @@
         "nullable": "YES"
       },
       {
+        "type": "text",
+        "column": "flashcards_json",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
         "type": "timestamp with time zone",
         "column": "created_at",
         "default": "now()",
@@ -1269,6 +1293,69 @@
     ]
   },
   {
+    "table_name": "pyq_passages",
+    "columns": [
+      {
+        "type": "integer",
+        "column": "order_index",
+        "default": "0",
+        "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "citation",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "passage_text",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "section_number",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "subject",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "timestamp with time zone",
+        "column": "created_at",
+        "default": "now()",
+        "nullable": "NO"
+      },
+      {
+        "type": "uuid",
+        "column": "id",
+        "default": "gen_random_uuid()",
+        "nullable": "NO"
+      },
+      {
+        "type": "uuid",
+        "column": "test_id",
+        "default": null,
+        "nullable": "NO"
+      }
+    ],
+    "policies": [
+      {
+        "roles": [
+          "public"
+        ],
+        "command": "ALL",
+        "permissive": "PERMISSIVE",
+        "policy_name": "Admins full access pyq_passages"
+      }
+    ]
+  },
+  {
     "table_name": "pyq_questions",
     "columns": [
       {
@@ -1332,6 +1419,18 @@
         "nullable": "NO"
       },
       {
+        "type": "text",
+        "column": "question_type",
+        "default": "'mcq'::text",
+        "nullable": "YES"
+      },
+      {
+        "type": "text",
+        "column": "subject",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
         "type": "timestamp with time zone",
         "column": "created_at",
         "default": "now()",
@@ -1342,6 +1441,12 @@
         "column": "id",
         "default": "gen_random_uuid()",
         "nullable": "NO"
+      },
+      {
+        "type": "uuid",
+        "column": "passage_id",
+        "default": null,
+        "nullable": "YES"
       },
       {
         "type": "uuid",
@@ -2071,6 +2176,42 @@
         "policy_name": "Everyone view structure"
       }
     ]
+  },
+  {
+    "table_name": "telegram_sessions",
+    "columns": [
+      {
+        "type": "bigint",
+        "column": "chat_id",
+        "default": null,
+        "nullable": "NO"
+      },
+      {
+        "type": "jsonb",
+        "column": "data",
+        "default": "'{}'::jsonb",
+        "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "state",
+        "default": "'idle'::text",
+        "nullable": "NO"
+      },
+      {
+        "type": "text",
+        "column": "user_name",
+        "default": null,
+        "nullable": "YES"
+      },
+      {
+        "type": "timestamp with time zone",
+        "column": "updated_at",
+        "default": "now()",
+        "nullable": "NO"
+      }
+    ],
+    "policies": []
   },
   {
     "table_name": "user_completed_items",

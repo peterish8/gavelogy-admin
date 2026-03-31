@@ -7,5 +7,6 @@ export function ThemeProvider({
   children,
   ...props
 }: React.ComponentProps<typeof NextThemesProvider>) {
+  // Thin wrapper that centralizes app theme configuration around next-themes.
   return <NextThemesProvider {...props}>{children}</NextThemesProvider>
 }

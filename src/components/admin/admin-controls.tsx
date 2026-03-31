@@ -13,6 +13,7 @@ interface AdminControlsProps {
   className?: string
 }
 
+// Shared admin action cluster that shows drag, edit, duplicate, and delete controls around list cards/items.
 export function AdminControls({
   onEdit,
   onDelete,
@@ -23,6 +24,7 @@ export function AdminControls({
 }: AdminControlsProps) {
   const isOverlay = variant === 'overlay'
 
+  // Adjusts layout/styling depending on whether the controls float over a card or sit inline.
   return (
     <div
       className={cn(
@@ -99,6 +101,7 @@ interface DragHandleProps {
   className?: string
 }
 
+// Standalone drag handle for dnd-kit sortable items.
 export function DragHandle({ listeners, attributes, className }: DragHandleProps) {
   return (
     <div

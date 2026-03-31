@@ -27,6 +27,8 @@ interface DraftState {
   addReorderChange: (entityType: EntityType, entityId: string, newOrder: number, originalOrder: number) => void
 }
 
+// Zustand store that tracks all pending create/update/delete/reorder changes before they are committed to the DB.
+// Acts as the undo buffer for the course studio's save-bar workflow.
 export const useDraftStore = create<DraftState>((set, get) => ({
   // Initial state
   changes: [],
@@ -34,7 +36,7 @@ export const useDraftStore = create<DraftState>((set, get) => ({
   isSaving: false,
   lastSaveError: null,
 
-  // Add a new change or update existing one
+  // Queues one draft change, merging it into an existing entry for the same entity when possible.
   addChange: (change) => set((state) => {
     const id = `${change.entityType}-${change.entityId}-${Date.now()}`
     const existingIndex = state.changes.findIndex(
@@ -78,7 +80,7 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     }
   }),
 
-  // Add multiple changes at once
+  // Queues several draft changes together, reusing the same merge rules as addChange.
   addChanges: (changesList) => set((state) => {
     const updatedChanges = [...state.changes]
     const now = Date.now()
@@ -112,7 +114,7 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     }
   }),
 
-  // Update an existing change
+  // Patches a queued change in place, usually after a follow-up edit to the same entity.
   updateChange: (entityId, updates) => set((state) => {
     const newChanges = state.changes.map((c) =>
       c.entityId === entityId ? { ...c, ...updates, timestamp: Date.now() } : c
@@ -123,7 +125,7 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     }
   }),
 
-  // Remove a change (e.g., when undoing)
+  // Removes the queued change for an entity, such as during undo or cleanup.
   removeChange: (entityId) => set((state) => {
     const newChanges = state.changes.filter((c) => c.entityId !== entityId)
     return {
@@ -132,31 +134,31 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     }
   }),
 
-  // Get a specific change
+  // Looks up the pending change for one entity ID.
   getChangeForEntity: (entityId) => {
     return get().changes.find((c) => c.entityId === entityId)
   },
 
-  // Get all changes for a specific type
+  // Returns only the queued changes for a specific entity type.
   getChangesForType: (entityType) => {
     return get().changes.filter((c) => c.entityType === entityType)
   },
 
-  // Clear all changes (after successful save or discard)
+  // Clears the entire draft queue after a successful save or manual discard.
   clearChanges: () => set({
     changes: [],
     hasUnsavedChanges: false,
     lastSaveError: null
   }),
 
-  // Discard all changes
+  // Discards every queued change and resets dirty/error flags without saving anything.
   discardChanges: () => set({
     changes: [],
     hasUnsavedChanges: false,
     lastSaveError: null
   }),
 
-  // Add a reorder change
+  // Convenience helper for queuing reorder operations with both new and original positions.
   addReorderChange: (entityType, entityId, newOrder, originalOrder) => {
     const { addChange } = get()
     addChange({
@@ -168,7 +170,7 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     })
   },
 
-  // Commit all changes to the database
+  // Writes all pending changes to Supabase in batched delete/insert/update operations, then syncs course store cache.
   commitChanges: async () => {
     const { changes } = get()
 
@@ -183,7 +185,7 @@ export const useDraftStore = create<DraftState>((set, get) => ({
       
       console.log('[DraftStore] Starting commit with', changes.length, 'changes')
 
-      // Group changes for batching
+      // Splits queued changes by action so deletes, inserts, and updates can be persisted efficiently.
       const deleteChanges = changes.filter(c => c.action === 'delete')
       const createChanges = changes.filter(c => c.action === 'create')
       const updateChanges = changes.filter(c => c.action === 'update' || c.action === 'reorder')
@@ -238,11 +240,10 @@ export const useDraftStore = create<DraftState>((set, get) => ({
         console.log('[DraftStore] Updates complete')
       }
 
-      // SYNC: Apply committed changes to the course store cache
-      // This makes UI update instantly without requiring reload
+      // Mirrors committed structure changes into the course store so the UI reflects saves immediately.
       const courseStore = useCourseStore.getState()
       
-      // Get all structure_item changes and group by course_id
+      // Collects affected course IDs so only relevant cached structures are updated.
       const structureChanges = changes.filter(c => c.entityType === 'structure_item')
       const courseIds = new Set<string>()
       
@@ -251,7 +252,7 @@ export const useDraftStore = create<DraftState>((set, get) => ({
         if (courseId) courseIds.add(courseId)
       })
       
-      // For each affected course, apply changes to cached structure
+      // Replays creates, updates, and deletes into each affected cached structure list.
       courseIds.forEach(courseId => {
         const cachedItems = courseStore.structures[courseId] || []
         let updatedItems = [...cachedItems]
@@ -295,7 +296,7 @@ export const useDraftStore = create<DraftState>((set, get) => ({
   }
 }))
 
-// Helper function to map entity types to table names
+// Maps an EntityType string ('course' | 'subject' | 'content_item' | 'structure_item') to its Supabase table name.
 function getTableName(entityType: EntityType): string {
   switch (entityType) {
     case 'course':
@@ -311,12 +312,12 @@ function getTableName(entityType: EntityType): string {
   }
 }
 
-// Hook for checking if there are unsaved changes (for navigation guards)
+// Selector hook returning true when there are pending unsaved changes — use in navigation guards / prompts.
 export function useHasUnsavedChanges() {
   return useDraftStore((state) => state.hasUnsavedChanges)
 }
 
-// Hook for the save bar - uses useShallow to prevent infinite loops
+// Composite hook that exposes all save-bar state (dirty flag, saving, error, count) and commit/discard actions.
 export function useSaveBar() {
   const hasUnsavedChanges = useDraftStore((state) => state.hasUnsavedChanges)
   const isSaving = useDraftStore((state) => state.isSaving)

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isAdminRequest, unauthorizedResponse, checkPayloadSize } from '@/lib/admin-auth'
 
 const SYSTEM_PROMPT = `You are a legal study notes formatter for Gavelogy, a law exam prep platform.
 You receive raw unformatted notes text and must return it formatted using a specific custom tag system.
@@ -44,6 +45,7 @@ FORMATTING RULES:
 
 IMPORTANT: Return ONLY the formatted content using the tag system above. No explanations, no markdown code blocks, no JSON wrapper. Just the raw tagged content starting directly with the first tag.`
 
+// Calls NVIDIA's Kimi model, the preferred formatter for converting raw notes into tagged Gavelogy markup.
 async function callNvidia(messages: any[], apiKey: string, maxTokens = 4000): Promise<string> {
   const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
@@ -55,6 +57,7 @@ async function callNvidia(messages: any[], apiKey: string, maxTokens = 4000): Pr
   return data.choices[0].message.content as string
 }
 
+// Calls Groq as a lower-latency fallback for note-formatting requests.
 async function callGroq(messages: any[], apiKey: string, maxTokens = 2000): Promise<string> {
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -66,6 +69,7 @@ async function callGroq(messages: any[], apiKey: string, maxTokens = 2000): Prom
   return data.choices[0].message.content as string
 }
 
+// Calls a chosen OpenRouter model and returns the raw formatted tag output.
 async function callOpenRouter(messages: any[], apiKey: string, model: string, maxTokens = 3000): Promise<string> {
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -82,11 +86,17 @@ async function callOpenRouter(messages: any[], apiKey: string, model: string, ma
   return data.choices[0].message.content as string
 }
 
+// POST handler: formats raw note text into Gavelogy custom tags with optional extra instructions.
 export async function POST(req: NextRequest) {
+  if (!isAdminRequest(req)) return unauthorizedResponse()
+  const sizeError = checkPayloadSize(req, 500_000)  // 500KB max
+  if (sizeError) return sizeError
+
   try {
     const { text, instructions } = await req.json()
     if (!text?.trim()) return NextResponse.json({ error: 'No text provided' }, { status: 400 })
 
+    // Builds the user prompt by combining optional formatting instructions with the trimmed source text.
     const userMessage = instructions?.trim()
       ? `Additional formatting instructions:\n${instructions}\n\nFormat these notes:\n\n${text.slice(0, 8000)}`
       : `Format these notes:\n\n${text.slice(0, 8000)}`
@@ -102,6 +112,7 @@ export async function POST(req: NextRequest) {
     const orKey = process.env.OPENROUTER_API_KEY
 
     // 1. NVIDIA Kimi K2.5 — highest priority
+    // Tries configured providers in order and returns the first successful formatted response.
     if (nvidiaKey) {
       try {
         const formatted = await callNvidia(messages, nvidiaKey, 4000)
@@ -148,6 +159,6 @@ export async function POST(req: NextRequest) {
 
   } catch (err: any) {
     console.error('[ai-format] Unexpected error:', err)
-    return NextResponse.json({ error: err.message || 'AI formatting failed' }, { status: 500 })
+    return NextResponse.json({ error: 'AI formatting failed. Please try again.' }, { status: 500 })
   }
 }
