@@ -7,6 +7,7 @@ interface Props {
   params: Promise<{ caseId: string }>
 }
 
+// Server page: loads the case item, its PDF proxy URL, existing tag links, and note content, then renders NoteJudgmentEditor.
 export default async function TaggingPage({ params }: Props) {
   const { caseId } = await params
   const supabase = await createClient()

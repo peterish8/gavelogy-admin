@@ -6,6 +6,7 @@ interface PageProps {
   params: Promise<{ courseId: string }>
 }
 
+// Server page: pre-fetches course metadata and flat structure items in parallel, then seeds the client component.
 export default async function CourseDetailServerPage({ params }: PageProps) {
   const { courseId } = await params
   const supabase = await createClient()

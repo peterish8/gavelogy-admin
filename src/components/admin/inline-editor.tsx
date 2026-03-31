@@ -20,6 +20,7 @@ interface InlineEditorProps {
   autoFocus?: boolean
 }
 
+// Reusable inline text editor that supports click-to-edit, keyboard shortcuts, and optional multiline mode.
 export function InlineEditor({
   value,
   onSave,
@@ -37,7 +38,7 @@ export function InlineEditor({
   const [editValue, setEditValue] = useState(value)
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null)
 
-  // Support both controlled and uncontrolled editing state
+  // Supports either parent-controlled editing state or internal local editing state.
   const isEditing = controlledEditing !== undefined ? controlledEditing : internalEditing
   const setEditing = (editing: boolean) => {
     if (controlledEditing === undefined) {
@@ -46,6 +47,7 @@ export function InlineEditor({
     onEditingChange?.(editing)
   }
 
+  // Focuses and selects the input after entering edit mode so the current text is easy to replace.
   useEffect(() => {
     if (isEditing && inputRef.current) {
       // Small timeout to ensure DOM is ready and transition is complete
@@ -59,12 +61,14 @@ export function InlineEditor({
     }
   }, [isEditing])
 
+  // Keeps the editable draft value in sync when the external value changes.
   useEffect(() => {
     setEditValue(value)
   }, [value])
 
   const containerRef = useRef<HTMLDivElement>(null)
 
+  // Saves only meaningful changes; otherwise it just closes the editor like a cancel action.
   const handleSave = () => {
     const trimmedValue = editValue.trim()
     if (trimmedValue && trimmedValue !== value) {
@@ -76,12 +80,14 @@ export function InlineEditor({
     setEditing(false)
   }
 
+  // Restores the original value and closes the editor without saving.
   const handleCancel = () => {
     setEditValue(value)
     setEditing(false)
     onCancel?.()
   }
 
+  // Auto-saves on blur unless focus is moving to one of this component's own action buttons.
   const handleBlur = (e: React.FocusEvent) => {
     // Check if the new focus is within our container (e.g. Save/Cancel buttons)
     if (containerRef.current?.contains(e.relatedTarget as Node)) {
@@ -90,6 +96,7 @@ export function InlineEditor({
     handleSave()
   }
 
+  // Enter saves and Escape cancels for quick keyboard-driven editing.
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()

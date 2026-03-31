@@ -3,7 +3,7 @@
 import { cn } from '@/lib/utils'
 import type { AdminPresence } from '@/lib/realtime/realtime-provider'
 
-// Color palette for presence badges
+// Gradient palette used to assign a stable avatar color per admin.
 const BADGE_COLORS = [
   'from-blue-400 to-blue-600',
   'from-green-400 to-green-600',
@@ -15,11 +15,13 @@ const BADGE_COLORS = [
   'from-cyan-400 to-cyan-600',
 ]
 
+// Derives a deterministic badge gradient from the user ID so the same admin keeps the same color.
 function getColorForUser(userId: string) {
   const hash = userId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)
   return BADGE_COLORS[hash % BADGE_COLORS.length]
 }
 
+// Builds a 1-2 letter avatar label from the admin's display name.
 function getInitials(name: string) {
   return name
     .split(' ')

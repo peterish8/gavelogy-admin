@@ -3,6 +3,7 @@
 import { createClient as createServerClient } from '@/lib/supabase/server'
 import { createClient } from '@supabase/supabase-js'
 
+// Creates a service-role client for judgment-link mutations that should bypass end-user RLS restrictions.
 function getAdminClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -31,6 +32,7 @@ export interface CaseItem {
   created_at: string
 }
 
+// Fetches all PDF highlight/link records attached to one note or judgment item.
 export async function fetchLinksForItem(itemId: string): Promise<NotePdfLink[]> {
   const supabase = await createServerClient()
   const { data, error } = await supabase
@@ -42,6 +44,7 @@ export async function fetchLinksForItem(itemId: string): Promise<NotePdfLink[]> 
   return data || []
 }
 
+// Checks whether the given structure item currently has a PDF URL attached.
 export async function checkItemHasPdf(itemId: string): Promise<string | null> {
   const supabase = await createServerClient()
   const { data, error } = await supabase
@@ -53,6 +56,7 @@ export async function checkItemHasPdf(itemId: string): Promise<string | null> {
   return (data as any).pdf_url || null
 }
 
+// Inserts a new PDF highlight/link rectangle for an item and returns the saved row.
 export async function insertLink(payload: {
   item_id: string
   link_id: string
@@ -73,6 +77,7 @@ export async function insertLink(payload: {
   return data
 }
 
+// Renames the label attached to an existing PDF link record.
 export async function updateLinkLabel(id: string, label: string): Promise<void> {
   const adminClient = getAdminClient()
   const { error } = await adminClient
@@ -82,6 +87,7 @@ export async function updateLinkLabel(id: string, label: string): Promise<void> 
   if (error) throw error
 }
 
+// Deletes a single PDF link/highlight record by its ID.
 export async function deleteLink(id: string): Promise<void> {
   const adminClient = getAdminClient()
   const { error } = await adminClient
@@ -91,6 +97,7 @@ export async function deleteLink(id: string): Promise<void> {
   if (error) throw error
 }
 
+// Stores the uploaded PDF URL on the owning structure item.
 export async function updateItemPdfUrl(itemId: string, pdfUrl: string): Promise<void> {
   const adminClient = getAdminClient()
   const { error } = await adminClient
@@ -100,6 +107,7 @@ export async function updateItemPdfUrl(itemId: string, pdfUrl: string): Promise<
   if (error) throw error
 }
 
+// Fetches structure items that look like case records for the tagging/linking admin flows.
 export async function fetchAllCaseItems(): Promise<CaseItem[]> {
   const supabase = await createServerClient()
   const { data, error } = await supabase
@@ -111,6 +119,7 @@ export async function fetchAllCaseItems(): Promise<CaseItem[]> {
   return (data || []) as CaseItem[]
 }
 
+// Clears the PDF URL from a structure item without deleting the item itself.
 export async function clearItemPdfUrl(itemId: string): Promise<void> {
   const adminClient = getAdminClient()
   const { error } = await adminClient
@@ -120,19 +129,19 @@ export async function clearItemPdfUrl(itemId: string): Promise<void> {
   if (error) throw error
 }
 
+// Returns per-item link counts via RPC so list views can show badges without fetching every link row.
 export async function fetchLinkCountsForItems(
   itemIds: string[]
 ): Promise<Record<string, number>> {
   if (itemIds.length === 0) return {}
   const supabase = await createServerClient()
-  const { data, error } = await supabase
-    .from('note_pdf_links')
-    .select('item_id')
-    .in('item_id', itemIds)
+  // Uses a Postgres RPC (get_link_counts.sql) to aggregate server-side
+  // instead of fetching all rows and counting in JS
+  const { data, error } = await supabase.rpc('get_link_counts', { item_ids: itemIds })
   if (error) return {}
   const counts: Record<string, number> = {}
   for (const row of data || []) {
-    counts[row.item_id] = (counts[row.item_id] || 0) + 1
+    counts[row.item_id] = Number(row.link_count)
   }
   return counts
 }

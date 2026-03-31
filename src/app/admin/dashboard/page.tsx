@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { FileText, Folder, BookOpen, Sparkles, Plus, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
+// Dashboard server page that fetches high-level content counts and recent courses for the admin home screen.
 export default async function DashboardPage() {
   const supabase = await createClient()
 
@@ -19,13 +20,14 @@ export default async function DashboardPage() {
     supabase.from('attached_quizzes').select('*', { count: 'exact', head: true }),
   ])
   
-  // Fetch recent courses
+  // Fetches the most recently updated courses for the "Recent Courses" panel.
   const { data: recentCourses } = await supabase
     .from('courses')
     .select('id, name, icon, updated_at')
     .order('updated_at', { ascending: false })
     .limit(5)
 
+  // Normalizes the stat cards so the grid can be rendered from one data structure.
   const stats = [
     { 
       label: 'Active Courses', 

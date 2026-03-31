@@ -6,18 +6,26 @@ import {
   sendMessage, editMessage, answerCallback,
   getSession, setSession, clearSession,
   getCourses, getTopLevelFolders, getFolderChildren,
-  getItem, getNoteContent, saveNoteContent, updateItemPdfUrl,
+  getItem, getNoteContent, saveNoteContent, saveQuizContent, saveFlashcardsContent, updateItemPdfUrl,
+  getExistingContent, getFlashcardsFromDb, getQuizFromDb,
   createCourse, createStructureItem,
   getCourse, updateCoursePrice, toggleCourseActive,
-  getCourseStructure, getLatestNoteWithContent, getStats,
+  getCourseStructure, getStats,
   stripTags, truncate, btn, rows, sid, expandId,
   extractPdfText,
 } from '@/lib/telegram'
 
-const ADMIN_NAMES: Record<number, string> = {
-  1243366277: 'Aksh',
-  6256543340: 'Peter',
-}
+// Security §1: Admin names moved to env var TELEGRAM_ADMIN_NAMES (format: "id:Name,id:Name")
+// Set in .env.local: TELEGRAM_ADMIN_NAMES=1243366277:Aksh,6256543340:Peter
+const ADMIN_NAMES: Record<number, string> = Object.fromEntries(
+  (process.env.TELEGRAM_ADMIN_NAMES ?? '')
+    .split(',')
+    .filter(Boolean)
+    .map(pair => {
+      const [id, name] = pair.split(':')
+      return [Number(id.trim()), name?.trim() ?? 'Admin']
+    })
+)
 
 // Supports comma-separated list: e.g. "1243366277,6256543340"
 const ADMIN_CHAT_IDS = new Set(
@@ -275,7 +283,50 @@ function formatProviderError(label: string, errMsg: string): string {
   return `${label} ❌ <code>${errMsg.slice(0, 60)}</code>`
 }
 
-async function handleGenerateAi(chatId: number, itemId: string) {
+// ── AI confirm: ask one item at a time ───────────────────────────────
+// pendingChecks: array of 'notes'|'quiz'|'cards' that still need a yes/no
+async function askNextAiConfirm(chatId: number) {
+  const session = await getSession(chatId)
+  if (session.state !== 'ai_confirm') return
+  const { itemId, pending, skipNotes, skipQuiz, skipCards } = session.data as {
+    itemId: string
+    pending: string[]
+    skipNotes: boolean
+    skipQuiz: boolean
+    skipCards: boolean
+  }
+
+  if (pending.length === 0) {
+    // All questions answered — fire generation
+    clearSession(chatId)
+    await handleGenerateAi(chatId, itemId, skipNotes, skipQuiz, skipCards)
+    return
+  }
+
+  const current = pending[0]
+  const labels: Record<string, string> = {
+    notes: '📝 Notes',
+    quiz:  '❓ Quiz',
+    cards: '🃏 Flashcards',
+  }
+  const label = labels[current]
+  // ai_yn:y:{8} = 16 bytes ✓  ai_yn:n:{8} = 16 bytes ✓
+  await sendMessage(
+    chatId,
+    `${label} already exists for this note.\n\n<b>Overwrite with new AI-generated ${label.slice(3)}?</b>`,
+    [
+      [btn('✅ Yes, overwrite', `ai_yn:y:${sid(itemId)}`), btn('❌ No, keep it', `ai_yn:n:${sid(itemId)}`)],
+    ]
+  )
+}
+
+async function handleGenerateAi(
+  chatId: number,
+  itemId: string,
+  skipNotes = false,
+  skipQuiz = false,
+  skipCards = false,
+) {
   const item = await getItem(itemId)
   if (!item) { await sendMessage(chatId, '❌ Note not found.'); return }
   if (!item.pdf_url) {
@@ -285,6 +336,32 @@ async function handleGenerateAi(chatId: number, itemId: string) {
     return
   }
 
+  // ── Pre-flight: check what already exists — ask one by one ─────────
+  // Only on first call (all skip flags are false = fresh trigger)
+  if (!skipNotes && !skipQuiz && !skipCards) {
+    const existing = await getExistingContent(itemId)
+    // Build list of items that exist and need a yes/no question
+    const pending = [
+      existing.hasNotes     ? 'notes' : null,
+      existing.hasQuiz      ? 'quiz'  : null,
+      existing.hasFlashcards ? 'cards' : null,
+    ].filter(Boolean) as string[]
+
+    if (pending.length > 0) {
+      await setSession(chatId, 'ai_confirm', {
+        itemId,
+        pending,
+        skipNotes: false,
+        skipQuiz: false,
+        skipCards: false,
+      })
+      await askNextAiConfirm(chatId)
+      return
+    }
+  }
+
+  clearSession(chatId)
+
   // Live progress log — each line is appended and message is edited in real time
   const log: string[] = [`🤖 <b>AI Generation — ${item.title}</b>\n`]
   const progressMsg = await sendMessage(chatId, log.join('\n'))
@@ -293,110 +370,140 @@ async function handleGenerateAi(chatId: number, itemId: string) {
 
   const elapsed = (start: number) => `${Math.round((Date.now() - start) / 1000)}s`
 
-  // ── STEP 1: Fetch PDF ──────────────────────────────────────────────
-  log.push('📥 Fetching PDF from storage…')
-  await update()
-  let pdfBuffer: Buffer
-  try {
-    const t = Date.now()
-    const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: item.pdf_url })
-    const signedUrl = await getSignedUrl(b2Client, cmd, { expiresIn: 300 })
-    const res = await fetch(signedUrl)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    pdfBuffer = Buffer.from(await res.arrayBuffer())
-    log[log.length - 1] = `📥 PDF fetched ✅ · ${elapsed(t)}`
-    await update()
-  } catch (e: any) {
-    log[log.length - 1] = `📥 PDF fetch ❌ — ${e.message}`
-    await update()
-    await sendMessage(chatId, '❌ Could not fetch PDF. Please try again.', [[btn('← Back', `nav_i:${itemId}`)]])
-    return
-  }
-
-  // ── STEP 2: Extract text ───────────────────────────────────────────
-  log.push('📄 Extracting text from PDF…')
-  await update()
-  let pdfText: string
-  try {
-    const t = Date.now()
-    pdfText = await extractPdfText(pdfBuffer)
-    const words = pdfText.split(/\s+/).length
-    log[log.length - 1] = `📄 Text extracted ✅ · ${words.toLocaleString()} words · ${elapsed(t)}`
-    await update()
-  } catch (e: any) {
-    log[log.length - 1] = `📄 Text extraction ❌ — ${e.message}`
-    await update()
-    await sendMessage(chatId, '❌ PDF may be scanned/image-based. Cannot extract text.', [[btn('← Back', `nav_i:${itemId}`)]])
-    return
-  }
-
   const baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : (process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000')
-  log.push('')
-  await update()
 
   // ── STEP 3: Notes ──────────────────────────────────────────────────
-  log.push('📝 <b>Notes</b> — generating…')
-  await update()
+  // Quiz and flashcards are generated FROM NOTES, not from the PDF.
+  // PDF is only fetched/extracted when notes need to be (re)generated.
   let notesText = ''
-  try {
-    const t = Date.now()
-    const res = await fetch(`${baseUrl}/api/ai-summarize`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pdfText }),
-    })
-    const data = await res.json()
-    if (!res.ok || data.error) throw new Error(data.error || 'failed')
-    await saveNoteContent(itemId, data.formatted)
-    notesText = stripTags(data.formatted)
-    log[log.length - 1] = `📝 <b>Notes</b> ✅ <code>${data.provider ?? 'unknown'}</code> · ${elapsed(t)}`
+  if (skipNotes) {
+    // Notes skipped — load existing notes from DB for quiz/flashcards to use
+    const existing = await getNoteContent(itemId)
+    if (existing) notesText = stripTags(existing)
+    log.push('📝 <b>Notes</b> — skipped (using existing)')
     await update()
-  } catch (e: any) {
-    const failLine = formatProviderError('📝 <b>Notes</b>', e.message)
-    log[log.length - 1] = failLine
+  } else {
+    // Need to generate notes → fetch PDF first
+    log.push('📥 Fetching PDF…')
     await update()
-    await sendMessage(chatId, '❌ Notes generation failed. Cannot continue.', [[btn('← Back', `nav_i:${itemId}`)]])
-    return
+    let pdfBuffer: Buffer
+    try {
+      const t = Date.now()
+      const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: item.pdf_url! })
+      const signedUrl = await getSignedUrl(b2Client, cmd, { expiresIn: 300 })
+      const res = await fetch(signedUrl)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      pdfBuffer = Buffer.from(await res.arrayBuffer())
+      log[log.length - 1] = `📥 PDF fetched ✅ · ${elapsed(t)}`
+      await update()
+    } catch (e: any) {
+      log[log.length - 1] = `📥 PDF fetch ❌ — ${e.message}`
+      await update()
+      await sendMessage(chatId, '❌ Could not fetch PDF. Please try again.', [[btn('← Back', `nav_i:${itemId}`)]])
+      return
+    }
+
+    log.push('📄 Extracting text…')
+    await update()
+    let pdfText: string
+    try {
+      const t = Date.now()
+      pdfText = await extractPdfText(pdfBuffer)
+      const words = pdfText.split(/\s+/).length
+      log[log.length - 1] = `📄 Text extracted ✅ · ${words.toLocaleString()} words · ${elapsed(t)}`
+      await update()
+    } catch (e: any) {
+      log[log.length - 1] = `📄 Text extraction ❌ — ${e.message}`
+      await update()
+      await sendMessage(chatId, '❌ PDF may be scanned/image-based. Cannot extract text.', [[btn('← Back', `nav_i:${itemId}`)]])
+      return
+    }
+
+    log.push('📝 <b>Notes</b> — generating…')
+    await update()
+    try {
+      const t = Date.now()
+      const res = await fetch(`${baseUrl}/api/ai-summarize`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // Security: internal call must include admin secret so the route accepts it
+          'x-admin-secret': process.env.ADMIN_API_SECRET ?? '',
+        },
+        body: JSON.stringify({ pdfText }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) throw new Error(data.error || 'failed')
+      await saveNoteContent(itemId, data.formatted)
+      notesText = stripTags(data.formatted)
+      log[log.length - 1] = `📝 <b>Notes</b> ✅ <code>${data.provider ?? 'unknown'}</code> · ${elapsed(t)}`
+      await update()
+    } catch (e: any) {
+      log[log.length - 1] = formatProviderError('📝 <b>Notes</b>', e.message)
+      await update()
+      await sendMessage(chatId, '❌ Notes generation failed. Cannot continue.', [[btn('← Back', `nav_i:${itemId}`)]])
+      return
+    }
   }
 
   // ── STEP 4: Quiz ───────────────────────────────────────────────────
-  log.push('❓ <b>Quiz</b> — generating…')
-  await update()
-  let quizCount = 0
-  try {
-    const t = Date.now()
-    const res = await fetch(`${baseUrl}/api/ai-quiz`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ notesText }),
-    })
-    const data = await res.json()
-    if (!res.ok || data.error) throw new Error(data.error || 'failed')
-    if (!data.quiz) throw new Error('Quiz response missing quiz field')
-    quizCount = (data.quiz as string).match(/^Q\d+\./gm)?.length ?? 10
-    log[log.length - 1] = `❓ <b>Quiz</b> ✅ <code>${data.provider ?? 'unknown'}</code> · ${quizCount} Qs · ${elapsed(t)}`
+  if (skipQuiz) {
+    log.push('❓ <b>Quiz</b> — skipped (kept existing)')
     await update()
-  } catch (e: any) {
-    log[log.length - 1] = formatProviderError('❓ <b>Quiz</b>', e.message) + ' (skipped)'
+  } else {
+    log.push('❓ <b>Quiz</b> — generating…')
     await update()
+    try {
+      const t = Date.now()
+      const res = await fetch(`${baseUrl}/api/ai-quiz`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-secret': process.env.ADMIN_API_SECRET ?? '',
+        },
+        body: JSON.stringify({ notesText }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) throw new Error(data.error || 'failed')
+      if (!data.quiz) throw new Error('Quiz response missing quiz field')
+      const quizCount = (data.quiz as string).match(/^Q\d+\./gm)?.length ?? 10
+      saveQuizContent(itemId, data.quiz as string).catch(e => console.warn('[telegram] saveQuiz failed:', e.message))
+      log[log.length - 1] = `❓ <b>Quiz</b> ✅ <code>${data.provider ?? 'unknown'}</code> · ${quizCount} Qs · ${elapsed(t)}`
+      await update()
+    } catch (e: any) {
+      log[log.length - 1] = formatProviderError('❓ <b>Quiz</b>', e.message) + ' (skipped)'
+      await update()
+    }
   }
 
   // ── STEP 5: Flashcards ─────────────────────────────────────────────
-  log.push('🃏 <b>Flashcards</b> — generating…')
-  await update()
-  let cardCount = 0
-  try {
-    const t = Date.now()
-    const res = await fetch(`${baseUrl}/api/ai-flashcards`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ notesText }),
-    })
-    const data = await res.json()
-    if (!res.ok || data.error) throw new Error(data.error || 'failed')
-    cardCount = (data.flashcards ?? []).length
-    log[log.length - 1] = `🃏 <b>Flashcards</b> ✅ <code>${data.provider ?? 'unknown'}</code> · ${cardCount} cards · ${elapsed(t)}`
+  if (skipCards) {
+    log.push('🃏 <b>Flashcards</b> — skipped (kept existing)')
     await update()
-  } catch (e: any) {
-    log[log.length - 1] = formatProviderError('🃏 <b>Flashcards</b>', e.message) + ' (skipped)'
+  } else {
+    log.push('🃏 <b>Flashcards</b> — generating…')
     await update()
+    try {
+      const t = Date.now()
+      const res = await fetch(`${baseUrl}/api/ai-flashcards`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-secret': process.env.ADMIN_API_SECRET ?? '',
+        },
+        body: JSON.stringify({ notesText }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) throw new Error(data.error || 'failed')
+      const flashcards = data.flashcards ?? []
+      const cardCount = flashcards.length
+      saveFlashcardsContent(itemId, flashcards).catch(e => console.warn('[telegram] saveFlashcards failed:', e.message))
+      log[log.length - 1] = `🃏 <b>Flashcards</b> ✅ <code>${data.provider ?? 'unknown'}</code> · ${cardCount} cards · ${elapsed(t)}`
+      await update()
+    } catch (e: any) {
+      log[log.length - 1] = formatProviderError('🃏 <b>Flashcards</b>', e.message) + ' (skipped)'
+      await update()
+    }
   }
 
   // ── DONE ───────────────────────────────────────────────────────────
@@ -430,90 +537,133 @@ async function handleViewNotes(chatId: number, itemId: string) {
 
 async function handleViewQuiz(chatId: number, itemId: string) {
   const item = await getItem(itemId)
+
+  // ── 1. Try DB first ───────────────────────────────────────────────
+  const saved = await getQuizFromDb(itemId)
+  if (saved && saved.length > 0) {
+    const lines = saved.map((q, i) => {
+      const opts = q.options.map(o => `  ${o.letter}) ${o.text}`).join('\n')
+      return `<b>Q${i + 1}.</b> ${q.questionText}\n${opts}\n✅ <b>${q.correctAnswer}</b>${q.explanation ? `\n💡 ${q.explanation}` : ''}`
+    })
+    const half = Math.ceil(lines.length / 2)
+    await sendMessage(
+      chatId,
+      `❓ <b>Quiz</b> — ${item?.title ?? ''}\n<i>Saved · ${saved.length} questions</i>\n\n${truncate(lines.slice(0, half).join('\n\n'))}`
+    )
+    if (lines.length > half) {
+      await sendMessage(chatId, truncate(lines.slice(half).join('\n\n')), [
+        [btn('← Back', `view_menu:${sid(itemId)}`)],
+      ])
+    } else {
+      await sendMessage(chatId, '— end of quiz —', [[btn('← Back', `view_menu:${sid(itemId)}`)]])
+    }
+    return
+  }
+
+  // ── 2. No saved quiz — need notes to generate ─────────────────────
   const html = await getNoteContent(itemId)
   if (!html) {
-    await sendMessage(chatId, '❌ No notes found. Generate AI notes first.', [
-      // act_ai:{8} = 15 bytes ✓
-      [btn('🤖 Generate AI', `act_ai:${sid(itemId)}`)],
+    await sendMessage(chatId, '❌ No notes or saved quiz found. Generate AI content first.', [
+      [btn('🤖 Generate AI', `act_ai:${sid(itemId)}`), btn('← Back', `view_menu:${sid(itemId)}`)],
     ])
     return
   }
+
   const notesText = stripTags(html)
-  const genMsg = await sendMessage(chatId, '❓ Generating quiz on demand…')
+  const genMsg = await sendMessage(chatId, '❓ No saved quiz found — generating on demand…')
   const genMsgId = genMsg?.result?.message_id
 
   try {
     const baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : (process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000')
     const res = await fetch(`${baseUrl}/api/ai-quiz`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-secret': process.env.ADMIN_API_SECRET ?? '',
+      },
       body: JSON.stringify({ notesText }),
     })
     const data = await res.json()
     if (!res.ok || data.error) throw new Error(data.error || 'Quiz generation failed')
+    if (!data.quiz) throw new Error('Quiz response missing quiz field')
 
     const quiz = data.quiz as string
-    // Show Q1–Q5 in first message, Q6–Q10 in second (character limit)
+    saveQuizContent(itemId, quiz).catch(e => console.warn('[telegram] saveQuiz (view) failed:', e.message))
+
     const questions = quiz.split(/(?=Q\d+\.)/).filter(Boolean)
     const half = Math.ceil(questions.length / 2)
 
     await editMessage(chatId, genMsgId, `❓ <b>Quiz</b> (${item?.title ?? ''})\n<code>Model: ${data.provider}</code>\n\n${truncate(questions.slice(0, half).join('\n'))}`)
     if (questions.length > half) {
       await sendMessage(chatId, truncate(questions.slice(half).join('\n')), [
-        // view_menu:{8} = 18 bytes ✓
         [btn('← Back', `view_menu:${sid(itemId)}`)],
       ])
     } else {
-      await sendMessage(chatId, '— end of quiz —', [
-        // view_menu:{8} = 18 bytes ✓
-        [btn('← Back', `view_menu:${sid(itemId)}`)],
-      ])
+      await sendMessage(chatId, '— end of quiz —', [[btn('← Back', `view_menu:${sid(itemId)}`)]])
     }
   } catch (e: any) {
     await editMessage(chatId, genMsgId, `❌ Quiz generation failed: ${e.message}`, [
-      // view_menu:{8} = 18 bytes ✓
-      [btn('← Back', `view_menu:${sid(itemId)}`)],
+      [btn('🤖 Retry via Generate AI', `act_ai:${sid(itemId)}`), btn('← Back', `view_menu:${sid(itemId)}`)],
     ])
   }
 }
 
 async function handleViewFlashcards(chatId: number, itemId: string) {
   const item = await getItem(itemId)
+
+  // ── 1. Try DB first ───────────────────────────────────────────────
+  const saved = await getFlashcardsFromDb(itemId)
+  if (saved && saved.length > 0) {
+    const cardText = saved.map((c, i) =>
+      `<b>Card ${i + 1}</b>\n🔵 <b>Q:</b> ${c.front}\n🟢 <b>A:</b> ${c.back}`
+    ).join('\n\n')
+    await sendMessage(
+      chatId,
+      `🃏 <b>Flashcards</b> — ${item?.title ?? ''}\n<i>Saved · ${saved.length} cards</i>\n\n${truncate(cardText)}`,
+      [[btn('← Back', `view_menu:${sid(itemId)}`)]]
+    )
+    return
+  }
+
+  // ── 2. No saved flashcards — need notes to generate ───────────────
   const html = await getNoteContent(itemId)
   if (!html) {
-    await sendMessage(chatId, '❌ No notes found. Generate AI notes first.', [
-      // act_ai:{8} = 15 bytes ✓
-      [btn('🤖 Generate AI', `act_ai:${sid(itemId)}`)],
+    await sendMessage(chatId, '❌ No notes or saved flashcards found. Generate AI content first.', [
+      [btn('🤖 Generate AI', `act_ai:${sid(itemId)}`), btn('← Back', `view_menu:${sid(itemId)}`)],
     ])
     return
   }
+
   const notesText = stripTags(html)
-  const genMsg = await sendMessage(chatId, '🃏 Generating flashcards on demand…')
+  const genMsg = await sendMessage(chatId, '🃏 No saved flashcards — generating on demand…')
   const genMsgId = genMsg?.result?.message_id
 
   try {
     const baseUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : (process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000')
     const res = await fetch(`${baseUrl}/api/ai-flashcards`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-secret': process.env.ADMIN_API_SECRET ?? '',
+      },
       body: JSON.stringify({ notesText }),
     })
     const data = await res.json()
     if (!res.ok || data.error) throw new Error(data.error || 'Flashcard generation failed')
 
     const cards: { front: string; back: string }[] = data.flashcards ?? []
+    saveFlashcardsContent(itemId, cards).catch(e => console.warn('[telegram] saveFlashcards (view) failed:', e.message))
+
     const cardText = cards.map((c, i) =>
       `<b>Card ${i + 1}</b>\n🔵 <b>Q:</b> ${c.front}\n🟢 <b>A:</b> ${c.back}`
     ).join('\n\n')
 
     await editMessage(chatId, genMsgId, `🃏 <b>Flashcards</b> (${item?.title ?? ''})\n<code>Model: ${data.provider}</code>\n\n${truncate(cardText)}`, [
-      // view_menu:{8} = 18 bytes ✓
       [btn('← Back', `view_menu:${sid(itemId)}`)],
     ])
   } catch (e: any) {
     await editMessage(chatId, genMsgId, `❌ Flashcard generation failed: ${e.message}`, [
-      // view_menu:{8} = 18 bytes ✓
-      [btn('← Back', `view_menu:${sid(itemId)}`)],
+      [btn('🤖 Retry via Generate AI', `act_ai:${sid(itemId)}`), btn('← Back', `view_menu:${sid(itemId)}`)],
     ])
   }
 }
@@ -760,8 +910,10 @@ ${structureText}`
   // Parse the LLM response
   let aiAction: AIAction
   try {
-    // Strip any accidental markdown code fences
-    const clean = rawJson.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+    // Strip <think>...</think> blocks from reasoning models (kimi-k2.5, etc.)
+    // then strip markdown code fences
+    const stripped = rawJson.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+    const clean = stripped.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
     aiAction = JSON.parse(clean) as AIAction
   } catch {
     console.error('[NL] Failed to parse LLM response:', rawJson)
@@ -775,21 +927,17 @@ ${structureText}`
   switch (aiAction.action) {
 
     case 'navigate_course': {
-      // Delete the thinking message, then show the course screen
-      await editMessage(chatId, thinkMsgId, `📚 Opening course…`)
-      await showCourse(chatId, aiAction.courseId)
+      await showCourse(chatId, aiAction.courseId, thinkMsgId)
       break
     }
 
     case 'navigate_folder': {
-      await editMessage(chatId, thinkMsgId, `📁 Opening folder…`)
-      await showFolder(chatId, aiAction.folderId, aiAction.courseId)
+      await showFolder(chatId, aiAction.folderId, aiAction.courseId, thinkMsgId)
       break
     }
 
     case 'navigate_note': {
-      await editMessage(chatId, thinkMsgId, `📄 Opening note…`)
-      await showNote(chatId, aiAction.itemId)
+      await showNote(chatId, aiAction.itemId, thinkMsgId)
       break
     }
 
@@ -1012,7 +1160,7 @@ async function handleTextInput(chatId: number, text: string) {
 // CALLBACK QUERY HANDLER
 // ═══════════════════════════════════════════════════════════════════════
 
-async function handleCallback(chatId: number, callbackId: string, data: string, msgId: number) {
+async function handleCallback(chatId: number, callbackId: string, data: string, msgId: number | undefined) {
   answerCallback(callbackId) // fire-and-forget — clears spinner instantly without blocking
   try {
     await handleCallbackInner(chatId, data, msgId)
@@ -1022,7 +1170,7 @@ async function handleCallback(chatId: number, callbackId: string, data: string, 
   }
 }
 
-async function handleCallbackInner(chatId: number, data: string, msgId: number) {
+async function handleCallbackInner(chatId: number, data: string, msgId: number | undefined) {
 
   // nav_courses
   if (data === 'nav_courses') { await showCourses(chatId, msgId); return }
@@ -1100,6 +1248,33 @@ async function handleCallbackInner(chatId: number, data: string, msgId: number) 
     await handleGenerateAi(chatId, itemId); return
   }
 
+  // ai_yn:y:{shortItemId} — yes overwrite current item
+  // ai_yn:n:{shortItemId} — no keep current item
+  if (data.startsWith('ai_yn:')) {
+    const overwrite = data[6] === 'y'
+    const session = await getSession(chatId)
+    if (session.state !== 'ai_confirm') return
+
+    const sData = session.data as {
+      itemId: string; pending: string[]
+      skipNotes: boolean; skipQuiz: boolean; skipCards: boolean
+    }
+    const current = sData.pending[0]
+
+    // Record the answer
+    if (current === 'notes') sData.skipNotes = !overwrite
+    if (current === 'quiz')  sData.skipQuiz  = !overwrite
+    if (current === 'cards') sData.skipCards = !overwrite
+
+    // Advance queue
+    sData.pending = sData.pending.slice(1)
+    await setSession(chatId, 'ai_confirm', sData)
+
+    // Ask next or fire generation
+    await askNextAiConfirm(chatId)
+    return
+  }
+
   // view_menu:{shortItemId}
   if (data.startsWith('view_menu:')) {
     const itemId = await expandId('structure_items', data.slice(10))
@@ -1139,9 +1314,8 @@ async function handleCallbackInner(chatId: number, data: string, msgId: number) 
   // toggle_pub:{shortCourseId} — publish/unpublish
   if (data.startsWith('toggle_pub:')) {
     const courseId = await expandId('courses', data.slice(11))
-    const newState = await toggleCourseActive(courseId)
-    await editMessage(chatId, msgId, `${newState ? '🟢 Course published!' : '🔴 Course hidden!'}`)
-    await showCourseSettings(chatId, courseId)
+    await toggleCourseActive(courseId)
+    await showCourseSettings(chatId, courseId, msgId)
     return
   }
 
@@ -1176,9 +1350,7 @@ async function handleCallbackInner(chatId: number, data: string, msgId: number) 
       await editMessage(chatId, msgId, '📄 <b>New Note</b>\n\nEnter the note title:')
     } else {
       // gen or upload: show the course so user can pick a note
-      const label = action === 'gen' ? '🤖 Tap a note to Generate AI' : '📤 Tap a note to Upload PDF'
-      await editMessage(chatId, msgId, label)
-      await showCourse(chatId, courseId)
+      await showCourse(chatId, courseId, msgId)
     }
     return
   }
@@ -1204,6 +1376,17 @@ async function handleCallbackInner(chatId: number, data: string, msgId: number) 
 // ═══════════════════════════════════════════════════════════════════════
 
 export async function POST(req: NextRequest) {
+  // Security §6: Verify Telegram webhook secret token to prevent fake messages
+  // Set TELEGRAM_WEBHOOK_SECRET in .env.local and register it with Telegram via /api/telegram/setup
+  const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET
+  if (webhookSecret) {
+    const receivedToken = req.headers.get('x-telegram-bot-api-secret-token')
+    if (receivedToken !== webhookSecret) {
+      console.warn('[telegram/webhook] Invalid secret token — possible spoofed request')
+      return NextResponse.json({ ok: true })  // Return 200 to Telegram but ignore the message
+    }
+  }
+
   try {
     const body = await req.json()
 

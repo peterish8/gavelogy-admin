@@ -47,10 +47,11 @@ interface StudioClientProps {
   initialCourses: Course[]
 }
 
+// Course Studio landing page: sortable/filterable course card grid with drag-reorder, create, edit, and delete actions.
 export default function StudioClient({ initialCourses }: StudioClientProps) {
   const { isAdmin } = useAdmin()
   const adminsByCourse = useAdminsByCourse()
-  
+
   // Organization State
   const [filterType, setFilterType] = useState<'all' | 'normal' | 'crash'>('all')
   const [sortOrder, setSortOrder] = useState<'custom' | 'newest' | 'oldest'>('custom')
@@ -62,7 +63,7 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
   // Use server-provided initial courses (no client-side initial fetch needed!)
   const [localCourses, setLocalCourses] = useState(initialCourses)
 
-  // Refetch function for mutations
+  // Re-fetches the full course list from Supabase to sync local state after mutations.
   const refetch = useCallback(async () => {
     setIsFetching(true)
     try {
@@ -79,10 +80,10 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
     }
   }, [])
 
-  // Auto-scroll logic
+  // Scrolls to the bottom sentinel div when a new course is added, so the new card is visible.
   const bottomRef = useRef<HTMLDivElement>(null)
   const prevCountRef = useRef(initialCourses.length)
-  
+
   useEffect(() => {
      if (localCourses.length > prevCountRef.current && localCourses.length > 0) {
           console.log('StudioPage: Course count increased, scrolling...', localCourses.length)
@@ -108,10 +109,12 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
     })
   )
 
+  // Thin wrapper so the header action button can trigger a refetch without holding a stale ref.
   const handleRefresh = useCallback(() => {
       refetch()
   }, [refetch])
 
+  // Reorders the dragged course card and updates order_index for every displaced course in the affected range.
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
 
@@ -119,15 +122,19 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
       const oldIndex = localCourses.findIndex((c) => c.id === active.id)
       const newIndex = localCourses.findIndex((c) => c.id === over.id)
 
-      // Optimistic update
       const newCourses = arrayMove(localCourses, oldIndex, newIndex)
       setLocalCourses(newCourses)
 
-      // Add reorder change to draft (now direct save)
-      reorderCourse(active.id as string, newIndex)
+      // Update all courses in the affected range so order_index stays collision-free
+      const minIdx = Math.min(oldIndex, newIndex)
+      const maxIdx = Math.max(oldIndex, newIndex)
+      newCourses.slice(minIdx, maxIdx + 1).forEach((c, i) =>
+        reorderCourse(c.id, minIdx + i)
+      )
     }
   }
 
+  // Optimistically inserts a new blank course into local state, then persists it to Supabase; reverts on error.
   const handleCreateCourse = useCallback(async () => {
     try {
       const supabase = createClient()
@@ -173,6 +180,7 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
     }
   }, [localCourses.length, refetch])
 
+  // Confirms with the user, removes the course from local state, then deletes it from Supabase; refetches on both success and error.
   const handleDeleteCourse = async (id: string) => {
     if (confirm('Are you sure you want to delete this course? This action cannot be undone.')) {
       try {
@@ -190,14 +198,20 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
     }
   }
 
-  const handleEditCourse = (id: string, updates: Partial<Course>) => {
-    if (Object.keys(updates).length > 0) {
-      updateCourse(id, updates)
-      setLocalCourses((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)))
+  // Optimistically applies field updates to the course card, awaits the DB write, and reverts on failure.
+  const handleEditCourse = async (id: string, updates: Partial<Course>) => {
+    if (Object.keys(updates).length === 0) return
+    const snapshot = localCourses
+    setLocalCourses((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)))
+    try {
+      await updateCourse(id, updates)
+    } catch {
+      setLocalCourses(snapshot)
+      toast.error('Failed to save course changes')
     }
   }
 
-  // Derived Courses Logic
+  // Applies the active filter (normal/crash) and sort order to produce the final display list.
   const processedCourses = useMemo(() => {
     let result = [...localCourses]
 
@@ -224,7 +238,7 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
   
   const displayCourses = processedCourses
 
-  // Header Integration - using refs to avoid dependency loops
+  // Injects New Course / Crash Course / Refresh buttons into the shared page header via header-store.
   const setHeader = useHeaderStore(state => state.setHeader)
   const clearHeader = useHeaderStore(state => state.clearHeader)
   

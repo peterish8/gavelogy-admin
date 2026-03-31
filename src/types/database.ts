@@ -152,6 +152,155 @@ export interface Database {
           }
         ]
       }
+      pyq_passages: {
+        Row: {
+          id: string
+          test_id: string
+          order_index: number
+          passage_text: string
+          citation: string | null
+          section_number: string | null
+          subject: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          test_id: string
+          order_index?: number
+          passage_text: string
+          citation?: string | null
+          section_number?: string | null
+          subject?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          test_id?: string
+          order_index?: number
+          passage_text?: string
+          citation?: string | null
+          section_number?: string | null
+          subject?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pyq_passages_test_id_fkey"
+            columns: ["test_id"]
+            referencedRelation: "pyq_tests"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      pyq_questions: {
+        Row: {
+          id: string
+          test_id: string
+          passage_id: string | null
+          order_index: number
+          question_text: string
+          option_a: string
+          option_b: string
+          option_c: string
+          option_d: string
+          correct_answer: 'A' | 'B' | 'C' | 'D'
+          explanation: string | null
+          marks: number
+          subject: string | null
+          question_type: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          test_id: string
+          passage_id?: string | null
+          order_index?: number
+          question_text: string
+          option_a: string
+          option_b: string
+          option_c: string
+          option_d: string
+          correct_answer: 'A' | 'B' | 'C' | 'D'
+          explanation?: string | null
+          marks?: number
+          subject?: string | null
+          question_type?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          test_id?: string
+          passage_id?: string | null
+          order_index?: number
+          question_text?: string
+          option_a?: string
+          option_b?: string
+          option_c?: string
+          option_d?: string
+          correct_answer?: 'A' | 'B' | 'C' | 'D'
+          explanation?: string | null
+          marks?: number
+          subject?: string | null
+          question_type?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pyq_questions_passage_id_fkey"
+            columns: ["passage_id"]
+            referencedRelation: "pyq_passages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pyq_questions_test_id_fkey"
+            columns: ["test_id"]
+            referencedRelation: "pyq_tests"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      pyq_tests: {
+        Row: {
+          id: string
+          title: string
+          exam_name: string
+          year: number | null
+          duration_minutes: number
+          total_marks: number
+          negative_marking: number
+          instructions: string | null
+          is_published: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          title: string
+          exam_name?: string
+          year?: number | null
+          duration_minutes?: number
+          total_marks?: number
+          negative_marking?: number
+          instructions?: string | null
+          is_published?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          title?: string
+          exam_name?: string
+          year?: number | null
+          duration_minutes?: number
+          total_marks?: number
+          negative_marking?: number
+          instructions?: string | null
+          is_published?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       subjects: {
         Row: {
           id: string

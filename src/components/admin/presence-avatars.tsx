@@ -14,7 +14,7 @@ export function PresenceAvatars() {
     return null
   }
 
-  // Color palette for avatars
+  // Gradient palette used to assign a stable avatar color per active admin.
   const colors = [
     'from-blue-400 to-blue-600',
     'from-green-400 to-green-600',
@@ -24,11 +24,13 @@ export function PresenceAvatars() {
     'from-teal-400 to-teal-600',
   ]
 
+  // Derives a deterministic gradient from the user ID so each admin keeps the same color.
   const getColorForUser = (userId: string) => {
     const hash = userId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)
     return colors[hash % colors.length]
   }
 
+  // Converts a full name into a compact 1-2 character avatar label.
   const getInitials = (name: string) => {
     return name
       .split(' ')
@@ -38,6 +40,7 @@ export function PresenceAvatars() {
       .slice(0, 2)
   }
 
+  // Maps admin routes to short human-readable labels shown in the avatar tooltip.
   const getPageLabel = (page: string) => {
     if (page.includes('/admin/studio/')) {
       return 'Course Studio'
@@ -57,6 +60,7 @@ export function PresenceAvatars() {
     return 'Admin Panel'
   }
 
+  // Renders the online count plus a capped stack of active-admin avatars.
   return (
     <div className="flex items-center gap-1">
       {/* Online indicator */}

@@ -6,6 +6,7 @@ interface SubjectFilterProps {
   hiddenQuery?: string
 }
 
+// Server-friendly select form that filters list pages by subject and resubmits on change.
 export function SubjectFilter({ subjects, defaultValue, hiddenQuery }: SubjectFilterProps) {
   return (
     <form>

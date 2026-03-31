@@ -12,10 +12,12 @@ interface Props {
   date: string
 }
 
+// Per-article action bar with publish/unpublish toggle and delete; refreshes the page on success via router.refresh().
 export default function NewsListActions({ cardId, status, date }: Props) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
 
+  // Switches the article between draft and published states, showing a toast for each outcome.
   async function togglePublish() {
     setLoading(true)
     try {
@@ -34,6 +36,7 @@ export default function NewsListActions({ cardId, status, date }: Props) {
     }
   }
 
+  // Confirms then permanently deletes the article row.
   async function handleDelete() {
     if (!confirm('Delete this article? This cannot be undone.')) return
     setLoading(true)

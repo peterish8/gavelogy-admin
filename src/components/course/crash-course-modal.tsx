@@ -17,6 +17,8 @@ interface CrashCourseModalProps {
   onImportComplete: () => void
 }
 
+// Modal for creating a "Crash Course" by bundling structure trees from multiple existing courses.
+// Clones folders/files (not content) into a new course in chunked DB inserts.
 export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourseModalProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -43,6 +45,7 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
 
   const availableCourses = courses?.filter(c => !c.is_crash_course)
 
+  // Toggles a course in/out of the selection set for bundling.
   const toggleCourse = (courseId: string) => {
     setSelectedCourseIds(prev => 
       prev.includes(courseId) 
@@ -51,6 +54,7 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
     )
   }
 
+  // Creates the crash course row, clones structure trees from each selected course into it, then navigates to the new studio.
   const handleImport = async () => {
     if (selectedCourseIds.length === 0 || !courseName.trim()) return
     
@@ -202,6 +206,7 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
     }
   }
 
+  // Resets all local state back to initial step so the modal is clean for the next use.
   const resetState = () => {
     setCourseName('')
     setSelectedCourseIds([])

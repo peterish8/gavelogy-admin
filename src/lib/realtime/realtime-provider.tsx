@@ -44,6 +44,7 @@ interface RealtimeProviderProps {
   userEmail: string
 }
 
+// Provides shared Supabase Realtime presence and table-subscription helpers to the admin app tree.
 export function RealtimeProvider({ children, userId, userName, userEmail }: RealtimeProviderProps) {
   const supabase = createClient()
   const pathname = usePathname()
@@ -53,7 +54,7 @@ export function RealtimeProvider({ children, userId, userName, userEmail }: Real
   const presenceChannelRef = useRef<RealtimeChannel | null>(null)
   const subscriptionsRef = useRef<Map<string, RealtimeChannel>>(new Map())
 
-  // Initialize presence channel
+  // Opens the shared admin presence channel, syncs active admin state, and tracks this user on subscribe.
   useEffect(() => {
     if (!userId) return
 
@@ -93,18 +94,27 @@ export function RealtimeProvider({ children, userId, userName, userEmail }: Real
     }
   }, [userId, userName, userEmail, supabase])
 
-  // Auto-track page changes
+  // Auto-track page changes — debounced to avoid a Supabase Realtime message on every nav
+  // Debounces page-level presence updates so route changes do not spam realtime messages.
+  const presenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (!presenceChannelRef.current || !userId) return
-    presenceChannelRef.current.track({
-      user_id: userId,
-      admin_name: userName,
-      admin_email: userEmail,
-      current_page: pathname,
-      last_seen_at: new Date().toISOString(),
-    })
+    if (presenceTimerRef.current) clearTimeout(presenceTimerRef.current)
+    presenceTimerRef.current = setTimeout(() => {
+      presenceChannelRef.current?.track({
+        user_id: userId,
+        admin_name: userName,
+        admin_email: userEmail,
+        current_page: pathname,
+        last_seen_at: new Date().toISOString(),
+      })
+    }, 2000)
+    return () => {
+      if (presenceTimerRef.current) clearTimeout(presenceTimerRef.current)
+    }
   }, [pathname, userId, userName, userEmail])
 
+  // Pushes an updated presence payload for the current admin into the shared presence channel.
   const updatePresence = useCallback(async (data: Partial<AdminPresence>) => {
     if (!presenceChannelRef.current || !userId) return
     await presenceChannelRef.current.track({
@@ -114,6 +124,7 @@ export function RealtimeProvider({ children, userId, userName, userEmail }: Real
     })
   }, [userId])
 
+  // Subscribes to a table's postgres_changes feed, optionally scoped by a single equality filter.
   const subscribeToTable = useCallback((
     table: string,
     callback: (payload: any) => void,
@@ -123,6 +134,7 @@ export function RealtimeProvider({ children, userId, userName, userEmail }: Real
       ? `${table}-${filter.column}-${filter.value}`
       : `${table}-all`
     
+    // Reuses an existing channel name and returns its cleanup function when already subscribed.
     if (subscriptionsRef.current.has(channelName)) {
       return () => {
         const channel = subscriptionsRef.current.get(channelName)
@@ -133,6 +145,7 @@ export function RealtimeProvider({ children, userId, userName, userEmail }: Real
       }
     }
 
+    // Builds the postgres_changes config and stores the channel for later cleanup.
     const channelConfig: any = {
       event: '*',
       schema: 'public',
@@ -174,6 +187,7 @@ export function RealtimeProvider({ children, userId, userName, userEmail }: Real
 // HOOKS
 // ============================================
 
+// Reads the realtime context and guarantees the caller is inside RealtimeProvider.
 export function useRealtime() {
   const context = useContext(RealtimeContext)
   if (!context) {
@@ -182,6 +196,7 @@ export function useRealtime() {
   return context
 }
 
+// Returns all active admins plus the subset excluding the current user.
 export function useActiveAdmins() {
   const { activeAdmins, currentUserId } = useRealtime()
   return {
@@ -195,6 +210,7 @@ export function useActiveAdmins() {
  * Returns other admins currently viewing a specific course.
  * Matches by checking if their current_page contains the courseId.
  */
+// Returns the other admins currently viewing routes that belong to a specific course.
 export function useAdminsOnCourse(courseId: string) {
   const { activeAdmins, currentUserId } = useRealtime()
   
@@ -210,6 +226,7 @@ export function useAdminsOnCourse(courseId: string) {
  * Returns other admins grouped by which courseId they're viewing.
  * Useful for the course list view to show badges on each card.
  */
+// Groups other active admins by the courseId inferred from their current admin route.
 export function useAdminsByCourse() {
   const { activeAdmins, currentUserId } = useRealtime()
   
@@ -232,20 +249,27 @@ export function useAdminsByCourse() {
   }, [activeAdmins, currentUserId])
 }
 
+// Exposes only the presence update helper for components that do not need the full realtime context.
 export function usePresence() {
   const { updatePresence } = useRealtime()
   return { updatePresence }
 }
 
+// Subscribes a component to table changes while keeping the callback stable across re-renders.
 export function useTableSubscription(
   table: string,
   callback: (payload: any) => void,
   filter?: { column: string; value: string }
 ) {
   const { subscribeToTable } = useRealtime()
-  
+  // Stabilize callback with a ref so callers don't need to wrap in useCallback
+  const callbackRef = useRef(callback)
+  useEffect(() => { callbackRef.current = callback })
+
   useEffect(() => {
-    const unsubscribe = subscribeToTable(table, callback, filter)
+    const stableCallback = (payload: any) => callbackRef.current(payload)
+    const unsubscribe = subscribeToTable(table, stableCallback, filter)
     return unsubscribe
-  }, [table, callback, filter, subscribeToTable])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [table, filter?.column, filter?.value, subscribeToTable])
 }

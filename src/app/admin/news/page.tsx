@@ -9,11 +9,13 @@ interface PageProps {
 }
 
 
+// Formats a YYYY-MM-DD date string as a long human-readable label (e.g. "Monday, 24 March 2025").
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00')
   return d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 }
 
+// Server component: renders the monthly calendar view by default; switches to a per-date article carousel when ?date= is present.
 export default async function NewsPage({ searchParams }: PageProps) {
   const params = await searchParams
   const selectedDate = params.date

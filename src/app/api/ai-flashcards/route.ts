@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isAdminRequest, unauthorizedResponse, checkPayloadSize } from '@/lib/admin-auth'
 
 const SYSTEM_PROMPT = `You are Gavelogy's Flashcard Engine. Your job is to read a completed Gavelogy case law note and generate exactly 6 to 8 flashcards from it, following the spaced repetition principles built into Gavelogy's SRS system.
 
@@ -93,11 +94,17 @@ QUALITY RULES FOR ALL CARDS
 5. Legal accuracy is non-negotiable. If you are uncertain about any fact on a card, write [VERIFY] on the back rather than guessing.
 6. Produce all 6–8 cards in order (Card 1 through Card 8). Output only the FRONT:/BACK:/--- blocks — nothing else.`
 
+// Removes reasoning-model <think> blocks so only the user-facing answer is parsed into flashcards.
+function stripThinking(raw: string): string {
+  return raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+}
+
 interface Flashcard {
   front: string
   back: string
 }
 
+// Parses the model's FRONT/BACK/--- plain-text output into structured flashcard objects.
 function parseFlashcards(raw: string): Flashcard[] {
   const blocks = raw.split(/---+/).map(b => b.trim()).filter(Boolean)
   const cards: Flashcard[] = []
@@ -114,6 +121,7 @@ function parseFlashcards(raw: string): Flashcard[] {
   return cards.slice(0, 8)
 }
 
+// Calls Cerebras chat completions and returns the cleaned raw flashcard text.
 async function callCerebras(messages: any[], apiKey: string, model: string): Promise<string> {
   const res = await fetch('https://api.cerebras.ai/v1/chat/completions', {
     method: 'POST',
@@ -122,9 +130,10 @@ async function callCerebras(messages: any[], apiKey: string, model: string): Pro
   })
   if (!res.ok) throw new Error(`Cerebras(${model}) ${res.status}: ${await res.text()}`)
   const data = await res.json()
-  return data.choices[0].message.content as string
+  return stripThinking(data.choices[0].message.content as string)
 }
 
+// Calls Together AI's Apriel model for a lower-cost flashcard-generation fallback.
 async function callTogether(messages: any[], apiKey: string): Promise<string> {
   // Free model: ServiceNow Apriel 15B — suitable for flashcard generation from notes
   const res = await fetch('https://api.together.xyz/v1/chat/completions', {
@@ -134,9 +143,10 @@ async function callTogether(messages: any[], apiKey: string): Promise<string> {
   })
   if (!res.ok) throw new Error(`Together ${res.status}: ${await res.text()}`)
   const data = await res.json()
-  return data.choices[0].message.content as string
+  return stripThinking(data.choices[0].message.content as string)
 }
 
+// Calls NVIDIA's Kimi model, the preferred high-priority provider for flashcard generation.
 async function callNvidia(messages: any[], apiKey: string): Promise<string> {
   const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
@@ -145,9 +155,10 @@ async function callNvidia(messages: any[], apiKey: string): Promise<string> {
   })
   if (!res.ok) throw new Error(`NVIDIA ${res.status}: ${await res.text()}`)
   const data = await res.json()
-  return data.choices[0].message.content as string
+  return stripThinking(data.choices[0].message.content as string)
 }
 
+// Calls Groq as a fast fallback provider for simple flashcard generation.
 async function callGroq(messages: any[], apiKey: string): Promise<string> {
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -156,9 +167,10 @@ async function callGroq(messages: any[], apiKey: string): Promise<string> {
   })
   if (!res.ok) throw new Error(`Groq ${res.status}: ${await res.text()}`)
   const data = await res.json()
-  return data.choices[0].message.content as string
+  return stripThinking(data.choices[0].message.content as string)
 }
 
+// Calls an OpenRouter model and returns cleaned flashcard text for the shared parser.
 async function callOpenRouter(messages: any[], apiKey: string, model: string): Promise<string> {
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -170,14 +182,20 @@ async function callOpenRouter(messages: any[], apiKey: string, model: string): P
   })
   if (!res.ok) throw new Error(`OpenRouter(${model}) ${res.status}: ${await res.text()}`)
   const data = await res.json()
-  return data.choices[0].message.content as string
+  return stripThinking(data.choices[0].message.content as string)
 }
 
+// POST handler: generates 6-8 flashcards from note text by trying configured AI providers in priority order.
 export async function POST(req: NextRequest) {
+  if (!isAdminRequest(req)) return unauthorizedResponse()
+  const sizeError = checkPayloadSize(req, 500_000)  // 500KB max
+  if (sizeError) return sizeError
+
   try {
     const { notesText } = await req.json()
     if (!notesText?.trim()) return NextResponse.json({ error: 'No notes text provided' }, { status: 400 })
 
+    // Builds the fixed system prompt plus the trimmed note content sent to each provider.
     const messages = [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: `Generate 6-8 flashcards from these case notes:\n\n${notesText.slice(0, 8000)}` },
@@ -190,6 +208,7 @@ export async function POST(req: NextRequest) {
     const orKey = process.env.OPENROUTER_API_KEY
 
     // 1. NVIDIA Kimi K2.5 — highest priority
+    // Tries providers in descending preference until one returns parseable flashcards.
     if (nvidiaKey) {
       try {
         const raw = await callNvidia(messages, nvidiaKey)
@@ -245,6 +264,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ error: 'All providers failed' }, { status: 500 })
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Flashcard generation failed' }, { status: 500 })
+    console.error('[ai-flashcards] Unexpected error:', err)
+    return NextResponse.json({ error: 'Flashcard generation failed. Please try again.' }, { status: 500 })
   }
 }

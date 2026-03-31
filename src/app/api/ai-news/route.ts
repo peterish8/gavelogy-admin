@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isAdminRequest, unauthorizedResponse, checkPayloadSize } from '@/lib/admin-auth'
 
 export const maxDuration = 120  // seconds — Kimi K2.5 is slow, needs headroom
 
+// Creates an AbortSignal timeout so slow provider calls fail cleanly instead of hanging the route.
 function withTimeout(ms: number): AbortSignal {
   return AbortSignal.timeout(ms)
 }
@@ -250,18 +252,22 @@ Return ONLY the JSON array — no text before or after.`
 
 // ─── Parser ───────────────────────────────────────────────────────────────────
 
+// Parses the model response into article objects, with a few recovery passes for slightly malformed JSON.
 function parseArticles(raw: string): ArticleItem[] {
   const match = raw.match(/```json\s*([\s\S]*?)```/)
   let s = match ? match[1].trim() : raw.trim()
 
+  // Falls back to normal JSON parsing first when the model returned a proper fenced array.
   try { return JSON.parse(s) } catch { /* fall through */ }
 
+  // Normalizes smart quotes and trailing commas before retrying JSON.parse.
   s = s
     .replace(/,\s*([}\]])/g, '$1')
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201C\u201D]/g, '"')
   try { return JSON.parse(s) } catch { /* fall through */ }
 
+  // As a last resort, extracts individual object-looking chunks that contain a title field.
   const recovered: ArticleItem[] = []
   const matches = [...s.matchAll(/\{[\s\S]*?"title"[\s\S]*?\}/g)]
   for (const m of matches) {
@@ -272,6 +278,7 @@ function parseArticles(raw: string): ArticleItem[] {
 
 // ─── AI callers ───────────────────────────────────────────────────────────────
 
+// Calls NVIDIA with the requested model and generous token budget for long-form legal news extraction.
 async function callNvidia(messages: any[], apiKey: string, model: string, maxTokens = 12000): Promise<string> {
   const res = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
@@ -284,6 +291,7 @@ async function callNvidia(messages: any[], apiKey: string, model: string, maxTok
   return data.choices[0].message.content as string
 }
 
+// Calls Groq with a configurable model for the main news-extraction cascade.
 async function callGroq(messages: any[], apiKey: string, model = 'llama-3.3-70b-versatile', maxTokens = 8000): Promise<string> {
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -296,6 +304,7 @@ async function callGroq(messages: any[], apiKey: string, model = 'llama-3.3-70b-
   return data.choices[0].message.content as string
 }
 
+// Calls an OpenRouter model for structured article extraction with request timeouts.
 async function callOpenRouter(messages: any[], apiKey: string, model: string, maxTokens = 8000): Promise<string> {
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -316,6 +325,7 @@ async function callOpenRouter(messages: any[], apiKey: string, model: string, ma
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 // Maps UI model IDs → provider call
+// Maps admin-selected model IDs to their underlying provider call and parsed article response.
 async function runModel(
   modelId: string,
   messages: any[],
@@ -362,11 +372,20 @@ async function runModel(
   }
 }
 
+// POST handler: extracts CLAT-relevant legal news articles, ranked and structured for Gavelogy.
 export async function POST(req: NextRequest) {
+  if (!isAdminRequest(req)) return unauthorizedResponse()
+  const sizeError = checkPayloadSize(req, 1_000_000)  // 1MB max
+  if (sizeError) return sizeError
+
   try {
-    const { pdfText, date, sourcePaper, maxArticles = 8, preferredModel } = await req.json()
+    const body = await req.json()
+    const { pdfText, date, sourcePaper, preferredModel } = body
+    // Security: cap maxArticles so callers can't request unbounded AI generation
+    const maxArticles = Math.min(Math.max(1, Number(body.maxArticles) || 8), 20)
     if (!pdfText?.trim()) return NextResponse.json({ error: 'No PDF text provided' }, { status: 400 })
 
+    // Trims newspaper text to a provider-safe window, then wraps it in the shared system/user prompt pair.
     const trimmedText = pdfText.slice(0, 8000)  // ~2000 tokens of PDF; system prompt + framing takes the rest under Groq's 6000 TPM
     const messages = [
       { role: 'system', content: SYSTEM_PROMPT },
@@ -384,6 +403,7 @@ export async function POST(req: NextRequest) {
     const keys = { nvidia: nvidiaKey, groq: groqKey, groq2: groqKey2, or: orKey }
 
     // If admin picked a specific model, try it first then fall through to auto cascade
+    // Honors the admin-picked model first, then falls back to the automatic provider cascade.
     if (preferredModel) {
       const result = await runModel(preferredModel, messages, keys)
       if (result && result.articles.length > 0) {
@@ -396,6 +416,7 @@ export async function POST(req: NextRequest) {
     // ── Auto cascade (best → fallback) ────────────────────────────────────────
 
     // 1. Groq 70b — fast, free, capable (try FIRST now — most reliable)
+    // Auto-cascade: try Groq first, then OpenRouter, then NVIDIA as the slowest last resort.
     if (groqKey) {
       for (const [model, label] of [
         ['llama-3.3-70b-versatile',                       'groq/llama-3.3-70b'],
@@ -478,6 +499,6 @@ export async function POST(req: NextRequest) {
 
   } catch (err: any) {
     console.error('[ai-news] Unexpected error:', err)
-    return NextResponse.json({ error: err.message || 'AI news extraction failed' }, { status: 500 })
+    return NextResponse.json({ error: 'AI news extraction failed. Please try again.' }, { status: 500 })
   }
 }

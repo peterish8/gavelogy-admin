@@ -7,6 +7,7 @@ interface StudioLayoutProps {
   children: React.ReactNode
 }
 
+// Wraps all studio routes in the draft provider and shared floating save bar.
 export default function StudioLayout({ children }: StudioLayoutProps) {
   return (
     <DraftProvider>

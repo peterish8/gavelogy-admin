@@ -12,16 +12,19 @@ interface Props {
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
+// Monthly calendar grid (Monday-first) showing news article counts per day; clicking a date navigates to that date's news list.
 export default function NewsCalendarView({ groups, selectedDate }: Props) {
   const router = useRouter()
   const today = new Date()
 
+  // Initialize calendar to the month of the selected date, or the current month.
   const initYear  = selectedDate ? parseInt(selectedDate.split('-')[0])     : today.getFullYear()
   const initMonth = selectedDate ? parseInt(selectedDate.split('-')[1]) - 1 : today.getMonth()
 
   const [year, setYear]   = useState(initYear)
   const [month, setMonth] = useState(initMonth)
 
+  // Build a Map from date string → group for O(1) lookup during cell rendering.
   const articleDates = new Map(groups.map(g => [g.date, g]))
 
   // Build grid — Monday-based
@@ -29,16 +32,19 @@ export default function NewsCalendarView({ groups, selectedDate }: Props) {
   const daysInMonth = new Date(year, month + 1, 0).getDate()
   const startOffset = (firstDay.getDay() + 6) % 7   // Mon=0 … Sun=6
 
+  // Pad the start with nulls so day 1 lands on the correct weekday column.
   const cells: (number | null)[] = [
     ...Array(startOffset).fill(null),
     ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
   ]
   while (cells.length % 7 !== 0) cells.push(null)
 
+  // Go back one month, rolling over to December of the previous year if needed.
   function prev() {
     if (month === 0) { setYear(y => y - 1); setMonth(11) }
     else setMonth(m => m - 1)
   }
+  // Advance one month, rolling over to January of the next year if needed.
   function next() {
     if (month === 11) { setYear(y => y + 1); setMonth(0) }
     else setMonth(m => m + 1)

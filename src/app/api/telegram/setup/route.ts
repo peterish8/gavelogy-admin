@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server'
  * One-time webhook registration. Call this once after deployment.
  * Protected by a secret key: ?key=TELEGRAM_SETUP_KEY
  */
+// GET handler: registers the Telegram bot webhook against this deployment after verifying the setup secret.
 export async function GET(req: NextRequest) {
   const key = req.nextUrl.searchParams.get('key')
   if (!key || key !== process.env.TELEGRAM_SETUP_KEY) {
@@ -18,11 +19,15 @@ export async function GET(req: NextRequest) {
   }
 
   const webhookUrl = `${siteUrl}/api/telegram/webhook`
+  const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET
+  const body: Record<string, unknown> = { url: webhookUrl, allowed_updates: ['message', 'callback_query'] }
+  if (webhookSecret) body.secret_token = webhookSecret
 
+  // Calls Telegram's setWebhook endpoint so message and callback updates hit this app's webhook route.
   const res = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: webhookUrl, allowed_updates: ['message', 'callback_query'] }),
+    body: JSON.stringify(body),
   })
   const data = await res.json()
 

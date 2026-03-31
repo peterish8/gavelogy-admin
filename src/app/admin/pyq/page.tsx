@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { Plus, ClipboardList, Clock, FileQuestion, Eye, Pencil, BookOpen, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { DeletePyqButton } from '@/app/admin/pyq/delete-pyq-button'
 
 interface PYQTest {
   id: string
@@ -16,6 +17,7 @@ interface PYQTest {
   question_count: number
 }
 
+// Server page that lists all PYQ mock tests with summary stats and links to edit/preview flows.
 export default async function PYQListPage() {
   const supabase = await createClient()
 
@@ -24,6 +26,7 @@ export default async function PYQListPage() {
     .select(`id, title, exam_name, year, duration_minutes, total_marks, negative_marking, is_published, created_at, pyq_questions(id)`)
     .order('created_at', { ascending: false })
 
+  // Flattens the joined question rows into a count per test for the stats chips and cards.
   const tests: PYQTest[] = (rawTests || []).map((t: any) => ({
     ...t,
     question_count: t.pyq_questions?.length ?? 0,
@@ -142,6 +145,10 @@ export default async function PYQListPage() {
                   Preview Exam
                   <ChevronRight className="w-3 h-3" />
                 </Link>
+                <DeletePyqButton
+                  testId={test.id}
+                  testTitle={test.title}
+                />
               </div>
             </div>
           ))}

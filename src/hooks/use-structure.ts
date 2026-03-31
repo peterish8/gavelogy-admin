@@ -4,6 +4,8 @@ import type { StructureItem, ItemType } from '@/types/structure'
 import { useDraftStore } from '@/lib/stores/draft-store'
 import { useCourseStore } from '@/lib/stores/course-store'
 
+// Fetches and caches the flat structure_items list for a course, overlaying pending draft changes to give instant UI feedback.
+// Returns a recursive tree (built by buildTree), loading state, error, and a refetch function.
 export function useStructure(courseId: string) {
   const store = useCourseStore()
   // const [items, setItems] = useState<StructureItem[]>([]) // REFACTOR: Using useMemo to prevent render lag
@@ -18,6 +20,7 @@ export function useStructure(courseId: string) {
   
   const { changes } = useDraftStore()
   
+  // Loads the flat structure_items list for a course and caches it in the shared course store.
   const fetchStructureFromDb = useCallback(async () => {
     if (!courseId) {
       console.log('useStructure: no courseId, skipping')
@@ -75,7 +78,7 @@ export function useStructure(courseId: string) {
   // Let's remove storeData from dependency and just use ref or trust the closure?
   // Actually, standard pattern:
 
-  // Initial fetch & Sync on courseId change
+  // Reuses cached structure when available, otherwise triggers the first fetch for this course.
   useEffect(() => {
     if (storeData) {
         setIsLoading(false)
@@ -84,7 +87,7 @@ export function useStructure(courseId: string) {
     }
   }, [courseId, fetchStructureFromDb, storeData]) 
   
-  // Derive final items from Store Data + Draft Changes
+  // Applies pending draft creates/updates/deletes on top of cached DB data before building the tree.
   const items = useMemo(() => {
     // If no store data and we are loading, return empty? 
     // Or just process what we have.
@@ -119,7 +122,8 @@ export function useStructure(courseId: string) {
   return { items, isLoading, error, refetch: fetchStructureFromDb }
 }
 
-// Helper to build recursive tree from flat array
+// Converts a flat array of structure_items into a recursive tree by linking children to parents via parent_id.
+// Each level is sorted by order_index.
 function buildTree(items: any[]): StructureItem[] {
   const itemMap = new Map<string, StructureItem>()
   const rootItems: StructureItem[] = []
@@ -155,11 +159,11 @@ function buildTree(items: any[]): StructureItem[] {
   return rootItems
 }
 
-// Actions hook
-// Actions hook (Refactored for Instant Save + Optimistic UI)
+// Provides create/update/delete/move actions for structure_items with optimistic store updates; writes directly to Supabase.
 export function useStructureActions() {
     const store = useCourseStore()
 
+  // Optimistically appends a new structure item to the cached course tree, then inserts it into Supabase.
   const createItem = useCallback(async (data: {
     course_id: string
     parent_id: string | null
@@ -204,6 +208,7 @@ export function useStructureActions() {
     return tempId
   }, [store])
 
+  // Optimistically patches a structure item in the cached tree before syncing the update to Supabase.
   const updateItem = useCallback(async (id: string, updates: Partial<StructureItem>) => {
      // 1. Optimistic Update
      let foundCourseId: string | null = null
@@ -229,6 +234,7 @@ export function useStructureActions() {
     if (error) throw error
   }, [store])
 
+  // Optimistically removes a structure item from any cached tree that contains it, then deletes it in Supabase.
   const deleteItem = useCallback(async (id: string) => {
     // 1. Optimistic
     Object.entries(store.structures).forEach(([cId, items]) => {
@@ -247,6 +253,7 @@ export function useStructureActions() {
     if (error) throw error
   }, [store])
 
+  // Persists parent/order changes for a moved structure item while leaving complex cache reshaping to later sync.
   const moveItem = useCallback(async (id: string, newParentId: string | null, newIndex: number) => {
     // 1. Optimistic - This is hard with recursive structures without a robust helper.
     // For now, let's trust that DND library usually updates UI locally FIRST via its own state (items prop),
@@ -286,7 +293,7 @@ export function useStructureActions() {
   return { createItem, updateItem, deleteItem, moveItem }
 }
 
-// Helpers for Optimistic Updates
+// Recursively flattens a tree of structure_items into a single array; used to locate an item's course_id.
 function flattenItems(items: any[]): any[] {
     let flat: any[] = []
     items.forEach(i => {
@@ -296,6 +303,7 @@ function flattenItems(items: any[]): any[] {
     return flat
 }
 
+// Returns true if an item with the given ID exists anywhere in the recursive tree.
 function findInTree(items: any[], id: string): boolean {
     for (const item of items) {
         if (item.id === id) return true
@@ -304,6 +312,7 @@ function findInTree(items: any[], id: string): boolean {
     return false
 }
 
+// Recursively replaces the matching item in the tree with merged updates; returns a new array (immutable).
 function deepUpdate(items: any[], id: string, updates: any): any[] {
     return items.map(item => {
         if (item.id === id) return { ...item, ...updates }
@@ -312,6 +321,7 @@ function deepUpdate(items: any[], id: string, updates: any): any[] {
     })
 }
 
+// Recursively removes the item with the given ID from the tree; returns a new array (immutable).
 function deepDelete(items: any[], id: string): any[] {
     return items.filter(item => item.id !== id).map(item => ({
         ...item,

@@ -5,11 +5,13 @@ import { createClient } from '@/lib/supabase/client'
 import type { Subject, SubjectWithContent } from '@/types/course-builder'
 import { useDraftStore } from '@/lib/stores/draft-store'
 
+// Fetches all subjects for a course from Supabase ordered by order_index; returns subjects, loading/error, and refetch.
 export function useSubjects(courseId: string) {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Loads all subjects for the selected course and refreshes the hook state from Supabase.
   const fetchSubjects = useCallback(async () => {
     if (!courseId) return
     
@@ -42,11 +44,13 @@ export function useSubjects(courseId: string) {
   return { subjects, isLoading, error, refetch: fetchSubjects }
 }
 
+// Fetches a single subject with its content_items joined, sorted by order_index.
 export function useSubject(subjectId: string) {
   const [subject, setSubject] = useState<SubjectWithContent | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Loads one subject with its nested content_items for detail screens and editors.
   const fetchSubject = useCallback(async () => {
     if (!subjectId) return
     
@@ -106,10 +110,11 @@ export function useSubject(subjectId: string) {
   return { subject, isLoading, error, refetch: fetchSubject }
 }
 
-// Hook for CRUD operations (uses draft store)
+// Provides create/update/delete/reorder actions for subjects; all writes go through the draft store queue.
 export function useSubjectActions() {
   const addChange = useDraftStore((state) => state.addChange)
 
+  // Queues a draft subject creation and returns the temporary ID used until the save-bar commits it.
   const createSubject = useCallback((subjectData: Partial<Subject> & { course_id: string }) => {
     const tempId = crypto.randomUUID()
     addChange({
@@ -130,6 +135,7 @@ export function useSubjectActions() {
     return tempId
   }, [addChange])
 
+  // Queues a draft update for a subject so edits appear immediately without saving yet.
   const updateSubject = useCallback((subjectId: string, updates: Partial<Subject>) => {
     addChange({
       action: 'update',
@@ -139,6 +145,7 @@ export function useSubjectActions() {
     })
   }, [addChange])
 
+  // Queues a draft delete for the selected subject.
   const deleteSubject = useCallback((subjectId: string) => {
     addChange({
       action: 'delete',
@@ -148,6 +155,7 @@ export function useSubjectActions() {
     })
   }, [addChange])
 
+  // Queues a subject reorder change with both new and original positions.
   const reorderSubject = useCallback((subjectId: string, newIndex: number, originalIndex: number) => {
     addChange({
       action: 'reorder',

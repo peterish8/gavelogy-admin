@@ -12,7 +12,9 @@ interface FullscreenQuizViewProps {
   onClose: () => void
 }
 
+// Full-screen quiz player overlay with gradient background; read-only (no inline editing), closes via onClose.
 export function FullscreenQuizView({ content, title, onClose }: FullscreenQuizViewProps) {
+  // Parse quiz text into structured data once per content change.
   const parsedQuiz = useMemo(() => parseQuizText(content), [content])
   
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -25,12 +27,14 @@ export function FullscreenQuizView({ content, title, onClose }: FullscreenQuizVi
 
   const isCorrect = selectedAnswer === currentQuestion?.correctAnswer
 
+  // Records the chosen answer and shows correct/incorrect feedback.
   const handleSelectAnswer = (letter: string) => {
     if (showResult) return
     setSelectedAnswer(letter)
     setShowResult(true)
   }
 
+  // Moves to the next question after viewing the result.
   const handleContinue = () => {
     if (currentIndex < totalQuestions - 1) {
       setCurrentIndex(prev => prev + 1)
@@ -39,6 +43,7 @@ export function FullscreenQuizView({ content, title, onClose }: FullscreenQuizVi
     }
   }
 
+  // Resets the quiz back to question 1 with no prior selections.
   const handleRestart = () => {
     setCurrentIndex(0)
     setSelectedAnswer(null)
@@ -59,7 +64,7 @@ export function FullscreenQuizView({ content, title, onClose }: FullscreenQuizVi
     )
   }
 
-  // Get quiz display title
+  // Prefer the parsed quiz's embedded title; fall back to the item title passed via props.
   const displayTitle = parsedQuiz.title || title
 
   return (

@@ -19,11 +19,13 @@ interface AddContentButtonProps {
   className?: string
 }
 
+// Renders an inline or end-of-list "add content" control with a dropdown for content-type selection.
 export function AddContentButton({ onAdd, position = 'between', className }: AddContentButtonProps) {
   const [isHovered, setIsHovered] = useState(false)
 
   const isBetween = position === 'between'
 
+  // Switches between the compact between-items UI and the larger end-of-list button.
   return (
     <div
       className={cn(
@@ -88,6 +90,7 @@ interface AddContentDropdownProps {
   onAdd: (type: ContentType) => void
 }
 
+// Shared dropdown menu listing the supported content types that can be inserted into the structure tree.
 function AddContentDropdown({ onAdd }: AddContentDropdownProps) {
   return (
     <DropdownMenuContent align="center" className="w-48">
@@ -130,6 +133,7 @@ interface AddItemButtonProps {
   className?: string
 }
 
+// Simple dashed add button variant used for higher-level items like courses or subjects.
 export function AddItemButton({ label, onClick, className }: AddItemButtonProps) {
   return (
     <Button

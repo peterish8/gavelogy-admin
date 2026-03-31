@@ -25,6 +25,7 @@ interface Props {
   noteContentLinkIds: string[]
 }
 
+// Root workspace for tagging a single case: hosts the PDF canvas on the left and a link-mappings sidebar on the right.
 export default function TagWorkspaceClient({
   caseId,
   caseTitle,
@@ -36,12 +37,15 @@ export default function TagWorkspaceClient({
   const [pendingRegion, setPendingRegion] = useState<Region | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
+  // Derives just the link_id strings for the duplicate-check in TagModal.
   const existingLinkIds = links.map((l) => l.link_id)
 
+  // Opens the TagModal for the newly drawn region.
   const handleRegionSelected = useCallback((region: Region) => {
     setPendingRegion(region)
   }, [])
 
+  // Persists the drawn region as a new NotePdfLink row and appends it to local state.
   async function handleSave(linkId: string, label: string) {
     if (!pendingRegion) return
     const newLink = await insertLink({
@@ -59,6 +63,7 @@ export default function TagWorkspaceClient({
     toast.success(`Tagged "${linkId}" on page ${pendingRegion.page}`)
   }
 
+  // Deletes a link by DB row ID and removes it from local state; shows a toast on success or error.
   async function handleDelete(id: string) {
     setDeletingId(id)
     try {
