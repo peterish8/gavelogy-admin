@@ -28,9 +28,14 @@ import { GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { b2Client, BUCKET } from '@/lib/b2-client'
 
+// Allow up to 60s for PDF download + parse on Vercel (avoids cold-start timeouts)
+export const maxDuration = 60
+
 // ─── PDF in-memory cache ───────────────────────────────────────────────────────
-// Prevents re-downloading + re-parsing the same PDF for every chunk call.
-// Keyed by B2 object key. Limited to 10 entries to bound memory usage.
+// Prevents re-downloading + re-parsing the same PDF within the same function instance.
+// Keyed by item_id. Limited to 10 entries to bound memory usage.
+// NOTE: Vercel serverless instances are ephemeral — this cache is per-instance only.
+// Persistent caching is done via the pdf_text_cache column in structure_items.
 const _pdfCache = new Map<string, string>()
 const PDF_CACHE_MAX = 10
 
@@ -734,34 +739,55 @@ async function handleToolCall(name: string, args: Record<string, any>) {
     const item = data as any
     if (!item?.pdf_url) return '(No PDF judgment attached to this item)'
 
-    // 2. Download + parse PDF, using cache to avoid re-downloading on multi-chunk sessions
+    // 2. Get full PDF text — check caches in order:
+    //    a) in-memory (same function instance, fastest)
+    //    b) Supabase pdf_text_cache column (persists across cold starts)
+    //    c) download + parse from B2 (slowest, populates both caches)
     let fullText: string
-    if (_pdfCache.has(item.pdf_url)) {
-      // Cache hit — skip the S3 download and pdf-parse entirely
-      fullText = _pdfCache.get(item.pdf_url)!
-    } else {
-      // Cache miss — download from B2 and parse
-      const command = new GetObjectCommand({ Bucket: BUCKET, Key: item.pdf_url })
-      const signedUrl = await getSignedUrl(b2Client, command, { expiresIn: 300 })
-      const res = await fetch(signedUrl)
-      if (!res.ok) throw new Error(`Failed to fetch PDF from B2: ${res.status}`)
-      const buffer = Buffer.from(await res.arrayBuffer())
 
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pdfParse = require('pdf-parse') as (buf: Buffer, opts?: any) => Promise<{ text: string; numpages: number }>
-      const parsed = await pdfParse(buffer, { max: 0 })
-      if (!parsed.text?.trim()) {
-        throw new Error('No text extracted from PDF — the file may be scanned/image-based.')
+    if (_pdfCache.has(item_id)) {
+      // In-memory hit — skip everything
+      fullText = _pdfCache.get(item_id)!
+    } else {
+      // Check Supabase persistent cache first
+      const { data: cachedRow } = await db
+        .from('structure_items')
+        .select('pdf_text_cache')
+        .eq('id', item_id)
+        .single()
+
+      if ((cachedRow as any)?.pdf_text_cache) {
+        fullText = (cachedRow as any).pdf_text_cache as string
+      } else {
+        // Cache miss — download from B2 and parse
+        const command = new GetObjectCommand({ Bucket: BUCKET, Key: item.pdf_url })
+        const signedUrl = await getSignedUrl(b2Client, command, { expiresIn: 300 })
+        const res = await fetch(signedUrl)
+        if (!res.ok) throw new Error(`Failed to fetch PDF from B2: ${res.status}`)
+        const buffer = Buffer.from(await res.arrayBuffer())
+
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const pdfParse = require('pdf-parse') as (buf: Buffer, opts?: any) => Promise<{ text: string; numpages: number }>
+        const parsed = await pdfParse(buffer, { max: 0 })
+        if (!parsed.text?.trim()) {
+          throw new Error('No text extracted from PDF — the file may be scanned/image-based.')
+        }
+
+        fullText = parsed.text
+
+        // Persist to Supabase so future cold-start instances skip re-parsing
+        await db
+          .from('structure_items')
+          .update({ pdf_text_cache: fullText })
+          .eq('id', item_id)
       }
 
-      fullText = parsed.text
-
-      // Evict oldest entry if cache is full
+      // Populate in-memory cache for subsequent calls in this instance
       if (_pdfCache.size >= PDF_CACHE_MAX) {
         const firstKey = _pdfCache.keys().next().value
         if (firstKey) _pdfCache.delete(firstKey)
       }
-      _pdfCache.set(item.pdf_url, fullText)
+      _pdfCache.set(item_id, fullText)
     }
     // 3. Chunk by character position.
     //    CHUNK_SIZE is chosen so that a 54-page judgment (~180k chars) gives ~54 chunks
