@@ -1,9 +1,16 @@
 /**
  * Gavelogy MCP Server — Streamable HTTP transport
  *
- * Tools:
+ * Tools (36 total):
+ *
+ * COURSES:
  *   list_courses          → list all courses
  *   create_course         → create a new top-level course
+ *   update_course         → update course name/icon/description
+ *   delete_course         → delete a course and all its items
+ *   reorder_courses       → set order_index for multiple courses
+ *
+ * ITEMS:
  *   list_items            → list structure_items for a course
  *   search_items          → search items by title keyword
  *   get_item_details      → full metadata for one structure item
@@ -11,15 +18,41 @@
  *   rename_item           → rename an existing item by id
  *   delete_item           → delete an item and all its associated data
  *   move_item             → move an item to a different parent or course
+ *   duplicate_item        → copy an item (optionally with its note)
+ *   bulk_delete_items     → delete multiple items at once
+ *   reorder_items         → set order_index for multiple items
+ *
+ * PDF:
+ *   attach_pdf            → set/replace the PDF judgment on an item
+ *   detach_pdf            → remove the PDF from an item
+ *   get_judgment_text     → extract + return full PDF text server-side
+ *
+ * NOTES:
  *   get_note              → fetch note content for an item
  *   save_note             → save/overwrite note content
  *   get_note_summary      → plain-text preview of a note (no tags)
- *   get_judgment_text     → extract + return full PDF text server-side
+ *
+ * QUIZZES:
  *   list_quizzes          → list all quizzes
+ *   create_quiz           → create a new blank quiz for an item
+ *   save_quiz             → save/overwrite questions for a quiz
+ *   delete_quiz           → delete a quiz and all its questions
+ *
+ * FLASHCARDS:
  *   list_flashcards       → get flashcards JSON for an item
  *   save_flashcards       → save flashcards JSON for an item
+ *   delete_flashcards     → clear all flashcards for an item
+ *
+ * PYQ:
  *   list_pyq_tests        → list all PYQ mock tests
- *   get_pyq_questions     → get all questions + passages for a PYQ test
+ *   get_pyq_questions     → get all questions for a PYQ test
+ *   create_pyq_test       → create a new PYQ mock test
+ *   save_pyq_questions    → save/replace all questions for a PYQ test
+ *   delete_pyq_test       → delete a PYQ test and its questions
+ *   publish_pyq_test      → publish or unpublish a PYQ test
+ *
+ * USERS:
+ *   list_users            → list all registered users
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -65,81 +98,127 @@ function getDb() {
 // ─── Note format guide (injected into save_note description) ──────────────────
 
 const NOTE_FORMAT_GUIDE = `
-Gavelogy uses a CUSTOM BRACKET-TAG FORMAT. Use ONLY these tags — no raw HTML:
+Gavelogy uses a CUSTOM BRACKET-TAG FORMAT. Use ONLY these tags — no raw HTML.
 
-STRUCTURE:
-  [h1]Heading[/h1]  [h2]Sub Heading[/h2]  [h3]Section[/h3]
-  [p]Paragraph[/p]
-  [hr]  ← horizontal divider
+━━ AVAILABLE TAGS ━━
+[h1]Title[/h1]           — Case title
+[h2]Title[/h2]           — Section headings
+[h3]Title[/h3]           — Sub-headings
+[p]Text[/p]              — ALL body text (wrap every sentence)
+[b]text[/b]              — Bold: article/section numbers, party names, key terms
+[i]text[/i]              — Italic: Latin phrases, obiter labels
+[hl:#7EC8B8]text[/hl]    — TEAL: ratio/holdings ("The Court held that...")
+[hl:#D4A96A]text[/hl]    — GOLD: key legal terms, doctrine names, constitutional concepts
+[hl:#9EC4D8]text[/hl]    — SKY: every case name + citation
+[hl:#C4A8E0]text[/hl]    — LAVENDER: obiter dicta, secondary observations
+[hl:#F0A0A0]text[/hl]    — ROSE: overruled cases, exam warnings
+[box:blue]...[/box]      — Blue box: identity/citation block, context
+[box:green]...[/box]     — Green box: memory aid / mnemonic
+[box:red]...[/box]       — Red box: core ratio / critical holding
+[box:yellow]...[/box]    — Yellow box: exam probability insight, cautions
+[box:purple]...[/box]    — Purple box: statutes/provisions block
+[box:violet]...[/box]    — Violet box: court's reasoning (constitutional cases)
+[ul][li]item[/li][/ul]   — Bullet list
+[ol][li]item[/li][/ul]   — Numbered list
+[hr]                     — Section divider
 
-INLINE:
-  [b]bold[/b]   [i]italic[/i]
-  [hl:#ffff00]yellow highlight[/hl]   [hl:#caffbf]green highlight[/hl]
-  [hl:#a0c4ff]blue highlight[/hl]     [hl:#ffd6a5]orange highlight[/hl]
-  [hl:#ffc6ff]pink highlight[/hl]
-  ⚠ NEVER use [u]underline[/u] — use highlights instead for emphasis
+━━ NOTE STRUCTURE (13 sections — always follow this order) ━━
 
-COLORED BOXES:
-  [box:blue]...[/box]    ← citations, definitions, case identity
-  [box:green]...[/box]   ← ratio decidendi, held, key ruling
-  [box:yellow]...[/box]  ← warnings, important notes, caution
-  [box:red]...[/box]     ← dissent, criticism, opposing view
-  [box:purple]...[/box]  ← statutes, provisions, bare act text
+SECTION 1 — CASE DETAILS
+[h1]📌 [Case Name][/h1]
+[box:blue]
+[p][b]📜 Citation:[/b] [hl:#9EC4D8][citation][/hl][/p]
+[p][b]⚖️ Bench:[/b] [judges] ([X]-judge bench)[/p]
+[p][b]📅 Date:[/b] [DD-MM-YYYY][/p]
+[p][b]📚 Subject Area:[/b] ...[/p]
+[p][b]🧠 Sub-topic:[/b] ...[/p]
+[/box]
+[box:purple]
+[p][b]📜 Constitutional Provisions:[/b][/p][ul][li]...[/li][/ul]
+[p][b]📜 Statutory Provisions:[/b][/p][ul][li]...[/li][/ul]
+[/box]
 
-LISTS:
-  [ul][li]item[/li][li]item[/li][/ul]
-  [ol][li]first[/li][li]second[/li][/ol]
+SECTION 2 — CASE CAPSULE ⭐ (one-line: issue + decision, 20–25 words)
+[h2]📍 Case Capsule[/h2][box:red][p][hl:#7EC8B8]...[/hl][/p][/box]
 
-TABLES (for comparisons, multi-column data):
-  [table]
-  [tr][th]Column A[/th][th]Column B[/th][th]Column C[/th][/tr]
-  [tr][td]Value 1[/td][td]Value 2[/td][td]Value 3[/td][/tr]
-  [tr][td]Value 4[/td][td]Value 5[/td][td]Value 6[/td][/tr]
-  [/table]
-  Use tables for: comparing cases, section-by-section analysis, before/after comparisons.
+SECTION 3 — TIMELINE (ONLY if multi-stage / long delay / constitutional process — SKIP otherwise)
+[h2]⏳ Timeline[/h2][ul][li][Year] — [Event][/li][/ul]  (max 3–5 points)
 
-PDF CONNECTIONS (link note text to PDF judgment pages):
-  [link:LABEL]highlighted text that connects to PDF[/link]
-  - LABEL is a short descriptive slug: e.g. "holding", "ratio", "sec196", "fir-facts", "court-test"
-  - ALWAYS include 5–10 connections per note — they are mandatory, not optional
-  - Connect the most important legal phrases, holdings, and key facts
-  - Labels must be lowercase, hyphen-separated, max 20 chars
-  Example:
-    [p]The Court held that [link:main-holding][hl:#caffbf]prior sanction under Section 196 is mandatory[/hl][/link] before cognizance can be taken.[/p]
-    [p]The FIR alleged that [link:fir-facts]the poem promoted enmity between religious groups[/link] under Section 153A.[/p]
+SECTION 4 — FACTS (max 3 sentences, 25 words each; constitutional cases may have 4–5)
+[h2]🧾 Facts[/h2]
+[p]1️⃣ [Parties + dispute][/p]
+[p]2️⃣ [Legal controversy][/p]
+[p]3️⃣ [Trigger][/p]
 
-EXAMPLE CASE LAW NOTE (showing all features):
-  [h2]Imran Pratapgadhi v. State of UP (2025)[/h2]
-  [box:blue][b]Citation:[/b] 2025 INSC 410 | [b]Bench:[/b] Abhay S. Oka & Ujjal Bhuyan JJ.[/box]
-  [box:purple][b]Sections:[/b] IPC 153A, 295A, 298, 504, 505 | CrPC 196, 197[/box]
-  [h3]Facts[/h3]
-  [p][link:fir-facts]The accused recited a poem at a rally which was alleged to promote communal enmity[/link]. An FIR was registered without prior sanction.[/p]
-  [h3]Key Issue[/h3]
-  [p][hl:#ffff00]Whether prior sanction under Section 196 CrPC is mandatory before registering an FIR for offences under Sections 153A and 505?[/hl][/p]
-  [h3]Held[/h3]
-  [p][link:main-holding][hl:#caffbf]Prior sanction under Section 196 is a condition precedent — FIR without it is void ab initio.[/hl][/link][/p]
-  [box:green][b]Ratio:[/b] [link:ratio]State cannot bypass the sanction requirement by registering FIR first and seeking sanction later.[/link][/box]
-  [h3]Court's Test for Section 153A[/h3]
-  [ol]
-  [li][link:test-1]Speech must [b]actually promote[/b] enmity — not merely offend[/link][/li]
-  [li][link:test-2]Context of speech must be examined holistically[/link][/li]
-  [li]Intent to promote disharmony is essential[/li]
-  [/ol]
-  [h3]Comparison: Section 153A vs 295A[/h3]
-  [table]
-  [tr][th]Aspect[/th][th]Section 153A[/th][th]295A[/th][/tr]
-  [tr][td]Target[/td][td]Groups/communities[/td][td]Religious feelings[/td][/tr]
-  [tr][td]Intent needed[/td][td]Yes[/td][td]Yes (deliberate)[/td][/tr]
-  [tr][td]Sanction required[/td][td]S.196 CrPC[/td][td]S.196 CrPC[/td][/tr]
-  [/table]
+SECTION 5 — LEGAL ISSUES (all issues the court framed, as "Whether...?" questions)
+[h2]📊 Legal Issues[/h2]
+[ol][li]📊 [b]Issue 1:[/b] [hl:#D4A96A]Whether … ?[/hl][/li][/ol]
 
-RULES:
-  - NEVER use [u]...[/u] underline — always use [hl:color] for emphasis
-  - Never nest [hl:] inside another [hl:]
-  - Never use raw HTML (<strong>, <div>, etc.) — use bracket tags only
-  - Always close every tag
-  - Always include 5–10 [link:LABEL]...[/link] connections — mandatory for every note
-  - Use [box:blue] for citations, [box:green] for ratio/held, [box:purple] for statutes, [box:yellow] for cautions`
+SECTION 6 — HOLDINGS / RATIO DECIDENDI ⭐
+[h2]⭐ Holdings / Ratio Decidendi[/h2]
+[box:red][p][b]⚖️ H1 [RATIO ⭐ CORE]:[/b] [hl:#7EC8B8]The Court held that ...[/hl][/p][/box]
+[p][b]⚖️ H2 [RATIO]:[/b] [hl:#7EC8B8]The Court held that ...[/hl][/p]
+[p][b]❗ O1 [OBITER]:[/b] [hl:#C4A8E0]The Court observed that ...[/hl][/p]
+(If directions/orders given:)
+[h3]📋 Directions / Orders[/h3][ul][li]...[/li][/ul]
+
+SECTION 7 — DOCTRINES / PRINCIPLES
+[h2]🧠 Doctrines / Principles[/h2]
+[p]🧠 [b][hl:#D4A96A][Doctrine Name][/hl][/b][/p]
+[p]📌 [Meaning in this case][/p]
+[p]📊 Status: Applied / Reaffirmed / Established / Overruled[/p]
+[p]📜 Prior Case: [hl:#9EC4D8][Case (Year)][/hl][/p]
+
+SECTION 8 — STATUTORY / CONSTITUTIONAL INTERPRETATION
+[h2]📜 Statutory / Constitutional Interpretation[/h2]
+[p]📜 [b]Primary Provision:[/b] [hl:#D4A96A][Article/Section][/hl][/p]
+[p]🔍 [b]Interpretation:[/b] ...[/p]
+[p]📜 [b]Secondary Provisions:[/b] [hl:#D4A96A]...[/hl][/p]
+
+SECTION 9 — CASE REFERENCE MATRIX ⭐
+[h2]🧩 Case Reference Matrix[/h2]
+[ul]
+[li]🧩 [b]RELIED UPON:[/b] [hl:#9EC4D8][Case (Year)][/hl] — [principle][/li]
+[li]🧩 [b]REFERRED TO:[/b] [hl:#9EC4D8][Case (Year)][/hl] — [principle][/li]
+[li]🧩 [b]DISTINGUISHED:[/b] [hl:#9EC4D8][Case (Year)][/hl] — [distinction][/li]
+[li]🧩 [b]OVERRULED:[/b] [hl:#F0A0A0][Case (Year)][/hl] — [reason][/li]
+[/ul]
+(If none in a category → write "None". [VERIFY] if citation uncertain.)
+
+SECTION 10 — COURT'S ANALYSIS ⭐
+[h2]🔍 Court's Analysis[/h2]
+For CONSTITUTIONAL cases (5+ bench / fundamental rights):
+[h3]🔍 Issue 1: Whether … ?[/h3][box:violet][p]Majority: ...[/p][p]Concurring: ...[/p][p]Dissent: [hl:#F0A0A0]...[/hl][/p][/box]
+
+For NON-CONSTITUTIONAL cases:
+[p]🔍 [b]Legal Context:[/b] ...[/p]
+[p]🔍 [b]Interpretation:[/b] ...[/p]
+[p]🔍 [b]Application:[/b] ...[/p]
+[p]🔍 [b]Balancing:[/b] ...[/p]
+[p]🔍 [b]Final Logic:[/b] ...[/p]
+
+SECTION 11 — MEMORY AID (ONLY if genuinely powerful — SKIP if forced)
+[h2]🧩 Memory Aid[/h2][box:green][p][b]🧩 [Short phrase / acronym, max 10 words][/b][/p][/box]
+
+SECTION 12 — CONCLUSION (50–70 words: core principle + legal importance + CLAT PG relevance)
+[h2]📌 Conclusion[/h2][p]...[/p]
+
+SECTION 13 — EXAM PROBABILITY INSIGHT ⭐
+[h2]📊 Exam Probability Insight[/h2]
+[box:yellow][ul]
+[li]⭐ [b]Exam probability:[/b] [0–100]% — [brief reason][/li]
+[li]📌 [b]Why it matters:[/b] ...[/li]
+[li]⚖️ [b]Key examinable point:[/b] ...[/li]
+[/ul][/box]
+
+━━ ABSOLUTE RULES ━━
+- NEVER invent citations, judges, or doctrines → use [VERIFY] if uncertain
+- "we observe" / "in passing" / "it would appear" = obiter (❗), NEVER ratio (⚖️)
+- NEVER nest [hl:] inside another [hl:]
+- NEVER wrap status words (Applied, Overruled, etc.) in [hl:] tags
+- Wrap ALL body text in [p][/p]
+- For criminal cases: list BOTH old IPC/CrPC AND new BNS/BNSS/BSA section
+- Include Timeline ONLY if genuinely useful; Memory Aid ONLY if genuinely powerful`
 
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
@@ -389,6 +468,234 @@ Example loop:
       },
       required: ['test_id'],
     },
+  },
+  {
+    name: 'delete_course',
+    description: 'Delete a course and ALL its structure items, notes, flashcards, quizzes, and PDF links. This is irreversible.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        course_id: { type: 'string', description: 'UUID of the course to delete' },
+      },
+      required: ['course_id'],
+    },
+  },
+  {
+    name: 'update_course',
+    description: 'Update a course name, icon, or description. Pass only the fields you want to change.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        course_id: { type: 'string', description: 'UUID of the course to update' },
+        name: { type: 'string', description: 'New course name (optional)' },
+        icon: { type: 'string', description: 'New emoji icon (optional, e.g. "⚖️")' },
+        description: { type: 'string', description: 'New description (optional)' },
+      },
+      required: ['course_id'],
+    },
+  },
+  {
+    name: 'reorder_courses',
+    description: 'Set the order_index of multiple courses at once. Pass an array of {id, order_index} pairs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        courses: {
+          type: 'array',
+          description: 'Array of {id, order_index} pairs',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: 'Course UUID' },
+              order_index: { type: 'number', description: 'New order index (0-based)' },
+            },
+            required: ['id', 'order_index'],
+          },
+        },
+      },
+      required: ['courses'],
+    },
+  },
+  {
+    name: 'duplicate_item',
+    description: 'Duplicate a structure item, placing the copy at the same level (same parent/course) with title suffixed " (copy)". Optionally copies the note content too.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        item_id: { type: 'string', description: 'UUID of the item to duplicate' },
+        copy_note: { type: 'boolean', description: 'If true, also copy the note + flashcards to the new item (default: false)' },
+      },
+      required: ['item_id'],
+    },
+  },
+  {
+    name: 'bulk_delete_items',
+    description: 'Delete multiple structure items at once. All associated notes, flashcards, quizzes, and PDF links are removed via FK cascade.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        item_ids: {
+          type: 'array',
+          description: 'Array of item UUIDs to delete',
+          items: { type: 'string' },
+        },
+      },
+      required: ['item_ids'],
+    },
+  },
+  {
+    name: 'reorder_items',
+    description: 'Set the order_index of multiple structure items at once. Pass an array of {id, order_index} pairs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          description: 'Array of {id, order_index} pairs',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: 'Item UUID' },
+              order_index: { type: 'number', description: 'New order index (0-based)' },
+            },
+            required: ['id', 'order_index'],
+          },
+        },
+      },
+      required: ['items'],
+    },
+  },
+  {
+    name: 'attach_pdf',
+    description: 'Set or replace the PDF judgment on a structure item. Provide the B2 storage key (e.g. "judgments/filename.pdf"). Clears any existing pdf_text_cache so the next get_judgment_text call re-parses the new file.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        item_id: { type: 'string', description: 'UUID of the structure item' },
+        pdf_url: { type: 'string', description: 'B2 storage key for the PDF (e.g. "judgments/case-name.pdf")' },
+      },
+      required: ['item_id', 'pdf_url'],
+    },
+  },
+  {
+    name: 'detach_pdf',
+    description: 'Remove the PDF judgment from a structure item and clear its text cache.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        item_id: { type: 'string', description: 'UUID of the structure item' },
+      },
+      required: ['item_id'],
+    },
+  },
+  {
+    name: 'create_quiz',
+    description: 'Create a new blank quiz attached to a structure item. Returns the new quiz id. Use save_quiz to add questions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        note_item_id: { type: 'string', description: 'UUID of the structure item this quiz belongs to' },
+        title: { type: 'string', description: 'Quiz title (e.g. "Criminal Law Quiz 1")' },
+        passing_score: { type: 'number', description: 'Passing score percentage (e.g. 70). Default: 70' },
+      },
+      required: ['note_item_id', 'title'],
+    },
+  },
+  {
+    name: 'delete_quiz',
+    description: 'Delete a quiz and all its questions. Use quiz_id from list_quizzes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        quiz_id: { type: 'string', description: 'UUID of the quiz to delete' },
+      },
+      required: ['quiz_id'],
+    },
+  },
+  {
+    name: 'delete_flashcards',
+    description: 'Delete all flashcards for a structure item (sets flashcards_json to null).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        item_id: { type: 'string', description: 'UUID of the structure item' },
+      },
+      required: ['item_id'],
+    },
+  },
+  {
+    name: 'create_pyq_test',
+    description: 'Create a new PYQ (Previous Year Question) mock test. Returns the new test id. Use save_pyq_questions to add questions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Test title (e.g. "CLAT 2023 Full Paper")' },
+        exam_name: { type: 'string', description: 'Exam name (e.g. "CLAT PG")' },
+        year: { type: 'number', description: 'Exam year (e.g. 2023)' },
+        duration_minutes: { type: 'number', description: 'Duration in minutes (e.g. 120)' },
+        total_marks: { type: 'number', description: 'Total marks (e.g. 120)' },
+        negative_marking: { type: 'number', description: 'Negative marks per wrong answer (e.g. 0.25). Default: 0' },
+      },
+      required: ['title', 'exam_name', 'year'],
+    },
+  },
+  {
+    name: 'save_pyq_questions',
+    description: 'Save/overwrite all questions for a PYQ test. Deletes existing questions and inserts the new ones.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        test_id: { type: 'string', description: 'UUID of the PYQ test' },
+        questions: {
+          type: 'array',
+          description: 'Array of PYQ question objects',
+          items: {
+            type: 'object',
+            properties: {
+              question_text: { type: 'string', description: 'Question text' },
+              option_a: { type: 'string', description: 'Option A' },
+              option_b: { type: 'string', description: 'Option B' },
+              option_c: { type: 'string', description: 'Option C' },
+              option_d: { type: 'string', description: 'Option D' },
+              correct_answer: { type: 'string', enum: ['A', 'B', 'C', 'D'], description: 'Correct answer letter' },
+              explanation: { type: 'string', description: 'Explanation (optional)' },
+              passage: { type: 'string', description: 'Passage text for reading-comprehension questions (optional)' },
+              marks: { type: 'number', description: 'Marks for this question (default: 1)' },
+            },
+            required: ['question_text', 'option_a', 'option_b', 'option_c', 'option_d', 'correct_answer'],
+          },
+        },
+      },
+      required: ['test_id', 'questions'],
+    },
+  },
+  {
+    name: 'delete_pyq_test',
+    description: 'Delete a PYQ test and all its questions. This is irreversible.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        test_id: { type: 'string', description: 'UUID of the PYQ test to delete' },
+      },
+      required: ['test_id'],
+    },
+  },
+  {
+    name: 'publish_pyq_test',
+    description: 'Publish or unpublish a PYQ test (sets is_published true or false).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        test_id: { type: 'string', description: 'UUID of the PYQ test' },
+        is_published: { type: 'boolean', description: 'true to publish, false to unpublish' },
+      },
+      required: ['test_id', 'is_published'],
+    },
+  },
+  {
+    name: 'list_users',
+    description: 'List all registered users (id, email, created_at, last_sign_in_at). Useful for monitoring access.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
   },
 ]
 
@@ -956,6 +1263,325 @@ async function handleToolCall(name: string, args: Record<string, any>) {
       .order('order_index')
     if (error) throw new Error(error.message)
     return JSON.stringify(data || [], null, 2)
+  }
+
+  // ── delete_course ────────────────────────────────────────────────────────────
+  if (name === 'delete_course') {
+    const { course_id } = args
+    if (!course_id) throw new Error('course_id is required')
+
+    const { data: course, error: fetchError } = await db
+      .from('courses')
+      .select('name')
+      .eq('id', course_id)
+      .single()
+    if (fetchError) throw new Error(fetchError.message)
+    if (!course) throw new Error(`Course ${course_id} not found`)
+
+    // Delete all structure_items first — FK cascades clean up notes/quizzes/etc.
+    await db.from('structure_items').delete().eq('course_id', course_id)
+
+    const { error } = await db.from('courses').delete().eq('id', course_id)
+    if (error) throw new Error(error.message)
+    return `Deleted course "${(course as any).name}" (id: ${course_id}) and all its items, notes, flashcards, and quizzes.`
+  }
+
+  // ── update_course ────────────────────────────────────────────────────────────
+  if (name === 'update_course') {
+    const { course_id, name: courseName, icon, description } = args
+    if (!course_id) throw new Error('course_id is required')
+
+    const updates: Record<string, unknown> = {}
+    if (courseName !== undefined) updates.name = courseName
+    if (icon !== undefined) updates.icon = icon
+    if (description !== undefined) updates.description = description
+    if (Object.keys(updates).length === 0) throw new Error('Provide at least one of: name, icon, description')
+
+    const { data, error } = await db
+      .from('courses')
+      .update(updates)
+      .eq('id', course_id)
+      .select('id, name, icon, description')
+      .single()
+    if (error) throw new Error(error.message)
+    return JSON.stringify(data, null, 2)
+  }
+
+  // ── reorder_courses ───────────────────────────────────────────────────────────
+  if (name === 'reorder_courses') {
+    const { courses } = args
+    if (!Array.isArray(courses) || courses.length === 0) throw new Error('courses must be a non-empty array')
+
+    const results = await Promise.all(
+      (courses as Array<{ id: string; order_index: number }>).map((c) =>
+        db.from('courses').update({ order_index: c.order_index }).eq('id', c.id)
+      )
+    )
+    const errors = results.filter((r) => r.error).map((r) => r.error!.message)
+    if (errors.length) throw new Error(`Reorder errors: ${errors.join(', ')}`)
+    return `Reordered ${courses.length} course(s).`
+  }
+
+  // ── duplicate_item ────────────────────────────────────────────────────────────
+  if (name === 'duplicate_item') {
+    const { item_id, copy_note = false } = args
+    if (!item_id) throw new Error('item_id is required')
+
+    const { data: original, error: fetchError } = await db
+      .from('structure_items')
+      .select('title, item_type, course_id, parent_id, description')
+      .eq('id', item_id)
+      .single()
+    if (fetchError) throw new Error(fetchError.message)
+    if (!original) throw new Error(`Item ${item_id} not found`)
+
+    const orig = original as any
+
+    // Compute next order_index among siblings
+    let sibQuery = db
+      .from('structure_items')
+      .select('order_index')
+      .eq('course_id', orig.course_id)
+      .order('order_index', { ascending: false })
+      .limit(1)
+    if (orig.parent_id) {
+      sibQuery = sibQuery.eq('parent_id', orig.parent_id)
+    } else {
+      sibQuery = sibQuery.is('parent_id', null)
+    }
+    const { data: maxSib } = await sibQuery.maybeSingle()
+    const nextOrder = maxSib ? ((maxSib as any).order_index ?? 0) + 1 : 0
+
+    const { data: newItem, error: insertError } = await db
+      .from('structure_items')
+      .insert({
+        course_id: orig.course_id,
+        title: `${orig.title} (copy)`,
+        item_type: orig.item_type,
+        parent_id: orig.parent_id || null,
+        description: orig.description || null,
+        order_index: nextOrder,
+        is_active: true,
+      })
+      .select('id, title, item_type, course_id, parent_id, order_index')
+      .single()
+    if (insertError) throw new Error(insertError.message)
+
+    if (copy_note) {
+      const { data: noteData } = await db
+        .from('note_contents')
+        .select('content_html, flashcards_json')
+        .eq('item_id', item_id)
+        .maybeSingle()
+      if (noteData) {
+        await db.from('note_contents').insert({
+          item_id: (newItem as any).id,
+          content_html: (noteData as any).content_html,
+          flashcards_json: (noteData as any).flashcards_json,
+          updated_at: new Date().toISOString(),
+        })
+      }
+    }
+
+    return JSON.stringify(newItem, null, 2)
+  }
+
+  // ── bulk_delete_items ─────────────────────────────────────────────────────────
+  if (name === 'bulk_delete_items') {
+    const { item_ids } = args
+    if (!Array.isArray(item_ids) || item_ids.length === 0) throw new Error('item_ids must be a non-empty array')
+
+    const { error } = await db.from('structure_items').delete().in('id', item_ids as string[])
+    if (error) throw new Error(error.message)
+    return `Deleted ${item_ids.length} item(s) and all associated data.`
+  }
+
+  // ── reorder_items ─────────────────────────────────────────────────────────────
+  if (name === 'reorder_items') {
+    const { items } = args
+    if (!Array.isArray(items) || items.length === 0) throw new Error('items must be a non-empty array')
+
+    const results = await Promise.all(
+      (items as Array<{ id: string; order_index: number }>).map((item) =>
+        db.from('structure_items').update({ order_index: item.order_index }).eq('id', item.id)
+      )
+    )
+    const errors = results.filter((r) => r.error).map((r) => r.error!.message)
+    if (errors.length) throw new Error(`Reorder errors: ${errors.join(', ')}`)
+    return `Reordered ${items.length} item(s).`
+  }
+
+  // ── attach_pdf ────────────────────────────────────────────────────────────────
+  if (name === 'attach_pdf') {
+    const { item_id, pdf_url } = args
+    if (!item_id) throw new Error('item_id is required')
+    if (!pdf_url) throw new Error('pdf_url is required')
+
+    const { error } = await db
+      .from('structure_items')
+      .update({ pdf_url, pdf_text_cache: null, updated_at: new Date().toISOString() })
+      .eq('id', item_id)
+    if (error) throw new Error(error.message)
+    _pdfCache.delete(item_id)
+    return `Attached PDF "${pdf_url}" to item ${item_id}. Text cache cleared.`
+  }
+
+  // ── detach_pdf ────────────────────────────────────────────────────────────────
+  if (name === 'detach_pdf') {
+    const { item_id } = args
+    if (!item_id) throw new Error('item_id is required')
+
+    const { error } = await db
+      .from('structure_items')
+      .update({ pdf_url: null, pdf_text_cache: null, updated_at: new Date().toISOString() })
+      .eq('id', item_id)
+    if (error) throw new Error(error.message)
+    _pdfCache.delete(item_id)
+    return `Detached PDF from item ${item_id}.`
+  }
+
+  // ── create_quiz ───────────────────────────────────────────────────────────────
+  if (name === 'create_quiz') {
+    const { note_item_id, title, passing_score = 70 } = args
+    if (!note_item_id) throw new Error('note_item_id is required')
+    if (!title) throw new Error('title is required')
+
+    const { data, error } = await db
+      .from('attached_quizzes')
+      .insert({ note_item_id, title, passing_score })
+      .select('id, title, note_item_id, passing_score')
+      .single()
+    if (error) throw new Error(error.message)
+    return JSON.stringify(data, null, 2)
+  }
+
+  // ── delete_quiz ───────────────────────────────────────────────────────────────
+  if (name === 'delete_quiz') {
+    const { quiz_id } = args
+    if (!quiz_id) throw new Error('quiz_id is required')
+
+    const { data: quiz, error: fetchError } = await db
+      .from('attached_quizzes')
+      .select('title')
+      .eq('id', quiz_id)
+      .single()
+    if (fetchError) throw new Error(fetchError.message)
+    if (!quiz) throw new Error(`Quiz ${quiz_id} not found`)
+
+    await db.from('quiz_questions').delete().eq('quiz_id', quiz_id)
+    const { error } = await db.from('attached_quizzes').delete().eq('id', quiz_id)
+    if (error) throw new Error(error.message)
+    return `Deleted quiz "${(quiz as any).title}" (id: ${quiz_id}) and all its questions.`
+  }
+
+  // ── delete_flashcards ─────────────────────────────────────────────────────────
+  if (name === 'delete_flashcards') {
+    const { item_id } = args
+    if (!item_id) throw new Error('item_id is required')
+
+    const { error } = await db
+      .from('note_contents')
+      .update({ flashcards_json: null, updated_at: new Date().toISOString() })
+      .eq('item_id', item_id)
+    if (error) throw new Error(error.message)
+    return `Deleted all flashcards for item ${item_id}.`
+  }
+
+  // ── create_pyq_test ───────────────────────────────────────────────────────────
+  if (name === 'create_pyq_test') {
+    const { title, exam_name, year, duration_minutes, total_marks, negative_marking = 0 } = args
+    if (!title) throw new Error('title is required')
+    if (!exam_name) throw new Error('exam_name is required')
+    if (!year) throw new Error('year is required')
+
+    const { data, error } = await db
+      .from('pyq_tests')
+      .insert({
+        title,
+        exam_name,
+        year,
+        duration_minutes: duration_minutes || null,
+        total_marks: total_marks || null,
+        negative_marking,
+        is_published: false,
+      })
+      .select('id, title, exam_name, year, duration_minutes, total_marks, negative_marking, is_published')
+      .single()
+    if (error) throw new Error(error.message)
+    return JSON.stringify(data, null, 2)
+  }
+
+  // ── save_pyq_questions ────────────────────────────────────────────────────────
+  if (name === 'save_pyq_questions') {
+    const { test_id, questions } = args
+    if (!test_id) throw new Error('test_id is required')
+    if (!Array.isArray(questions)) throw new Error('questions must be an array')
+
+    const { error: delError } = await db.from('pyq_questions').delete().eq('test_id', test_id)
+    if (delError) throw new Error(`Failed to delete old questions: ${delError.message}`)
+
+    const rows = (questions as any[]).map((q, i) => ({
+      test_id,
+      order_index: i,
+      question_text: q.question_text,
+      option_a: q.option_a,
+      option_b: q.option_b,
+      option_c: q.option_c,
+      option_d: q.option_d,
+      correct_answer: q.correct_answer,
+      explanation: q.explanation || null,
+      passage: q.passage || null,
+      marks: q.marks ?? 1,
+    }))
+    const { error: insError } = await db.from('pyq_questions').insert(rows)
+    if (insError) throw new Error(`Failed to insert questions: ${insError.message}`)
+    return `Saved ${questions.length} question(s) to PYQ test ${test_id}.`
+  }
+
+  // ── delete_pyq_test ───────────────────────────────────────────────────────────
+  if (name === 'delete_pyq_test') {
+    const { test_id } = args
+    if (!test_id) throw new Error('test_id is required')
+
+    const { data: test, error: fetchError } = await db
+      .from('pyq_tests')
+      .select('title')
+      .eq('id', test_id)
+      .single()
+    if (fetchError) throw new Error(fetchError.message)
+    if (!test) throw new Error(`PYQ test ${test_id} not found`)
+
+    await db.from('pyq_questions').delete().eq('test_id', test_id)
+    const { error } = await db.from('pyq_tests').delete().eq('id', test_id)
+    if (error) throw new Error(error.message)
+    return `Deleted PYQ test "${(test as any).title}" (id: ${test_id}) and all its questions.`
+  }
+
+  // ── publish_pyq_test ──────────────────────────────────────────────────────────
+  if (name === 'publish_pyq_test') {
+    const { test_id, is_published } = args
+    if (!test_id) throw new Error('test_id is required')
+    if (typeof is_published !== 'boolean') throw new Error('is_published must be a boolean')
+
+    const { error } = await db
+      .from('pyq_tests')
+      .update({ is_published })
+      .eq('id', test_id)
+    if (error) throw new Error(error.message)
+    return `PYQ test ${test_id} is now ${is_published ? 'published' : 'unpublished'}.`
+  }
+
+  // ── list_users ────────────────────────────────────────────────────────────────
+  if (name === 'list_users') {
+    const { data: { users }, error } = await db.auth.admin.listUsers()
+    if (error) throw new Error(error.message)
+    const rows = users.map((u) => ({
+      id: u.id,
+      email: u.email,
+      created_at: u.created_at,
+      last_sign_in_at: u.last_sign_in_at,
+    }))
+    return JSON.stringify(rows, null, 2)
   }
 
   throw new Error(`Unknown tool: ${name}`)
