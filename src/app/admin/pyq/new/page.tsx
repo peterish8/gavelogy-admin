@@ -20,7 +20,8 @@ import {
   Wand2,
 } from 'lucide-react'
 
-import { createClient } from '@/lib/supabase/client'
+import { useMutation } from 'convex/react'
+import { api } from '@convex/_generated/api'
 import { cn } from '@/lib/utils'
 import {
   buildPyqReviewText,
@@ -52,7 +53,7 @@ const EMPTY_BUNDLE: PyqDraftBundle = { passages: [], questions: [] }
 
 export default function NewPYQTestPage() {
   const router = useRouter()
-  const supabase = createClient()
+  const createPyqTestWithBundle = useMutation(api.pyq.createPyqTestWithBundle)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [meta, setMeta] = useState<TestMeta>({
@@ -256,63 +257,39 @@ export default function NewPYQTestPage() {
 
     setIsSaving(true)
     try {
-      const { data: test, error: testErr } = await supabase
-        .from('pyq_tests')
-        .insert({
-          title: meta.title.trim(),
-          exam_name: meta.exam_name.trim(),
-          year: meta.year ? parseInt(meta.year, 10) : null,
-          duration_minutes: parseInt(meta.duration_minutes, 10) || 120,
-          total_marks: parseInt(meta.total_marks, 10) || 120,
-          negative_marking: parseFloat(meta.negative_marking) || 0.25,
-          instructions: meta.instructions.trim() || null,
-          is_published: meta.is_published,
-        })
-        .select('id')
-        .single()
-
-      if (testErr || !test) throw new Error(testErr?.message || 'Failed to create test')
-
-      const passageIdMap = new Map<string, string>()
-      if (bundle.passages.length > 0) {
-        const passageRows = bundle.passages.map((passage, index) => ({
-          test_id: test.id,
-          order_index: index,
+      const testId = await createPyqTestWithBundle({
+        title: meta.title.trim(),
+        exam_name: meta.exam_name.trim(),
+        year: meta.year ? parseInt(meta.year, 10) : undefined,
+        duration_minutes: parseInt(meta.duration_minutes, 10) || 120,
+        total_marks: parseInt(meta.total_marks, 10) || 120,
+        negative_marking: parseFloat(meta.negative_marking) || 0.25,
+        instructions: meta.instructions.trim() || undefined,
+        is_published: meta.is_published,
+        passages: bundle.passages.map((passage, index) => ({
+          client_passage_id: passage.client_passage_id,
           passage_text: passage.passage_text.trim(),
-          citation: passage.passage_citation.trim() || null,
-          section_number: passage.section.trim() || null,
-          subject: passage.subject.trim() || null,
-        }))
-        const { data: insertedPassages, error: passageErr } = await supabase
-          .from('pyq_passages')
-          .insert(passageRows)
-          .select('id')
-
-        if (passageErr) throw new Error(passageErr.message)
-        insertedPassages?.forEach((row: any, index: number) => {
-          passageIdMap.set(bundle.passages[index].client_passage_id, row.id)
-        })
-      }
-
-      const questionRows = bundle.questions.map((question, index) => ({
-        test_id: test.id,
-        order_index: index,
-        passage_id: question.passage_id ? (passageIdMap.get(question.passage_id) || null) : null,
-        question_text: question.question_text.trim(),
-        option_a: question.option_a.trim(),
-        option_b: question.option_b.trim(),
-        option_c: question.option_c.trim(),
-        option_d: question.option_d.trim(),
-        correct_answer: question.correct_answer,
-        explanation: question.explanation.trim() || null,
-        marks: 1,
-        question_type: question.question_type.trim() || 'mcq',
-        subject: question.subject.trim() || null,
-      }))
-      const { error: questionErr } = await supabase.from('pyq_questions').insert(questionRows)
-      if (questionErr) throw new Error(questionErr.message)
-
-      router.push(`/admin/pyq/${test.id}/edit`)
+          citation: passage.passage_citation.trim() || undefined,
+          section_number: passage.section.trim() || undefined,
+          subject: passage.subject.trim() || undefined,
+          order_index: index,
+        })),
+        questions: bundle.questions.map((question, index) => ({
+          client_passage_id: question.passage_id ?? undefined,
+          question_text: question.question_text.trim(),
+          option_a: question.option_a.trim() || undefined,
+          option_b: question.option_b.trim() || undefined,
+          option_c: question.option_c.trim() || undefined,
+          option_d: question.option_d.trim() || undefined,
+          correct_answer: question.correct_answer || undefined,
+          explanation: question.explanation.trim() || undefined,
+          marks: 1,
+          question_type: question.question_type.trim() || 'mcq',
+          subject: question.subject.trim() || undefined,
+          order_index: index,
+        })),
+      })
+      router.push(`/admin/pyq/${testId}/edit`)
     } catch (e: any) {
       alert(`Save failed: ${e.message}`)
     } finally {

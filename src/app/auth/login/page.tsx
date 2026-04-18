@@ -1,11 +1,10 @@
 'use client'
 
-import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, ShieldAlert, Lock, Mail, Eye, EyeOff } from 'lucide-react'
+import { useAuth } from '@/lib/auth-context'
 
-// Admin login page that authenticates with Supabase, verifies admin access, and redirects to the dashboard.
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -13,51 +12,46 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
-  const supabase = createClient()
+  const { signIn, isAuthenticated, isLoading } = useAuth()
 
-  // Handles the full login flow: auth sign-in, admin-role check, redirect, and error state updates.
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      router.replace('/admin/dashboard')
+    }
+  }, [isAuthenticated, isLoading, router])
+
+  // While auth state resolves, show a blank loading screen
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-slate-900 via-slate-800 to-slate-900">
+        <Loader2 className="w-8 h-8 animate-spin text-primary/50" />
+      </div>
+    )
+  }
+
+  // Already authenticated, don't flash login UI
+  if (isAuthenticated) return null
+
+  const ADMIN_EMAILS = (process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? '')
+    .split(',').map(e => e.trim().toLowerCase())
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError(null)
 
     try {
-      // Step 1: Sign in with Supabase Auth
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      })
-
-      if (authError) {
-        throw new Error(authError.message)
-      }
-
-      if (!authData.user) {
-        throw new Error('Login failed. Please try again.')
-      }
-
-      // Step 2: Check if user is admin in public.users table
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('is_admin, full_name')
-        .eq('id', authData.user.id)
-        .single()
-
-      if (userError) {
-        // User exists in auth but not in public.users - might be a new user
-        await supabase.auth.signOut()
-        throw new Error('User profile not found. Please contact administrator.')
-      }
-
-      if (!userData.is_admin) {
-        // User is not an admin - sign them out and show error
-        await supabase.auth.signOut()
+      // Reject non-admin emails immediately before even hitting Convex
+      if (!ADMIN_EMAILS.includes(email.trim().toLowerCase())) {
         throw new Error('Access denied. You do not have admin privileges.')
       }
 
-      // Step 3: Admin verified - redirect to dashboard
-      // Step 3: Admin verified - redirect to dashboard
-      router.push('/admin/dashboard')
+      const result = await signIn(email, password)
+      if (!result.success) {
+        throw new Error(result.error || 'Login failed. Please try again.')
+      }
+
+      router.replace('/admin/dashboard')
       router.refresh()
     } catch (err: any) {
       setError(err.message)

@@ -1,8 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { useQuery, useMutation } from 'convex/react'
+import { api } from '@convex/_generated/api'
+import type { Id } from '@convex/_generated/dataModel'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -20,31 +22,19 @@ import Link from 'next/link'
 
 export default function CreateQuizPage() {
   const router = useRouter()
-  const supabase = createClient()
-  
+  const rawSubjects = useQuery(api.quizzes.getAllSubjects, {})
+  const createQuiz = useMutation(api.quizzes.createQuiz)
+
+  const subjects = (rawSubjects ?? []).map((s: any) => ({ id: s._id as string, name: s.name as string }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+
   const [loading, setLoading] = useState(false)
-  const [subjects, setSubjects] = useState<{ id: string; name: string }[]>([])
-  
   const [formData, setFormData] = useState({
     title: '',
     description: '',
     subject_id: '',
     order_index: 0
   })
-
-  useEffect(() => {
-    const fetchSubjects = async () => {
-      const { data } = await supabase
-        .from('subjects')
-        .select('id, name')
-        .order('name')
-      
-      if (data) {
-        setSubjects(data)
-      }
-    }
-    fetchSubjects()
-  }, [supabase])
 
   const handleSave = async () => {
     if (!formData.title.trim()) {
@@ -58,21 +48,14 @@ export default function CreateQuizPage() {
 
     setLoading(true)
     try {
-      const { data, error } = await supabase
-        .from('quizzes')
-        .insert({
-          title: formData.title,
-          description: formData.description || null,
-          subject_id: formData.subject_id,
-          order_index: formData.order_index
-        })
-        .select()
-        .single()
-
-      if (error) throw error
-
+      const newId = await createQuiz({
+        title: formData.title,
+        description: formData.description || undefined,
+        subject_id: formData.subject_id as Id<'subjects'>,
+        order_index: formData.order_index,
+      })
       toast.success('Quiz created successfully')
-      router.push(`/admin/quizzes/${data.id}/edit`)
+      router.push(`/admin/quizzes/${newId}/edit`)
       router.refresh()
     } catch (error: any) {
       toast.error(error.message || 'Failed to create quiz')

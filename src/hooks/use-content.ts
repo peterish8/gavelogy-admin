@@ -1,93 +1,71 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { useCallback } from 'react'
+import { useQuery } from 'convex/react'
+import { api } from '@convex/_generated/api'
+import type { Id } from '@convex/_generated/dataModel'
 import type { ContentItem } from '@/types/course-builder'
 import { useDraftStore } from '@/lib/stores/draft-store'
 
-// Fetches all content items for a subject from Supabase ordered by order_index; returns items, loading/error state, and refetch.
+// Helper to reliably map Convex structure_items back to ContentItem for the draft store UI
+function mapStructureItemToContentItem(item: any): ContentItem {
+  return {
+    id: item._id,
+    subject_id: item.courseId || item.parentId || '', // fallback
+    title: item.title,
+    content_type: (item.item_type as any) || 'note',
+    order_index: item.order_index || 0,
+    is_active: item.is_active ?? true,
+    version: 1,
+    // Add null fallbacks for fields used by the UI
+    note_content: null,
+    quiz_id: null,
+    case_number: null,
+    interactive_data: null,
+    pdf_url: item.pdf_url || null,
+  }
+}
+
 export function useContentItems(subjectId: string) {
-  const [contentItems, setContentItems] = useState<ContentItem[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  // Assuming subjectId here refers to a courseId for top level structure
+  const rawItems = useQuery(
+    api.content.getStructureItemsByCourse, 
+    subjectId ? { courseId: subjectId as Id<"courses"> } : "skip"
+  )
+  
+  const isLoading = rawItems === undefined
+  const error = null // Convex handles errors at boundary or throws
+  
+  // Sort and map
+  const contentItems = rawItems 
+    ? [...rawItems].sort((a, b) => (a.order_index || 0) - (b.order_index || 0)).map(mapStructureItemToContentItem)
+    : []
 
-  // Loads the current subject's content list and refreshes the hook state from Supabase.
-  const fetchContentItems = useCallback(async () => {
-    if (!subjectId) return
-    
-    setIsLoading(true)
-    setError(null)
-
-    try {
-      const supabase = createClient()
-      const { data, error: fetchError } = await supabase
-        .from('content_items')
-        .select('*')
-        .eq('subject_id', subjectId)
-        .order('order_index', { ascending: true })
-
-      if (fetchError) throw fetchError
-      setContentItems(data || [])
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch content items'
-      setError(message)
-      console.error('Error fetching content items:', err)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [subjectId])
-
-  useEffect(() => {
-    fetchContentItems()
-  }, [fetchContentItems])
+  // Dummy refetch as Convex is auto-updating
+  const fetchContentItems = useCallback(async () => {}, [])
 
   return { contentItems, isLoading, error, refetch: fetchContentItems }
 }
 
-// Fetches a single content item by ID from Supabase; returns item, loading/error state, and refetch.
 export function useContentItem(contentId: string) {
-  const [contentItem, setContentItem] = useState<ContentItem | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  // Loads a single content item record by ID and stores it for edit/detail screens.
-  const fetchContentItem = useCallback(async () => {
-    if (!contentId) return
-    
-    setIsLoading(true)
-    setError(null)
-
-    try {
-      const supabase = createClient()
-      const { data, error: fetchError } = await supabase
-        .from('content_items')
-        .select('*')
-        .eq('id', contentId)
-        .single()
-
-      if (fetchError) throw fetchError
-      setContentItem(data)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch content item'
-      setError(message)
-      console.error('Error fetching content item:', err)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [contentId])
-
-  useEffect(() => {
-    fetchContentItem()
-  }, [fetchContentItem])
+  const item = useQuery(
+    api.content.getStructureItem, 
+    contentId ? { itemId: contentId as Id<"structure_items"> } : "skip"
+  )
+  
+  const isLoading = item === undefined
+  const error = null
+  
+  const contentItem = item ? mapStructureItemToContentItem(item) : null
+  
+  const fetchContentItem = useCallback(async () => {}, [])
 
   return { contentItem, isLoading, error, refetch: fetchContentItem }
 }
 
-// Provides create/update/delete/reorder actions for content items; all writes go through the draft store queue.
 export function useContentActions() {
   const addChange = useDraftStore((state) => state.addChange)
 
-  // Queues a draft "create" change with sensible defaults and returns the temporary client-side ID.
   const createContentItem = useCallback((contentData: Partial<ContentItem> & { subject_id: string; content_type: ContentItem['content_type'] }) => {
     const tempId = crypto.randomUUID()
     addChange({
@@ -110,7 +88,6 @@ export function useContentActions() {
     return tempId
   }, [addChange])
 
-  // Queues a draft update for an existing content item without touching the database yet.
   const updateContentItem = useCallback((contentId: string, updates: Partial<ContentItem>) => {
     addChange({
       action: 'update',
@@ -120,7 +97,6 @@ export function useContentActions() {
     })
   }, [addChange])
 
-  // Queues a draft delete so the item disappears in the UI until the save-bar commits it.
   const deleteContentItem = useCallback((contentId: string) => {
     addChange({
       action: 'delete',
@@ -130,7 +106,6 @@ export function useContentActions() {
     })
   }, [addChange])
 
-  // Queues an order_index change while preserving the original index for later save/discard flows.
   const reorderContentItem = useCallback((contentId: string, newIndex: number, originalIndex: number) => {
     addChange({
       action: 'reorder',

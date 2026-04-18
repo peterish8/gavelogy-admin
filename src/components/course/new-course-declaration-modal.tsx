@@ -8,7 +8,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Upload, Folder, FileText, ChevronRight, ChevronDown, Loader2, CheckCircle2, AlertCircle, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
-import { createClient } from '@/lib/supabase/client'
+import { useMutation } from 'convex/react'
+import { api } from '@convex/_generated/api'
 
 interface CourseDeclarationItem {
   id: string
@@ -112,7 +113,9 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
   const [parseError, setParseError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [step, setStep] = useState<'input' | 'preview'>('input')
-  const [copied, setCopied] = useState(false) // Add copied state
+  const [copied, setCopied] = useState(false)
+
+  const createEntity = useMutation(api.adminMutations.createEntity as any)
 
   // Parses and validates the pasted JSON declaration, advancing to the preview step on success.
   const handleParse = useCallback(() => {
@@ -188,7 +191,7 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
     toast.success('Item removed. Children promoted to parent level.')
   }, [parsedData])
 
-  // Inserts the course row and all structure items directly to Supabase in 1000-item chunks, then navigates to the studio.
+  // Inserts the course row and all structure items directly to Convex.
   const handleSave = async () => {
     if (!parsedData) return
     setSaving(true)
@@ -196,12 +199,11 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
 
     try {
       toastId = toast.loading('Creating course...')
-      const supabase = createClient()
 
       // 1. Create the course directly in database (PRIVATE by default: is_active = false)
-      const { data: courseData, error: courseError } = await supabase
-        .from('courses')
-        .insert({
+      const newCourseId = await createEntity({
+        entityType: 'course',
+        data: {
           name: parsedData.courseName,
           description: parsedData.courseDescription || 'Course description',
           icon: '📚',
@@ -209,14 +211,10 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
           is_active: false, // PRIVATE by default
           version: 1,
           price: 0
-        })
-        .select()
-        .single()
+        }
+      })
 
-      if (courseError) throw courseError
-      if (!courseData) throw new Error('Failed to create course')
-
-      const newCourseId = courseData.id
+      if (!newCourseId) throw new Error('Failed to create course')
 
       // 2. Prepare Structure Items for Batch Insert
       toast.loading(`Preparing ${(stats?.files ?? 0) + (stats?.folders ?? 0)} items...`, { id: toastId })
@@ -228,13 +226,12 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
           
           itemsToInsert.push({
             id: newId,
-            course_id: newCourseId,
-            parent_id: parentId,
+            courseId: newCourseId, // mapped for Convex
+            parentId: parentId || undefined,
             item_type: item.type,
             title: item.title,
             order_index: orderStart + i,
             is_active: true
-            // note_content/quiz logic would go here if needed in future
           })
 
           if (item.children && item.children.length > 0) {
@@ -245,25 +242,12 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
 
       processItems(parsedData.structure, null, 0)
 
-      // 3. Batch Insert Structure Items in CHUNKS
+      // 3. Batch Insert Structure Items
       if (itemsToInsert.length > 0) {
-        const CHUNK_SIZE = 1000
-        const chunks = []
-        for (let i = 0; i < itemsToInsert.length; i += CHUNK_SIZE) {
-          chunks.push(itemsToInsert.slice(i, i + CHUNK_SIZE))
-        }
-
-        console.log(`Batch inserting ${itemsToInsert.length} items in ${chunks.length} chunks...`)
-        
-        for (let i = 0; i < chunks.length; i++) {
-           const chunk = chunks[i]
-           toast.loading(`Saving items (${i + 1}/${chunks.length})...`, { id: toastId })
-           
-           const { error: itemsError } = await supabase
-             .from('structure_items')
-             .insert(chunk)
-           
-           if (itemsError) throw itemsError
+        console.log(`Inserting ${itemsToInsert.length} items...`)
+        toast.loading(`Saving items...`, { id: toastId })
+        for (const item of itemsToInsert) {
+           await createEntity({ entityType: 'structure_item', data: item });
         }
       }
       

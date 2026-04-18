@@ -1,4 +1,3 @@
-import { createClient } from '@/lib/supabase/server'
 import { fetchAllCaseItems, fetchLinkCountsForItems } from '@/actions/judgment/links'
 import TagCasesClient from './TagCasesClient'
 

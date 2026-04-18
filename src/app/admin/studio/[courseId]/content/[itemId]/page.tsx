@@ -1,4 +1,6 @@
-import { createClient } from '@/lib/supabase/server'
+import { fetchQuery } from 'convex/nextjs'
+import { api } from '@convex/_generated/api'
+import type { Id } from '@convex/_generated/dataModel'
 import Link from 'next/link'
 import { ArrowLeft, Save, FileText, HelpCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -13,21 +15,12 @@ interface PageProps {
 export default async function ContentEditorPage(props: PageProps) {
   const params = await props.params;
   const { courseId, itemId } = params;
-  const supabase = await createClient()
 
-  // Fetch the item to know its type and details
-  const { data: item, error } = await supabase
-    .from('structure_items')
-    .select(`
-      *,
-      course:courses(name),
-      note_content:note_contents(*),
-      attached_quiz:attached_quizzes(*)
-    `)
-    .eq('id', itemId)
-    .single()
+  const item = await fetchQuery(api.content.getStructureItemWithRelations, {
+    itemId: itemId as Id<'structure_items'>,
+  })
 
-  if (error || !item) {
+  if (!item) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-8">
           <h2 className="text-2xl font-bold mb-4">Content Not Found</h2>

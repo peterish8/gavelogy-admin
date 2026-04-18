@@ -1,21 +1,20 @@
-import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { Input } from '@/components/ui/input'
 import { Search, FileText, ChevronRight, FolderOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { fetchQuery } from 'convex/nextjs'
+import { api } from '@convex/_generated/api'
 
 interface NoteItem {
   id: string
   title: string
-  course_id: string
+  course_id: string | null | undefined
   courses: {
     id: string
     name: string
-    icon: string
+    icon?: string
   }
-  note_content: {
-    id: string
-  }[] | null
+  note_content: { id: string }[] | null
 }
 
 interface GroupedNotes {
@@ -33,33 +32,27 @@ export default async function NotesPage({
 }: {
   searchParams: Promise<{ q?: string }>
 }) {
-  const supabase = await createClient()
   const query = (await searchParams).q || ''
-
-  const { data } = await supabase
-    .from('structure_items')
-    .select(`
-      id, title, course_id,
-      courses(id, name, icon),
-      note_content:note_contents(id)
-    `)
-    .eq('item_type', 'file')
-    .order('course_id')
-    .order('order_index')
-
-  // Normalizes the joined Supabase rows into a simpler note list shape for rendering.
-  const notes: NoteItem[] = (data || []).map((item: any) => ({
-    id: item.id,
-    title: item.title,
-    course_id: item.course_id,
-    courses: item.courses,
-    note_content: item.note_content
-  }))
+  const items = await fetchQuery(api.admin.getAllStructureItems, { item_type: 'file' })
+  const notes = await Promise.all(
+    items.map(async (item: any) => {
+      const note = await fetchQuery(api.content.getNoteContent, { itemId: item._id })
+      return {
+        id: item._id,
+        title: item.title,
+        course_id: item.courseId,
+        courses: item.course
+          ? { id: item.course._id, name: item.course.name, icon: item.course.icon }
+          : { id: '', name: 'Unknown Course' },
+        note_content: note ? [{ id: note._id }] : null,
+      } satisfies NoteItem
+    })
+  )
 
   // Filter by search query  
   // Applies the title/course search filter when a query is present.
   const filteredNotes = query
-    ? notes.filter(note =>
+    ? notes.filter((note) =>
         note.title.toLowerCase().includes(query.toLowerCase()) ||
         note.courses?.name?.toLowerCase().includes(query.toLowerCase())
       )
@@ -69,7 +62,7 @@ export default async function NotesPage({
   // Groups notes by course so the page can render one section per course.
   const groups: Map<string, GroupedNotes> = new Map()
   filteredNotes.forEach(note => {
-    if (!note.courses) return
+    if (!note.courses || !note.course_id) return
     const courseId = note.course_id
     if (!groups.has(courseId)) {
       groups.set(courseId, { course: note.courses, notes: [] })
@@ -131,7 +124,7 @@ export default async function NotesPage({
 
               {/* Notes Grid */}
               <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                {group.notes.map((note) => (
+                {group.notes.map((note: NoteItem) => (
                   <Link
                     key={note.id}
                     href={`/admin/notes/edit/${note.id}`}

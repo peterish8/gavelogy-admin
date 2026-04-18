@@ -1,33 +1,23 @@
 'use server'
 
-import { createClient } from '@supabase/supabase-js'
+import { fetchMutation } from 'convex/nextjs'
+import { convexAuthNextjsToken } from '@convex-dev/auth/nextjs/server'
+import { api } from '@convex/_generated/api'
+import type { Id } from '@convex/_generated/dataModel'
 
-// Creates a service-role Supabase client for server-side note-content writes.
-function getAdminClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
+export async function saveNoteContent(itemId: string, contentHtml: string): Promise<void> {
+  const token = await convexAuthNextjsToken()
+  await fetchMutation(
+    api.content.updateNoteContent,
+    {
+      itemId: itemId as Id<'structure_items'>,
+      content_html: contentHtml,
+    },
+    token ? { token } : undefined
   )
 }
 
-// Upserts the rendered HTML body for a note item, creating the note_contents row when needed.
-export async function saveNoteContent(itemId: string, contentHtml: string): Promise<void> {
-  const adminClient = getAdminClient()
-  const { error } = await adminClient
-    .from('note_contents')
-    .upsert(
-      { item_id: itemId, content_html: contentHtml },
-      { onConflict: 'item_id' }
-    )
-  if (error) throw error
-}
-
-// Stores generated flashcards as JSON on the existing note_contents row for the item.
-export async function saveFlashcardsJson(itemId: string, flashcards: { front: string; back: string }[]): Promise<void> {
-  const adminClient = getAdminClient()
-  const { error } = await adminClient
-    .from('note_contents')
-    .update({ flashcards_json: JSON.stringify(flashcards), updated_at: new Date().toISOString() })
-    .eq('item_id', itemId)
-  if (error) throw error
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function saveFlashcardsJson(_itemId: string, _flashcards: { front: string; back: string }[]): Promise<void> {
+  throw new Error('Flashcard persistence has not been added to the shared Convex backend yet.')
 }

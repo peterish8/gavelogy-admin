@@ -3,7 +3,6 @@
 import { useState, useRef } from 'react'
 import Link from 'next/link'
 import type { CaseItem } from '@/actions/judgment/links'
-import { createClient } from '@/lib/supabase/client'
 import {
   CheckCircle2,
   XCircle,
@@ -26,7 +25,6 @@ export default function TagCasesClient({ cases, linkCounts }: Props) {
   const [search, setSearch] = useState('')
   // Hidden file inputs are stored per caseId so we can trigger them from the Upload button.
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map())
-  const supabase = createClient()
 
   // Posts the selected file to the judgment upload API and stores the returned object key locally.
   async function handlePdfUpload(caseId: string, file: File) {
@@ -34,11 +32,8 @@ export default function TagCasesClient({ cases, linkCounts }: Props) {
     formData.append('file', file)
     formData.append('caseId', caseId)
 
-    const { data: { session } } = await supabase.auth.getSession()
-
     const res = await fetch('/api/judgment/upload', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${session?.access_token}` },
       body: formData,
     })
     const result = await res.json()
@@ -88,7 +83,7 @@ export default function TagCasesClient({ cases, linkCounts }: Props) {
           </h1>
         </div>
         <p className="text-sm" style={{ color: '#92400e', marginLeft: '52px' }}>
-          Upload a PDF to Backblaze B2 then drag-tag regions
+          Upload a PDF to Convex storage then drag-tag regions
         </p>
       </div>
 

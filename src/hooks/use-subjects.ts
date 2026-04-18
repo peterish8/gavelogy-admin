@@ -1,120 +1,84 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { useCallback } from 'react'
+import { useQuery } from 'convex/react'
+import { api } from '@convex/_generated/api'
+import type { Id } from '@convex/_generated/dataModel'
 import type { Subject, SubjectWithContent } from '@/types/course-builder'
 import { useDraftStore } from '@/lib/stores/draft-store'
 
-// Fetches all subjects for a course from Supabase ordered by order_index; returns subjects, loading/error, and refetch.
+// Helper to map Convex subject to expected UI format
+function mapSubject(subject: any): Subject {
+  return {
+    id: subject._id,
+    course_id: subject.courseId,
+    name: subject.name,
+    description: subject.description,
+    order_index: subject.order_index,
+    is_active: true, // Convex subjects don't have is_active natively yet
+    version: 1,
+    icon: '📖'
+  }
+}
+
 export function useSubjects(courseId: string) {
-  const [subjects, setSubjects] = useState<Subject[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  // Since Convex uses courseId, we fetch subjects by course
+  const rawSubjects = useQuery(
+    api.adminQueries.getSubjectsByCourse as any,
+    courseId ? { courseId: courseId as Id<"courses"> } : "skip"
+  )
+  
+  const isLoading = rawSubjects === undefined
+  const error = null
+  
+  const subjects = rawSubjects 
+    ? [...rawSubjects].sort((a, b) => (a.order_index || 0) - (b.order_index || 0)).map(mapSubject)
+    : []
 
-  // Loads all subjects for the selected course and refreshes the hook state from Supabase.
-  const fetchSubjects = useCallback(async () => {
-    if (!courseId) return
-    
-    setIsLoading(true)
-    setError(null)
-
-    try {
-      const supabase = createClient()
-      const { data, error: fetchError } = await supabase
-        .from('subjects')
-        .select('*')
-        .eq('course_id', courseId)
-        .order('order_index', { ascending: true })
-
-      if (fetchError) throw fetchError
-      setSubjects(data || [])
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch subjects'
-      setError(message)
-      console.error('Error fetching subjects:', err)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [courseId])
-
-  useEffect(() => {
-    fetchSubjects()
-  }, [fetchSubjects])
+  const fetchSubjects = useCallback(async () => {}, [])
 
   return { subjects, isLoading, error, refetch: fetchSubjects }
 }
 
-// Fetches a single subject with its content_items joined, sorted by order_index.
 export function useSubject(subjectId: string) {
-  const [subject, setSubject] = useState<SubjectWithContent | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  // Loads one subject with its nested content_items for detail screens and editors.
-  const fetchSubject = useCallback(async () => {
-    if (!subjectId) return
-    
-    setIsLoading(true)
-    setError(null)
-
-    try {
-      const supabase = createClient()
-      
-      // Fetch subject with content items
-      const { data: subjectData, error: subjectError } = await supabase
-        .from('subjects')
-        .select(`
-          *,
-          content_items (
-            id,
-            subject_id,
-            content_type,
-            title,
-            order_index,
-            is_active,
-            created_at,
-            updated_at,
-            version,
-            note_content,
-            quiz_id,
-            case_number,
-            interactive_data
-          )
-        `)
-        .eq('id', subjectId)
-        .single()
-
-      if (subjectError) throw subjectError
-      
-      // Sort content items by order_index
-      if (subjectData?.content_items) {
-        subjectData.content_items.sort((a: { order_index: number }, b: { order_index: number }) => 
-          a.order_index - b.order_index
-        )
-      }
-
-      setSubject(subjectData)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch subject'
-      setError(message)
-      console.error('Error fetching subject:', err)
-    } finally {
-      setIsLoading(false)
+  const rawSubject = useQuery(
+    api.adminQueries.getSubjectWithContent as any,
+    subjectId ? { subjectId: subjectId as Id<"subjects"> } : "skip"
+  )
+  
+  const isLoading = rawSubject === undefined
+  const error = null
+  
+  let subject: SubjectWithContent | null = null
+  
+  if (rawSubject) {
+    subject = {
+      ...mapSubject(rawSubject.subject),
+      content_items: (rawSubject.content_items || []).map((item: any) => ({
+        id: item._id,
+        subject_id: subjectId,
+        content_type: item.item_type || 'note',
+        title: item.title,
+        order_index: item.order_index || 0,
+        is_active: item.is_active ?? true,
+        version: 1,
+        note_content: null,
+        quiz_id: null,
+        case_number: null,
+        interactive_data: null,
+        pdf_url: item.pdf_url || null,
+      })).sort((a: any, b: any) => a.order_index - b.order_index)
     }
-  }, [subjectId])
+  }
 
-  useEffect(() => {
-    fetchSubject()
-  }, [fetchSubject])
+  const fetchSubject = useCallback(async () => {}, [])
 
   return { subject, isLoading, error, refetch: fetchSubject }
 }
 
-// Provides create/update/delete/reorder actions for subjects; all writes go through the draft store queue.
 export function useSubjectActions() {
   const addChange = useDraftStore((state) => state.addChange)
 
-  // Queues a draft subject creation and returns the temporary ID used until the save-bar commits it.
   const createSubject = useCallback((subjectData: Partial<Subject> & { course_id: string }) => {
     const tempId = crypto.randomUUID()
     addChange({
@@ -135,7 +99,6 @@ export function useSubjectActions() {
     return tempId
   }, [addChange])
 
-  // Queues a draft update for a subject so edits appear immediately without saving yet.
   const updateSubject = useCallback((subjectId: string, updates: Partial<Subject>) => {
     addChange({
       action: 'update',
@@ -145,7 +108,6 @@ export function useSubjectActions() {
     })
   }, [addChange])
 
-  // Queues a draft delete for the selected subject.
   const deleteSubject = useCallback((subjectId: string) => {
     addChange({
       action: 'delete',
@@ -155,7 +117,6 @@ export function useSubjectActions() {
     })
   }, [addChange])
 
-  // Queues a subject reorder change with both new and original positions.
   const reorderSubject = useCallback((subjectId: string, newIndex: number, originalIndex: number) => {
     addChange({
       action: 'reorder',

@@ -1,4 +1,5 @@
-import { createClient } from '@/lib/supabase/server'
+import { fetchQuery } from 'convex/nextjs'
+import { api } from '@convex/_generated/api'
 import Link from 'next/link'
 import { Plus, ClipboardList, Clock, FileQuestion, Eye, Pencil, BookOpen, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -19,17 +20,19 @@ interface PYQTest {
 
 // Server page that lists all PYQ mock tests with summary stats and links to edit/preview flows.
 export default async function PYQListPage() {
-  const supabase = await createClient()
+  const rawTests = await fetchQuery(api.pyq.getAllPyqTests, {})
 
-  const { data: rawTests } = await supabase
-    .from('pyq_tests')
-    .select(`id, title, exam_name, year, duration_minutes, total_marks, negative_marking, is_published, created_at, pyq_questions(id)`)
-    .order('created_at', { ascending: false })
-
-  // Flattens the joined question rows into a count per test for the stats chips and cards.
-  const tests: PYQTest[] = (rawTests || []).map((t: any) => ({
-    ...t,
-    question_count: t.pyq_questions?.length ?? 0,
+  const tests: PYQTest[] = rawTests.map((t: any) => ({
+    id: t._id,
+    title: t.title,
+    exam_name: t.exam_name ?? '',
+    year: t.year ?? null,
+    duration_minutes: t.duration_minutes ?? 120,
+    total_marks: t.total_marks ?? 120,
+    negative_marking: t.negative_marking ?? 0.25,
+    is_published: t.is_published ?? false,
+    created_at: new Date(t._creationTime).toISOString(),
+    question_count: t.question_count ?? 0,
   }))
 
   return (
