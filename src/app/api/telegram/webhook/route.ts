@@ -65,7 +65,11 @@ async function showCourses(chatId: number, msgId?: number) {
   if (courses.length === 0) {
     const text = '📚 <b>No courses yet.</b>\nCreate your first course!'
     const kb = [[btn('➕ New Course', 'new_course')]]
-    msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
+    if (msgId) {
+      await editMessage(chatId, msgId, text, kb)
+    } else {
+      await sendMessage(chatId, text, kb)
+    }
     return
   }
   const text = '📚 <b>Select a Course</b>'
@@ -74,7 +78,11 @@ async function showCourses(chatId: number, msgId?: number) {
     ...rows(courses.map(c => btn(`${c.icon ?? '📚'} ${c.name}`, `nav_c:${sid(c.id)}`)), 1),
     [btn('➕ New Course', 'new_course')],
   ]
-  msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
+    if (msgId) {
+      await editMessage(chatId, msgId, text, kb)
+    } else {
+      await sendMessage(chatId, text, kb)
+    }
 }
 
 async function showCourseSettings(chatId: number, courseId: string, msgId?: number) {
@@ -89,7 +97,11 @@ async function showCourseSettings(chatId: number, courseId: string, msgId?: numb
     [btn('💰 Change Price', `edit_price:${sid(courseId)}`)],
     [btn('← Back to Course', `nav_c:${sid(courseId)}`)],
   ]
-  msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
+    if (msgId) {
+      await editMessage(chatId, msgId, text, kb)
+    } else {
+      await sendMessage(chatId, text, kb)
+    }
 }
 
 async function showCourse(chatId: number, courseId: string, msgId?: number) {
@@ -109,7 +121,11 @@ async function showCourse(chatId: number, courseId: string, msgId?: number) {
     [btn('📁 New Module', `new_mod:${sid(courseId)}:root`), btn('📄 New Note', `new_note:${sid(courseId)}:root`)],
     [btn('⚙️ Settings', `course_set:${sid(courseId)}`), btn('← Back', 'nav_courses')],
   ]
-  msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
+    if (msgId) {
+      await editMessage(chatId, msgId, text, kb)
+    } else {
+      await sendMessage(chatId, text, kb)
+    }
 }
 
 async function showFolder(chatId: number, folderId: string, courseId: string, msgId?: number) {
@@ -134,7 +150,11 @@ async function showFolder(chatId: number, folderId: string, courseId: string, ms
     // nav_c:{8} = 14 bytes ✓
     [btn('← Back', `nav_c:${sid(courseId)}`)],
   ]
-  msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
+    if (msgId) {
+      await editMessage(chatId, msgId, text, kb)
+    } else {
+      await sendMessage(chatId, text, kb)
+    }
 }
 
 async function showNote(chatId: number, itemId: string, msgId?: number) {
@@ -166,7 +186,11 @@ async function showNote(chatId: number, itemId: string, msgId?: number) {
     ]
   }
 
-  msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
+    if (msgId) {
+      await editMessage(chatId, msgId, text, kb)
+    } else {
+      await sendMessage(chatId, text, kb)
+    }
 }
 
 async function showViewMenu(chatId: number, itemId: string, msgId?: number) {
@@ -181,7 +205,11 @@ async function showViewMenu(chatId: number, itemId: string, msgId?: number) {
     // nav_i:{8}  = 6 + 8 = 14 bytes ✓
     [btn('← Back', `nav_i:${sid(itemId)}`)],
   ]
-  msgId ? await editMessage(chatId, msgId, text, kb) : await sendMessage(chatId, text, kb)
+    if (msgId) {
+      await editMessage(chatId, msgId, text, kb)
+    } else {
+      await sendMessage(chatId, text, kb)
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════

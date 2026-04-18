@@ -7,6 +7,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Upload, Folder, FileText, ChevronRight, ChevronDown, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { useMutation } from 'convex/react'
+import { api } from '@convex/_generated/api'
 
 // Types for the course declaration JSON
 interface CourseDeclarationItem {
@@ -135,7 +137,9 @@ export function CourseDeclarationModal({
   const [parseError, setParseError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [step, setStep] = useState<'input' | 'preview'>('input')
-  const [copied, setCopied] = useState(false) // Add copied state
+  const [copied, setCopied] = useState(false)
+
+  const createEntity = useMutation(api.adminMutations.createEntity as any)
 
   // Parse JSON and validate structure
   const handleParse = useCallback(() => {
@@ -193,10 +197,6 @@ export function CourseDeclarationModal({
     setSaving(true)
 
     try {
-      // Direct Supabase Batch Insert (Bypassing DraftStore for speed)
-      const { createClient } = await import('@/lib/supabase/client')
-      const supabase = createClient()
-      
       const itemsToInsert: any[] = []
       
       // Helper to process items recursively and prepare for batch insert
@@ -210,34 +210,27 @@ export function CourseDeclarationModal({
           
           itemsToInsert.push({
             id: newId,
-            course_id: courseId,
-            parent_id: parentId,
+            courseId: courseId, // mapped correctly for Convex
+            parentId: parentId || undefined,
             item_type: item.type,
             title: item.title,
             order_index: orderStart + index,
             is_active: true,
-            // Add note_content if it's a file with notes (placeholder for now)
-            // In a real scenario we'd insert note_content separately
           })
 
-          // Recurse for children
           if (item.children && item.children.length > 0) {
             processItems(item.children, newId, 0)
           }
         })
       }
 
-      // 1. Prepare data
       processItems(parsedData.structure, null, nextOrderIndex)
       
-      // 2. Batch Insert
       if (itemsToInsert.length > 0) {
-        console.log('Batch inserting', itemsToInsert.length, 'structure items...')
-        const { error } = await supabase
-          .from('structure_items')
-          .insert(itemsToInsert)
-        
-        if (error) throw error
+        console.log('Inserting', itemsToInsert.length, 'structure items...')
+        for (const item of itemsToInsert) {
+           await createEntity({ entityType: 'structure_item', data: item });
+        }
       }
 
       // 3. Update Course Info (if needed)

@@ -1,8 +1,9 @@
-import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { Input } from '@/components/ui/input'
 import { Search, HelpCircle, ChevronRight, FolderOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { fetchQuery } from 'convex/nextjs'
+import { api } from '@convex/_generated/api'
 
 interface QuizItem {
   id: string
@@ -32,49 +33,22 @@ export default async function QuizzesPage({
 }: {
   searchParams: Promise<{ q?: string }>
 }) {
-  const supabase = await createClient()
   const query = (await searchParams).q || ''
-
-  // Fetch attached quizzes with question counts
-  // Fetches quiz rows together with their existing question counts.
-  const { data: quizData } = await supabase
-    .from('attached_quizzes')
-    .select(`
-      id, title, note_item_id,
-      quiz_questions(id)
-    `)
-
-  // Get structure items and courses for these quizzes
-  // Resolves the owning structure items and courses for each attached quiz.
-  const itemIds = (quizData || []).map((q: any) => q.note_item_id).filter(Boolean)
-
-  let quizzes: QuizItem[] = []
-
-  if (itemIds.length > 0) {
-    const { data: itemsData } = await supabase
-      .from('structure_items')
-      .select(`
-        id, title, course_id,
-        courses(id, name, icon)
-      `)
-      .in('id', itemIds)
-
-    const itemsMap = new Map<string, any>((itemsData || []).map((item: any) => [item.id, item]))
-
-    quizzes = (quizData || [])
-      .filter((quiz: any) => itemsMap.has(quiz.note_item_id))
-      .map((quiz: any) => {
-        const item = itemsMap.get(quiz.note_item_id)
-        return {
-          id: quiz.id,
-          title: quiz.title,
-          hasQuestions: quiz.quiz_questions?.length > 0,
-          item_id: quiz.note_item_id,
-          itemTitle: item.title,
-          course: item.courses as any
-        }
-      })
-  }
+  const allQuizzes = await fetchQuery(api.admin.getAllAttachedQuizzes, {})
+  const quizzes: QuizItem[] = allQuizzes
+    .filter((quiz: any) => quiz.item && quiz.course)
+    .map((quiz: any) => ({
+      id: quiz._id,
+      title: quiz.title,
+      hasQuestions: quiz.questionCount > 0,
+      item_id: quiz.item._id,
+      itemTitle: quiz.item.title,
+      course: {
+        id: quiz.course._id,
+        name: quiz.course.name,
+        icon: quiz.course.icon,
+      },
+    }))
 
   // Filter by search query
   // Applies the title/course search filter when a query is present.

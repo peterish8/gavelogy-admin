@@ -6,11 +6,25 @@ import type { NotePdfLink } from '@/actions/judgment/links'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
-  Upload, Loader2, FileText, Trash2, Trash, Link2, Unlink, ChevronDown, Sparkles,
+  Upload, Loader2, FileText, Trash2, Trash, Link2, Unlink, ChevronDown, Sparkles, Copy,
 } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { toast } from 'sonner'
-import { createClient } from '@/lib/supabase/client'
-import { buildPageFlat, searchOnPage, findTextInPageData } from '@/lib/pdf-search'
+import { findTextInPageData } from '@/lib/pdf-search'
+import { JUDGMENT_SYSTEM_PROMPT } from '@/lib/prompts'
+import { 
+  LINK_COLORS, 
+  DEFAULT_LINK_COLOR, 
+  parseLinkMeta, 
+  encodeLinkMeta,
+  hexToRgb
+} from '@/lib/pdf-utils'
 
 const SCALE = 1.3
 
@@ -32,43 +46,6 @@ export interface ConnectionViz {
   label?: string
 }
 
-// ── Link color helpers — color is stored as JSON in the label field ──
-export const LINK_COLORS = [
-  { name: 'Amber',  hex: '#c9922a' },  // Facts
-  { name: 'Rose',   hex: '#dc2626' },  // Issues
-  { name: 'Blue',   hex: '#2563eb' },  // Ratio / Holding
-  { name: 'Violet', hex: '#7c3aed' },  // Reasoning / Doctrine
-  { name: 'Orange', hex: '#ea580c' },  // Statute / Provision
-  { name: 'Green',  hex: '#16a34a' },  // Evolution / Significance
-]
-export const DEFAULT_LINK_COLOR = '#c9922a'
-
-// Decodes a link label that may be plain text or a JSON object containing { text, color }.
-export function parseLinkMeta(label: string | null): { text: string; color: string } {
-  if (!label) return { text: '', color: DEFAULT_LINK_COLOR }
-  try {
-    if (label.startsWith('{')) {
-      const parsed = JSON.parse(label)
-      return { text: parsed.text ?? '', color: parsed.color ?? DEFAULT_LINK_COLOR }
-    }
-  } catch {}
-  return { text: label, color: DEFAULT_LINK_COLOR }
-}
-
-// Encodes display text and hex color into the JSON label format stored on a link row.
-export function encodeLinkMeta(text: string, color: string): string {
-  return JSON.stringify({ text, color })
-}
-
-// Converts a hex color string to an "r,g,b" comma-separated string for use in rgba() CSS values.
-function hexToRgb(hex: string): string {
-  const h = hex.replace('#', '')
-  const r = parseInt(h.slice(0, 2), 16)
-  const g = parseInt(h.slice(2, 4), 16)
-  const b = parseInt(h.slice(4, 6), 16)
-  return `${r},${g},${b}`
-}
-
 interface ConnectPdfCapture {
   page: number
   x: number
@@ -84,7 +61,6 @@ interface JudgmentPdfPanelProps {
   onLinksChange: (updater: (prev: NotePdfLink[]) => NotePdfLink[]) => void
   connectMode: boolean
   connectStep: 'note' | 'pdf' | null
-  connectNoteCapture: { text: string; linkId: string } | null
   connectPdfCapture: ConnectPdfCapture | null
   onConnectPdfCapture: (c: ConnectPdfCapture | null) => void
   highlightedLinkId: string | null
@@ -109,7 +85,6 @@ export function JudgmentPdfPanel({
   onLinksChange,
   connectMode,
   connectStep,
-  connectNoteCapture,
   connectPdfCapture,
   onConnectPdfCapture,
   highlightedLinkId,
@@ -202,15 +177,7 @@ export function JudgmentPdfPanel({
   // ── Load PDF URL on mount ──────────────────────────────────────────
   useEffect(() => {
     async function loadPdfUrl() {
-      const supabase = createClient()
-      const { data } = await supabase
-        .from('structure_items')
-        .select('pdf_url')
-        .eq('id', itemId)
-        .single()
-      if (data?.pdf_url) {
-        setSignedUrl(`/api/judgment/pdf-proxy?itemId=${itemId}`)
-      }
+      setSignedUrl(`/api/judgment/pdf-proxy?itemId=${itemId}`)
     }
     loadPdfUrl()
   }, [itemId])
@@ -364,14 +331,11 @@ export function JudgmentPdfPanel({
   async function handlePdfUpload(file: File) {
     setUploadingPdf(true)
     try {
-      const supabase = createClient()
-      const { data: { session } } = await supabase.auth.getSession()
       const formData = new FormData()
       formData.append('file', file)
       formData.append('caseId', itemId)
       const res = await fetch('/api/judgment/upload', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${session?.access_token}` },
         body: formData,
       })
       const result = await res.json()
@@ -517,9 +481,50 @@ export function JudgmentPdfPanel({
 
   // ── AI helpers ────────────────────────────────────────────────────
 
-  /** Strip custom tags from a string to get plain text. */
-  function stripTags(s: string): string {
-    return s.replace(/\[\/?\w+(?::[^\]>]*)?\]/g, '').replace(/\s+/g, ' ').trim()
+
+  /** Extract plain text from all PDF pages. */
+  async function extractPdfText(): Promise<string> {
+    if (!pdfDocRef.current) return ''
+    const parts: string[] = []
+    const total = pdfDocRef.current.numPages
+    for (let i = 1; i <= total; i++) {
+        const page = await pdfDocRef.current.getPage(i)
+        const content = await page.getTextContent()
+        const pageText = (content.items as any[]).map((item: any) => item.str).join(' ')
+        parts.push(`[Page ${i}]\n${pageText}`)
+    }
+    return parts.join('\n\n')
+  }
+
+  /** Copy text to clipboard with a toast. */
+  async function copyToClipboard(text: string, description: string) {
+    try {
+        await navigator.clipboard.writeText(text)
+        toast.success(`${description} copied to clipboard`)
+    } catch (err: any) {
+        toast.error('Failed to copy: ' + err.message)
+    }
+  }
+
+  /** Copies the base system instructions. */
+  function handleCopySystemPrompt() {
+    copyToClipboard(JUDGMENT_SYSTEM_PROMPT, 'System prompt')
+  }
+
+  /** Extracts PDF text and copies the combined instructions + judgment prompt. */
+  async function handleCopyFullPrompt() {
+    const toastId = toast.loading('📄 Extracting text for prompt…')
+    try {
+        const pdfText = await extractPdfText()
+        if (!pdfText) throw new Error('No text found in PDF')
+        
+        const fullPrompt = `${JUDGMENT_SYSTEM_PROMPT}\n\nGenerate a complete GAVELOGY case law note from the following judgment text:\n\n${pdfText}`
+        await copyToClipboard(fullPrompt, 'Full prompt')
+    } catch (err: any) {
+        toast.error(err.message || 'Prompt generation failed')
+    } finally {
+        toast.dismiss(toastId)
+    }
   }
 
   /** Programmatic fallback connections.
@@ -601,8 +606,8 @@ export function JudgmentPdfPanel({
     const toastId = toast.loading('📄 Extracting text from PDF…')
     try {
       // Extract text from every page — keep items with positions for auto-linking
-      const parts: string[] = []
       const pageData: { pageNum: number; items: any[] }[] = []
+      const parts: string[] = []
       const total: number = pdfDocRef.current.numPages
       for (let i = 1; i <= total; i++) {
         const page = await pdfDocRef.current.getPage(i)
@@ -774,18 +779,46 @@ export function JudgmentPdfPanel({
           />
           {/* ✨ AI Notes button — only visible when PDF is loaded */}
           {signedUrl && onAiNotesGenerated && (
-            <button
-              onClick={handleAiSummarize}
-              disabled={aiSummarizing || pdfLoading}
-              title="AI: Extract text & generate structured case notes in the notes panel"
-              className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-semibold transition-all bg-linear-to-r from-violet-500 to-purple-600 text-white hover:from-violet-600 hover:to-purple-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {aiSummarizing
-                ? <Loader2 className="w-3 h-3 animate-spin" />
-                : <Sparkles className="w-3 h-3" />
-              }
-              {aiSummarizing ? 'Generating…' : 'AI Notes'}
-            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  disabled={aiSummarizing || pdfLoading}
+                  className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-semibold transition-all bg-linear-to-r from-violet-500 to-purple-600 text-white hover:from-violet-600 hover:to-purple-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed group"
+                >
+                  {aiSummarizing
+                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                    : <Sparkles className="w-3 h-3" />
+                  }
+                  {aiSummarizing ? 'Generating…' : 'AI Notes'}
+                  <ChevronDown className="w-3 h-3 opacity-50 group-hover:opacity-100 transition-opacity" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem 
+                  onClick={handleAiSummarize}
+                  disabled={aiSummarizing}
+                  className="gap-2"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-purple-500" />
+                  <span>Generate AI Notes</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  onClick={handleCopySystemPrompt}
+                  className="gap-2"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy System Prompt</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  onClick={handleCopyFullPrompt}
+                  className="gap-2"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Copy Full Prompt (+PDF)</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
           {signedUrl && (
             <div className="flex items-center gap-px bg-muted/60 p-0.5 rounded-md border border-border">

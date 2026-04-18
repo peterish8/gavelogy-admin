@@ -1,7 +1,13 @@
 import { create } from 'zustand'
-import { createClient } from '@/lib/supabase/client'
+import { ConvexHttpClient } from "convex/browser"
+import { api } from "@convex/_generated/api"
 import type { DraftChange, EntityType } from '@/types/course-builder'
 import { useCourseStore } from './course-store'
+
+function getConvexClient() {
+  return new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+}
+
 
 interface DraftState {
   // State
@@ -170,7 +176,7 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     })
   },
 
-  // Writes all pending changes to Supabase in batched delete/insert/update operations, then syncs course store cache.
+  // Writes all pending changes to Convex in batched operations
   commitChanges: async () => {
     const { changes } = get()
 
@@ -181,63 +187,42 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     set({ isSaving: true, lastSaveError: null })
 
     try {
-      const supabase = createClient()
-      
+      const convex = getConvexClient();
       console.log('[DraftStore] Starting commit with', changes.length, 'changes')
 
-      // Splits queued changes by action so deletes, inserts, and updates can be persisted efficiently.
       const deleteChanges = changes.filter(c => c.action === 'delete')
       const createChanges = changes.filter(c => c.action === 'create')
       const updateChanges = changes.filter(c => c.action === 'update' || c.action === 'reorder')
 
-      // 1. Batch Deletions
       if (deleteChanges.length > 0) {
         console.log('[DraftStore] Deleting', deleteChanges.length, 'items...')
-        const deletionsByTable = deleteChanges.reduce((acc, c) => {
-          const table = getTableName(c.entityType)
-          if (!acc[table]) acc[table] = []
-          acc[table].push(c.entityId)
-          return acc
-        }, {} as Record<string, string[]>)
-
-        for (const [table, ids] of Object.entries(deletionsByTable)) {
-          const { error } = await supabase.from(table).delete().in('id', ids)
-          if (error) throw new Error(`Failed to delete from ${table}: ${error.message}`)
+        for (const c of deleteChanges) {
+           await convex.mutation(api.adminMutations.deleteEntity as any, { 
+             entityType: c.entityType, 
+             id: c.entityId 
+           });
         }
-        console.log('[DraftStore] Deletions complete')
       }
 
-      // 2. Batch Inserts (Creates only)
       if (createChanges.length > 0) {
         console.log('[DraftStore] Inserting', createChanges.length, 'new items...')
-        const insertsByTable = createChanges.reduce((acc, c) => {
-          const table = getTableName(c.entityType)
-          if (!acc[table]) acc[table] = []
-          acc[table].push({ ...c.data, id: c.entityId })
-          return acc
-        }, {} as Record<string, any[]>)
-
-        for (const [table, items] of Object.entries(insertsByTable)) {
-          console.log(`[DraftStore] Inserting ${items.length} to ${table}...`)
-          const { error } = await supabase.from(table).insert(items)
-          if (error) throw new Error(`Failed to insert to ${table}: ${error.message}`)
+        for (const c of createChanges) {
+           await convex.mutation(api.adminMutations.createEntity as any, { 
+             entityType: c.entityType, 
+             data: { ...c.data, id: c.entityId }
+           });
         }
-        console.log('[DraftStore] Inserts complete')
       }
 
-      // 3. Individual Updates (to avoid overwriting existing data)
       if (updateChanges.length > 0) {
         console.log('[DraftStore] Updating', updateChanges.length, 'items...')
-        for (const change of updateChanges) {
-          const table = getTableName(change.entityType)
-          const { error } = await supabase
-            .from(table)
-            .update(change.data)
-            .eq('id', change.entityId)
-          
-          if (error) throw new Error(`Failed to update ${table}: ${error.message}`)
+        for (const c of updateChanges) {
+           await convex.mutation(api.adminMutations.updateEntity as any, { 
+             entityType: c.entityType, 
+             id: c.entityId,
+             data: c.data
+           });
         }
-        console.log('[DraftStore] Updates complete')
       }
 
       // Mirrors committed structure changes into the course store so the UI reflects saves immediately.

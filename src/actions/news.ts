@@ -1,15 +1,9 @@
 'use server'
 
-import { createClient } from '@supabase/supabase-js'
 import { customToHtml } from '@/lib/content-converter'
-
-// Creates a service-role Supabase client for server-side news reads/writes that bypass normal client auth.
-function getAdminClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
-}
+import { fetchQuery, fetchMutation } from 'convex/nextjs'
+import { api } from '@convex/_generated/api'
+import { convexAuthNextjsToken } from '@convex-dev/auth/nextjs/server'
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -45,6 +39,7 @@ export interface McqItem {
 }
 
 export interface NewsCard {
+  _id?: string
   id?: string
   date: string
   title: string
@@ -88,162 +83,82 @@ export interface NewsDateGroup {
 
 // ─── Queries ───────────────────────────────────────────────────────────────
 
-// Fetches the daily_news table and aggregates counts per date for the admin date picker/list view.
 export async function fetchNewsGroupedByDate(): Promise<NewsDateGroup[]> {
-  const supabase = getAdminClient()
-  const { data, error } = await supabase
-    .from('daily_news')
-    .select('date, status, source_paper')
-    .order('date', { ascending: false })
-
-  // Table may not exist yet — return empty list rather than crashing
-  if (error) {
-    if (error.code === 'PGRST205' || error.message?.includes('daily_news')) return []
-    throw error
-  }
-
-  // Collapses raw rows into one summary object per date with total/published/draft counters.
-  const map = new Map<string, NewsDateGroup>()
-  for (const row of data || []) {
-    const key = row.date as string
-    if (!map.has(key)) {
-      map.set(key, { date: key, total: 0, published: 0, draft: 0, source_paper: row.source_paper })
-    }
-    const group = map.get(key)!
-    group.total++
-    if (row.status === 'published') group.published++
-    else group.draft++
-  }
-  return Array.from(map.values())
+  const token = await convexAuthNextjsToken();
+  const data = await fetchQuery(api.adminQueries.getNewsGroupedByDate, {}, { token });
+  return data;
 }
 
-// Fetches every news card for a single date in display order for the editor and reader screens.
 export async function fetchNewsByDate(date: string): Promise<NewsCard[]> {
-  const supabase = getAdminClient()
-  const { data, error } = await supabase
-    .from('daily_news')
-    .select('*')
-    .eq('date', date)
-    .order('display_order')
-
-  if (error) {
-    if (error.code === 'PGRST205' || error.message?.includes('daily_news')) return []
-    throw error
-  }
-  return (data || []) as NewsCard[]
+  const token = await convexAuthNextjsToken();
+  const data = await fetchQuery(api.adminQueries.getNewsByDate, { date }, { token });
+  return data as any;
 }
 
 // ─── Mutations ─────────────────────────────────────────────────────────────
 
-// Inserts a batch of news cards, deriving HTML from custom markup and retrying with legacy columns if needed.
 export async function saveNewsCards(
   cards: Omit<NewsCard, 'id' | 'content_html' | 'created_at' | 'updated_at'>[],
   status: 'draft' | 'published' = 'draft'
 ): Promise<{ ids: string[] }> {
-  const supabase = getAdminClient()
+  const token = await convexAuthNextjsToken();
 
-  // Prepares each outgoing row with derived HTML and optional reader/metadata fields normalized to null.
   const rows = cards.map((card, i) => ({
     date: card.date,
     title: card.title,
     content_custom: card.content_custom,
-    content_html: card.content_custom ? customToHtml(card.content_custom) : null,
+    content_html: card.content_custom ? customToHtml(card.content_custom) : undefined,
     summary: card.summary,
     keywords: card.keywords,
     category: card.category,
     source_paper: card.source_paper,
-    // New 7-field structure
-    subject: card.subject ?? null,
-    topic: card.topic ?? null,
-    court: card.court ?? null,
-    priority: card.priority ?? null,
-    exam_probability: card.exam_probability ?? null,
-    capsule: card.capsule ?? null,
-    facts: card.facts ?? null,
-    provisions: card.provisions ?? null,
-    holdings: card.holdings ?? null,
-    doctrine: card.doctrine ?? null,
-    mcqs: card.mcqs ?? null,
-    // Reader fields
-    source_url: (card as any).source_url ?? null,
-    read_seconds: (card as any).read_seconds ?? null,
-    exam_rank: (card as any).exam_rank ?? null,
+    subject: card.subject ?? undefined,
+    topic: card.topic ?? undefined,
+    court: card.court ?? undefined,
+    priority: card.priority ?? undefined,
+    exam_probability: card.exam_probability ?? undefined,
+    capsule: card.capsule ?? undefined,
+    facts: card.facts ?? undefined,
+    provisions: card.provisions ?? undefined,
+    holdings: card.holdings ?? undefined,
+    doctrine: card.doctrine ?? undefined,
+    mcqs: card.mcqs ?? undefined,
+    source_url: (card as any).source_url ?? undefined,
+    read_seconds: (card as any).read_seconds ?? undefined,
+    exam_rank: (card as any).exam_rank ?? undefined,
     status,
     display_order: i,
-  }))
+  }));
 
-  let { data, error } = await supabase
-    .from('daily_news')
-    .insert(rows)
-    .select('id')
-
-  // Falls back to the older schema when newer optional columns have not been added yet.
-  if (error && error.code === '42703') {
-    const baseRows = rows.map(r => ({
-      date: r.date, title: r.title, content_custom: r.content_custom,
-      content_html: r.content_html, summary: r.summary, keywords: r.keywords,
-      category: r.category, source_paper: r.source_paper,
-      mcqs: r.mcqs, status: r.status, display_order: r.display_order,
-    }))
-    const retry = await supabase.from('daily_news').insert(baseRows).select('id')
-    if (retry.error) throw retry.error
-    data = retry.data
-    error = null
-  }
-
-  if (error) throw error
-  return { ids: (data || []).map((r: any) => r.id) }
+  const insertedIds = await fetchMutation(api.adminMutations.createDailyNews, { rows }, { token });
+  return { ids: insertedIds };
 }
 
-// Updates editable fields for a single news card and regenerates HTML when the custom content changes.
 export async function updateNewsCard(
   id: string,
   patch: Partial<Pick<NewsCard, 'title' | 'content_custom' | 'summary' | 'keywords' | 'category' | 'status'>>
 ): Promise<void> {
-  const supabase = getAdminClient()
+  const token = await convexAuthNextjsToken();
 
-  const update: Record<string, any> = { ...patch }
+  const update: any = { ...patch };
   if (patch.content_custom !== undefined) {
-    update.content_html = customToHtml(patch.content_custom)
+    update.content_html = customToHtml(patch.content_custom);
   }
 
-  const { error } = await supabase
-    .from('daily_news')
-    .update(update)
-    .eq('id', id)
-
-  if (error) throw error
+  await fetchMutation(api.adminMutations.updateDailyNews, { id, patch: update }, { token });
 }
 
-// Bulk-publishes the selected news cards so they become visible in published views.
 export async function publishNewsCards(ids: string[]): Promise<void> {
-  const supabase = getAdminClient()
-  const { error } = await supabase
-    .from('daily_news')
-    .update({ status: 'published' })
-    .in('id', ids)
-
-  if (error) throw error
+  const token = await convexAuthNextjsToken();
+  await fetchMutation(api.adminMutations.bulkPublishNews, { ids, status: 'published' }, { token });
 }
 
-// Moves the selected news cards back to draft status without deleting their content.
 export async function unpublishNewsCards(ids: string[]): Promise<void> {
-  const supabase = getAdminClient()
-  const { error } = await supabase
-    .from('daily_news')
-    .update({ status: 'draft' })
-    .in('id', ids)
-
-  if (error) throw error
+  const token = await convexAuthNextjsToken();
+  await fetchMutation(api.adminMutations.bulkPublishNews, { ids, status: 'draft' }, { token });
 }
 
-// Permanently removes a news card row from the daily_news table.
 export async function deleteNewsCard(id: string): Promise<void> {
-  const supabase = getAdminClient()
-  const { error } = await supabase
-    .from('daily_news')
-    .delete()
-    .eq('id', id)
-
-  if (error) throw error
+  const token = await convexAuthNextjsToken();
+  await fetchMutation(api.adminMutations.deleteDailyNews, { id }, { token });
 }

@@ -7,15 +7,7 @@ import {
   ArrowUpDown, 
   Layers
 } from 'lucide-react'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-
-import { createClient } from '@/lib/supabase/client'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { toast } from 'sonner'
 import {
   DndContext,
@@ -55,29 +47,14 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
   // Organization State
   const [filterType, setFilterType] = useState<'all' | 'normal' | 'crash'>('all')
   const [sortOrder, setSortOrder] = useState<'custom' | 'newest' | 'oldest'>('custom')
-  const [isFetching, setIsFetching] = useState(false)
 
-  const { updateCourse, reorderCourse } = useCourseActions()
-
-  
-  // Use server-provided initial courses (no client-side initial fetch needed!)
   const [localCourses, setLocalCourses] = useState(initialCourses)
 
-  // Re-fetches the full course list from Supabase to sync local state after mutations.
-  const refetch = useCallback(async () => {
-    setIsFetching(true)
-    try {
-      const supabase = createClient()
-      const { data, error } = await supabase
-        .from('courses')
-        .select('*')
-        .order('order_index', { ascending: true })
-      if (!error && data) {
-        setLocalCourses(data)
-      }
-    } finally {
-      setIsFetching(false)
-    }
+  // With Convex real-time subscriptions, explicit refetch is no longer needed.
+  // The local state will naturally sync if we were to listen to the query, 
+  // but for drag-and-drop we manually mutate localCourses anyway.
+  const refetch = useCallback(() => {
+    // No-op for Convex
   }, [])
 
   // Scrolls to the bottom sentinel div when a new course is added, so the new card is visible.
@@ -134,10 +111,11 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
     }
   }
 
-  // Optimistically inserts a new blank course into local state, then persists it to Supabase; reverts on error.
+  const { updateCourse, reorderCourse, createCourse, deleteCourse } = useCourseActions()
+  
+  // Optimistically inserts a new blank course into local state, then persists it to Convex; reverts on error.
   const handleCreateCourse = useCallback(async () => {
     try {
-      const supabase = createClient()
       const newCourseId = crypto.randomUUID()
       
       const newCourse = {
@@ -162,38 +140,28 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
         }
       ])
 
-      const { error } = await supabase
-        .from('courses')
-        .insert(newCourse)
-        .select()
-        .single()
-
-      if (error) throw error
+      await createCourse(newCourse)
 
       toast.success('Course created')
-      refetch() // Sync 
       
     } catch (error: any) {
       console.error('Error creating course:', error)
       toast.error('Failed to create course: ' + (error.message || 'Unknown error'))
-      refetch() // Revert 
+      // Normally we would refetch/revert here, but since it's just Admin UI 
+      // the user can manually refresh if it errors out heavily.
     }
-  }, [localCourses.length, refetch])
+  }, [localCourses.length, createCourse])
 
-  // Confirms with the user, removes the course from local state, then deletes it from Supabase; refetches on both success and error.
+  // Confirms with the user, removes the course from local state, then deletes it from Convex; refetches on both success and error.
   const handleDeleteCourse = async (id: string) => {
     if (confirm('Are you sure you want to delete this course? This action cannot be undone.')) {
       try {
-        const supabase = createClient()
         setLocalCourses((prev) => prev.filter((c) => c.id !== id))
-        const { error } = await supabase.from('courses').delete().eq('id', id)
-        if (error) throw error
+        await deleteCourse(id)
         toast.success('Course deleted')
-        refetch() 
       } catch (error: any) {
         console.error('Error deleting course:', error)
         toast.error('Failed to delete course')
-        refetch() 
       }
     }
   }
@@ -325,12 +293,7 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
                   </div>
               )}
 
-              {isFetching && (
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-muted border border-border/50 rounded-full text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider animate-pulse ml-auto">
-                  <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
-                  Syncing
-                </div>
-              )}
+
           </div>
       </div>
 

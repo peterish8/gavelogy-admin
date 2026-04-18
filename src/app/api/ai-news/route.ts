@@ -331,7 +331,7 @@ async function runModel(
   messages: any[],
   keys: { nvidia?: string; groq?: string; groq2?: string; or?: string },
 ): Promise<{ articles: ArticleItem[]; provider: string } | null> {
-  const { nvidia, groq: groqKey, groq2, or: orKey } = keys
+  const { nvidia, groq: groqKey, or: orKey } = keys
   try {
     switch (modelId) {
       // ── NVIDIA models ──

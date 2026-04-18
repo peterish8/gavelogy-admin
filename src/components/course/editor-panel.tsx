@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { useConvex, useMutation } from 'convex/react'
+import { api } from '@convex/_generated/api'
 import { useDraftStore } from '@/lib/stores/draft-store'
 import { useLocalContentCache } from '@/lib/stores/local-content-cache'
 import { cn } from '@/lib/utils'
@@ -19,7 +20,14 @@ import { htmlToCustom, customToHtml, fixAiMistakes } from '@/lib/content-convert
 import { fetchLinksForItem, insertLink, deleteLink } from '@/actions/judgment/links'
 import type { NotePdfLink } from '@/actions/judgment/links'
 import { saveNoteContent, saveFlashcardsJson } from '@/actions/judgment/note-content'
-import { JudgmentPdfPanel, parseLinkMeta } from './judgment-pdf-panel'
+import { JudgmentPdfPanel } from './judgment-pdf-panel'
+import { 
+    findTextInPageData 
+} from '@/lib/pdf-search'
+import { 
+    encodeLinkMeta, 
+    parseLinkMeta
+} from '@/lib/pdf-utils'
 import type { ConnectionViz } from './judgment-pdf-panel'
 import { LineHeight } from '@/lib/line-height-extension'
 import { Table } from '@tiptap/extension-table'
@@ -291,6 +299,11 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   const cachedPdfDoc = useRef<any>(null)
 
   const { changes } = useDraftStore()
+  const convex = useConvex()
+  const saveDraftMutation = useMutation(api.adminMutations.saveDraft as any)
+  const saveQuizMutation = useMutation(api.adminMutations.saveQuiz as any)
+  const publishMutation = useMutation(api.adminMutations.publishNoteContent as any)
+  const discardDraftMutation = useMutation(api.adminMutations.discardDraft as any)
 
   // Active highlight color for "paint bucket" mode — shows tick on selection
   const [selectedHighlightColor, setSelectedHighlightColor] = useState<string | null>(null)
@@ -374,6 +387,112 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
       toast.error(e.message || 'Flashcard generation failed', { id: toastId })
     } finally {
       setAiFlashcarding(false)
+    }
+  }
+
+  /**
+   * MAGIC PASTE: Processes AI output that includes ---CONNECTIONS_JSON---
+   * This automatically finds coordinates in the PDF and creates interactive links.
+   */
+  const handleMagicPaste = async (text: string) => {
+    if (!editor || !itemId) return
+    const [formattedPart, jsonPart] = text.split('---CONNECTIONS_JSON---')
+    if (!jsonPart) return
+
+    const toastId = toast.loading('🔗 Connecting AI notes to PDF…')
+    try {
+        // 1. Parse JSON
+        let connections: any[] = []
+        try {
+            connections = JSON.parse(jsonPart.trim())
+        } catch {
+            throw new Error('Malformed connections JSON at bottom of text')
+        }
+
+        if (!Array.isArray(connections) || connections.length === 0) {
+            // No connections? Just paste formatted text
+            const html = customToHtml(formattedPart.trim())
+            editor.commands.setContent(html)
+            toast.success('AI Content Processed!', { id: toastId })
+            return
+        }
+
+        // 2. Load PDF and build index
+        const pdfjsLib = await import('pdfjs-dist')
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
+        
+        let doc = cachedPdfDoc.current
+        if (!doc) {
+            const proxyUrl = `/api/judgment/pdf-proxy?itemId=${itemId}`
+            doc = await pdfjsLib.getDocument(proxyUrl).promise
+            cachedPdfDoc.current = doc
+        }
+
+        const pageData: { pageNum: number; items: any[] }[] = []
+        for (let i = 1; i <= doc.numPages; i++) {
+            const page = await doc.getPage(i)
+            const content = await page.getTextContent()
+            pageData.push({ pageNum: i, items: content.items })
+        }
+
+        // 3. Delete old links (clean slate for new AI note)
+        const oldLinks = await fetchLinksForItem(itemId)
+        for (const old of oldLinks) {
+            try { await deleteLink(old.id) } catch {}
+        }
+
+        // 4. Process each connection
+        let taggedFormatted = formattedPart.trim()
+        const createdLinks: NotePdfLink[] = []
+
+        for (const conn of connections) {
+            const searchText = conn.pdfSearchText || conn.searchText || ''
+            const pos = findTextInPageData(pageData, searchText, conn.pdfPage)
+            
+            if (pos) {
+                const label = encodeLinkMeta(conn.label || '', conn.color || '#c9922a')
+                const newLink = await insertLink({
+                    item_id: itemId,
+                    link_id: conn.linkId,
+                    pdf_page: pos.page,
+                    x: pos.x,
+                    y: pos.y,
+                    width: pos.width,
+                    height: pos.height,
+                    label,
+                })
+                createdLinks.push(newLink)
+
+                // Inject [link:X] tag into the note text
+                const anchor = conn.noteAnchor || conn.noteText || ''
+                if (anchor && !taggedFormatted.includes(`[link:${conn.linkId}]`)) {
+                    const escaped = anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                    // Try to wrap inside a heading tag first
+                    const headingRe = new RegExp(`(\\[h[123]\\])(${escaped})(\\[/h[123]\\])`, 'i')
+                    if (headingRe.test(taggedFormatted)) {
+                        taggedFormatted = taggedFormatted.replace(headingRe, `$1[link:${conn.linkId}]$2[/link]$3`)
+                    } else {
+                        // Fall back: wrap first occurrence
+                        taggedFormatted = taggedFormatted.replace(new RegExp(escaped, 'i'), `[link:${conn.linkId}]${anchor}[/link]`)
+                    }
+                }
+            }
+        }
+
+        // 5. Apply to editor
+        const html = customToHtml(taggedFormatted)
+        editor.commands.setContent(html)
+        
+        // 6. Refresh UI
+        setJLinks(createdLinks)
+        setJLinksLoaded(true)
+        
+        toast.success(`✨ Success! ${createdLinks.length} interactive connections created.`, { id: toastId })
+    } catch (e: any) {
+        toast.error(e.message || 'Magic Paste failed', { id: toastId })
+        // Fallback: just paste the formatted part
+        const html = customToHtml(formattedPart.trim())
+        editor.commands.setContent(html)
     }
   }
 
@@ -891,12 +1010,12 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
     const editorHtml = editor.getHTML()
     const hasLinkedSpans = /data-link-id=/.test(editorHtml)
     if (!hasLinkedSpans) {
-      // Editor has no linked text but DB has links — load live content
-      const supabase = createClient()
-      supabase.from('note_contents').select('content_html').eq('item_id', itemId).maybeSingle()
-        .then(({ data }: { data: any }) => {
-          if (data?.content_html) {
-            const html = customToHtml(data.content_html)
+      // Editor has no linked text but DB has links — load live content via Convex
+      convex.query(api.adminQueries.getEditorData as any, { itemId })
+        .then((dbData: any) => {
+          const content = dbData?.liveRes?.data?.content_html
+          if (content) {
+            const html = customToHtml(content)
             if (/data-link-id=/.test(html)) {
               editor.commands.setContent(html)
               toast.info('Loaded published content with linked text')
@@ -1169,9 +1288,17 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
       },
       handlePaste: (view, event) => {
         const text = event.clipboardData?.getData('text/plain')
-        if (text && (text.includes('[box:') || text.includes('[h1]') || text.includes('[p]') || text.includes('[size:'))) {
+        if (!text) return false
+
+        // 1. MAGIC AI PASTE: Detect AI connections JSON
+        if (text.includes('---CONNECTIONS_JSON---')) {
+            handleMagicPaste(text)
+            return true // Prevent default paste
+        }
+
+        // 2. MAGIC FORMAT PASTE: Detect AI syntax and render it instantly
+        if (text.includes('[box:') || text.includes('[h1]') || text.includes('[p]') || text.includes('[size:')) {
             try {
-                // MAGIC PASTE: Detect AI syntax and render it instantly
                 const html = customToHtml(text)
                 
                 // Parse HTML to ProseMirror Slice
@@ -1346,29 +1473,19 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
     async function fetch() {
         console.log('EditorPanel: [Fetch] Starting for', itemId)
         try {
-            const supabase = createClient()
-            
-            // Checks for draft content
-            // localDraft logic removed as unused
-
             // Check Local Cache First
             const cachedNote = localCache.getNoteContent(itemId!)
             const cachedNoteSavedAt = localCache.getNoteContentSavedAt(itemId!)
             const cachedQuiz = localCache.getQuizContent(itemId!)
 
-            // Fetch DB Data in Parallel
-            const [draftRes, liveRes, quizRes, itemRes] = await Promise.all([
-                supabase.from('draft_content_cache').select('*').eq('original_content_id', itemId!).maybeSingle(),
-                supabase.from('note_contents').select('*').eq('item_id', itemId!).maybeSingle(),
-                supabase.from('attached_quizzes').select('*, quiz_questions(*)').eq('note_item_id', itemId!).maybeSingle(),
-                supabase.from('structure_items').select('pdf_url').eq('id', itemId!).maybeSingle()
-            ])
+            // Fetch DB Data via Convex
+            const dbData = await convex.query(api.adminQueries.getEditorData as any, { itemId })
+            const { draftRes, liveRes, itemRes, quizRes } = dbData
 
             if (!isMounted) return
 
             // If the DB note was saved AFTER the local cache entry (e.g. saved via MCP/Claude),
             // discard the stale local cache so the fresh DB content is shown.
-            // Also discard if cache has no timestamp (legacy entries) and DB has content.
             const dbUpdatedAt = liveRes.data?.updated_at
             const cacheIsStale = cachedNote && dbUpdatedAt && (
                 !cachedNoteSavedAt || new Date(dbUpdatedAt) > new Date(cachedNoteSavedAt)
@@ -1392,7 +1509,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                 quizContent: cachedQuiz || null,
                 quizData: quizRes.data,
 
-                // Flashcard Data (from note_contents.flashcards_json)
+                // Flashcard Data (from node_contents.flashcards_json)
                 flashcardsJson: liveRes.data?.flashcards_json || null,
             })
             console.log('EditorPanel: [Fetch] Complete - setFetchedData called for', itemId)
@@ -1550,46 +1667,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
     const customSyntax = htmlToCustom(currentHtml)
     
     try {
-        const supabase = createClient()
-        
-        // Create a timeout promise
-
-
-        // Wrapper for the DB operation
-        const dbOperation = async () => {
-             // Check if draft already exists
-             const { data: existingDraft } = await supabase
-                .from('draft_content_cache')
-                .select('id')
-                .eq('original_content_id', itemId)
-                .maybeSingle()
-
-             if (existingDraft) {
-                // Update existing draft
-                const { error } = await supabase
-                    .from('draft_content_cache')
-                    .update({ 
-                        draft_data: { content_html: customSyntax },
-                        updated_at: new Date().toISOString()
-                    })
-                    .eq('id', existingDraft.id)
-
-                if (error) throw error
-            } else {
-                // Insert new draft
-                const { error } = await supabase
-                    .from('draft_content_cache')
-                    .insert({ 
-                        original_content_id: itemId,
-                        draft_data: { content_html: customSyntax }
-                    })
-
-                if (error) throw error
-            }
-        }
-
-        // Execute DB Operation directly (let Supabase handle network timeouts)
-        await dbOperation()
+        await saveDraftMutation({ itemId, contentHtml: customSyntax })
         
         setHasDraft(true)
         setLastSaved(new Date())
@@ -1616,11 +1694,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
     setSaveQuizLoading(true)
 
     try {
-        const supabase = createClient()
-        
-        // 1. Parse the quiz text into structured data
         const parsedQuiz = parseQuizText(quizContent)
-        
         if (parsedQuiz.questions.length === 0) {
             toast.error("No valid questions found. Use format: Q1. Question text...")
             setSaveQuizLoading(false)
@@ -1629,71 +1703,11 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
 
         console.log('Saving quiz with', parsedQuiz.questions.length, 'questions')
 
-        // 2. Check if quiz already exists for this note
-        const { data: existingQuiz } = await supabase
-            .from('attached_quizzes')
-            .select('id')
-            .eq('note_item_id', itemId)
-            .maybeSingle()
-
-        let quizId: string
-
-        if (existingQuiz) {
-            // Update existing quiz
-            const { error: updateError } = await supabase
-                .from('attached_quizzes')
-                .update({ 
-                    title: parsedQuiz.title || title || 'Quiz',
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', existingQuiz.id)
-
-            if (updateError) throw updateError
-            quizId = existingQuiz.id
-            console.log('Updated existing quiz:', quizId)
-        } else {
-            // Insert new quiz
-            const { data: newQuiz, error: insertQuizError } = await supabase
-                .from('attached_quizzes')
-                .insert({ 
-                    note_item_id: itemId,
-                    title: parsedQuiz.title || title || 'Quiz'
-                })
-                .select('id')
-                .single()
-
-            if (insertQuizError) throw insertQuizError
-            quizId = newQuiz.id
-            console.log('Created new quiz:', quizId)
-        }
-        
-        const quizIdFinal = quizId
-
-        // 3. Delete old questions for this quiz (to handle edits)
-        const { error: deleteError } = await supabase
-            .from('quiz_questions')
-            .delete()
-            .eq('quiz_id', quizIdFinal)
-
-        if (deleteError) {
-            console.warn('Failed to delete old questions:', deleteError)
-        }
-
-        // 4. Insert new questions
-        const questionsToInsert = parsedQuiz.questions.map((q, index) => ({
-            quiz_id: quizIdFinal,
-            question_text: q.questionText,
-            options: q.options, // JSONB field
-            correct_answer: q.correctAnswer,
-            explanation: q.explanation,
-            order_index: index
-        }))
-
-        const { error: insertError } = await supabase
-            .from('quiz_questions')
-            .insert(questionsToInsert)
-
-        if (insertError) throw insertError
+        await saveQuizMutation({
+            itemId,
+            title: parsedQuiz.title || title || 'Quiz',
+            questions: parsedQuiz.questions
+        })
         
         setOriginalQuizContent(quizContent)
         toast.success(`Quiz saved with ${parsedQuiz.questions.length} questions`)
@@ -1749,31 +1763,9 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
     const customSyntax = htmlToCustom(currentHtml)
     
     try {
-        const supabase = createClient()
+        await publishMutation({ itemId, contentHtml: customSyntax })
         
-        // 1. Update Live Table
-        const { error: liveError } = await supabase
-            .from('note_contents')
-            .upsert({ 
-                item_id: itemId,
-                content_html: customSyntax,
-                updated_at: new Date().toISOString()
-            }, { onConflict: 'item_id' })
-
-        if (liveError) throw liveError
-        
-        // 2. Delete Draft (Cache)
-        const { error: deleteError } = await supabase
-            .from('draft_content_cache')
-            .delete()
-            .eq('original_content_id', itemId)
-
-        if (deleteError) console.warn('Failed to clean up draft', deleteError)
-        
-        // 3. Clear Local Cache (LocalStorage)
         localCache.clearContent(itemId)
-
-        // 4. Update UI State
         setHasDraft(false)
         setDraftId(null)
         setInitialContent(currentHtml)
@@ -1799,25 +1791,16 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
       
       setLoading(true)
       try {
-          const supabase = createClient()
-          
-          // Delete draft from cache table
-          await supabase.from('draft_content_cache').delete().eq('original_content_id', itemId)
-          
-          // Clear local memory cache
+          await discardDraftMutation({ itemId: itemId! })
           if (itemId) localCache.clearContent(itemId)
           
           setHasDraft(false)
           setDraftId(null)
           
-          // Fetch published content (or empty if never published)
-          const { data } = await supabase
-                .from('note_contents')
-                .select('*')
-                .eq('item_id', itemId)
-                .limit(1)
+          const dbData = await convex.query(api.adminQueries.getEditorData as any, { itemId })
+          const liveRes = dbData.liveRes
             
-          const rawContent = data?.[0]?.content_html || ''
+          const rawContent = liveRes.data?.content_html || ''
           const htmlContent = customToHtml(rawContent)
           editor?.commands.setContent(htmlContent)
           setInitialContent(htmlContent)

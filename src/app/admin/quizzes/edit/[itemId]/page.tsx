@@ -1,66 +1,28 @@
 'use client'
 
-import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { EditorPanel } from '@/components/course/editor-panel'
-
-interface QuizData {
-  id: string
-  title: string
-  course_id: string
-  courses: {
-    id: string
-    name: string
-    icon: string
-  }
-}
+import { useQuery } from 'convex/react'
+import { api } from '@convex/_generated/api'
 
 export default function QuizEditPage() {
   const params = useParams()
   const itemId = params.itemId as string
   
-  const [quizData, setQuizData] = useState<QuizData | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const quizData = useQuery(api.adminQueries.getEntity, itemId ? { entityType: 'structure_items', id: itemId } : "skip") as any
+  const courseData = useQuery(api.adminQueries.getEntity, quizData?.courseId ? { entityType: 'courses', id: quizData.courseId } : "skip") as any
 
-  useEffect(() => {
-    const fetchQuiz = async () => {
-      try {
-        const supabase = createClient()
-        const { data, error: fetchError } = await supabase
-          .from('structure_items')
-          .select(`
-            id, title, course_id,
-            courses(id, name, icon)
-          `)
-          .eq('id', itemId)
-          .single()
-
-        if (fetchError) throw fetchError
-        if (data) {
-          setQuizData({
-            id: data.id,
-            title: data.title,
-            course_id: data.course_id,
-            courses: data.courses as any
-          })
-        }
-      } catch (err) {
-        console.error('Error fetching quiz:', err)
-        setError('Failed to load quiz')
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    if (itemId) {
-      fetchQuiz()
-    }
-  }, [itemId])
+  const isLoading = quizData === undefined || (quizData && quizData.courseId && courseData === undefined)
+  const error = quizData === null ? 'Quiz not found' : null
+  
+  const mergedQuizData = quizData && courseData ? {
+    title: quizData.title,
+    course_id: quizData.courseId,
+    courses: courseData
+  } : null
 
   if (isLoading) {
     return (
@@ -70,7 +32,7 @@ export default function QuizEditPage() {
     )
   }
 
-  if (error || !quizData) {
+  if (error || !mergedQuizData) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] text-center">
         <p className="text-destructive mb-4">{error || 'Quiz not found'}</p>
@@ -92,12 +54,12 @@ export default function QuizEditPage() {
         </Link>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center text-lg">
-            {quizData.courses?.icon || '📚'}
+            {mergedQuizData.courses?.icon || '📚'}
           </div>
           <div>
-            <h1 className="text-xl font-bold text-foreground">{quizData.title}</h1>
+            <h1 className="text-xl font-bold text-foreground">{mergedQuizData.title}</h1>
             <p className="text-sm text-muted-foreground">
-              {quizData.courses?.name} • Editing Quiz
+              {mergedQuizData.courses?.name} • Editing Quiz
             </p>
           </div>
         </div>
@@ -108,8 +70,8 @@ export default function QuizEditPage() {
         <EditorPanel
           itemId={itemId}
           itemType="file"
-          courseId={quizData.course_id}
-          title={quizData.title}
+          courseId={mergedQuizData.course_id}
+          title={mergedQuizData.title}
           mode="quiz-only"
         />
       </div>

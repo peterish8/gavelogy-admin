@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { useMutation } from 'convex/react'
+import { api } from '@convex/_generated/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -13,8 +14,8 @@ import Link from 'next/link'
 
 export default function CreateNotePage() {
   const router = useRouter()
-  const supabase = createClient()
-  
+  const createCaseNote = useMutation(api.caseNotes.createCaseNote)
+
   const [loading, setLoading] = useState(false)
   const [caseNumber, setCaseNumber] = useState('')
   const [content, setContent] = useState('')
@@ -38,15 +39,7 @@ export default function CreateNotePage() {
 
     setLoading(true)
     try {
-      const { error } = await supabase
-        .from('contemprory_case_notes')
-        .insert({
-          case_number: caseNumber,
-          overall_content: content
-        })
-
-      if (error) throw error
-
+      await createCaseNote({ case_number: caseNumber, overall_content: content })
       toast.success('Note created successfully')
       router.push('/admin/notes')
       router.refresh()

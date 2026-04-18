@@ -2,7 +2,8 @@
 
 import { useState, useEffect, use } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { useQuery, useMutation } from 'convex/react'
+import { api } from '@convex/_generated/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -25,54 +26,36 @@ import {
 export default function EditNotePage({ params }: { params: Promise<{ caseNumber: string }> }) {
   const resolvedParams = use(params)
   const router = useRouter()
-  const supabase = createClient()
   const caseNumberDecoded = decodeURIComponent(resolvedParams.caseNumber)
-  
+
+  const noteData = useQuery(api.caseNotes.getCaseNote, { case_number: caseNumberDecoded })
+  const updateCaseNote = useMutation(api.caseNotes.updateCaseNote)
+  const deleteCaseNote = useMutation(api.caseNotes.deleteCaseNote)
+
   const [loading, setLoading] = useState(false)
-  const [fetching, setFetching] = useState(true)
   const [content, setContent] = useState('')
+  const [initialized, setInitialized] = useState(false)
 
   useEffect(() => {
-    const fetchNote = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('contemprory_case_notes')
-          .select('overall_content')
-          .eq('case_number', caseNumberDecoded)
-          .single()
-
-        if (error) throw error
-        if (data) {
-          setContent(data.overall_content)
-        }
-      } catch {
-        toast.error('Failed to load note')
+    if (!initialized && noteData !== undefined) {
+      if (noteData) {
+        setContent(noteData.overall_content ?? '')
+      } else {
+        toast.error('Note not found')
         router.push('/admin/notes')
-      } finally {
-        setFetching(false)
       }
+      setInitialized(true)
     }
-
-    fetchNote()
-  }, [caseNumberDecoded, router, supabase])
+  }, [noteData, initialized, router])
 
   const handleUpdate = async () => {
     if (!content.trim()) {
       toast.error('Content is required')
       return
     }
-
     setLoading(true)
     try {
-      const { error } = await supabase
-        .from('contemprory_case_notes')
-        .update({
-          overall_content: content
-        })
-        .eq('case_number', caseNumberDecoded)
-
-      if (error) throw error
-
+      await updateCaseNote({ case_number: caseNumberDecoded, overall_content: content })
       toast.success('Note updated successfully')
       router.refresh()
     } catch (error: any) {
@@ -85,13 +68,7 @@ export default function EditNotePage({ params }: { params: Promise<{ caseNumber:
   const handleDelete = async () => {
     setLoading(true)
     try {
-      const { error } = await supabase
-        .from('contemprory_case_notes')
-        .delete()
-        .eq('case_number', caseNumberDecoded)
-
-      if (error) throw error
-
+      await deleteCaseNote({ case_number: caseNumberDecoded })
       toast.success('Note deleted successfully')
       router.push('/admin/notes')
       router.refresh()
@@ -101,7 +78,7 @@ export default function EditNotePage({ params }: { params: Promise<{ caseNumber:
     }
   }
 
-  if (fetching) {
+  if (noteData === undefined) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />

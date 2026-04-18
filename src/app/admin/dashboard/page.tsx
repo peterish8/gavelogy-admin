@@ -1,37 +1,21 @@
-import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { FileText, Folder, BookOpen, Sparkles, Plus, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { fetchQuery } from 'convex/nextjs'
+import { api } from '@convex/_generated/api'
 
 // Dashboard server page that fetches high-level content counts and recent courses for the admin home screen.
 export default async function DashboardPage() {
-  const supabase = await createClient()
-
-  // Fetch real counts from NEW database schema
-  const [
-    { count: coursesCount },
-    { count: modulesCount }, // Folders
-    { count: notesCount }, // Files
-    { count: quizzesCount },
-  ] = await Promise.all([
-    supabase.from('courses').select('*', { count: 'exact', head: true }),
-    supabase.from('structure_items').select('*', { count: 'exact', head: true }).eq('item_type', 'folder'),
-    supabase.from('structure_items').select('*', { count: 'exact', head: true }).eq('item_type', 'file'),
-    supabase.from('attached_quizzes').select('*', { count: 'exact', head: true }),
+  const [counts, recentCourses] = await Promise.all([
+    fetchQuery(api.admin.getDashboardCounts, {}),
+    fetchQuery(api.admin.getRecentCourses, { limit: 5 }),
   ])
-  
-  // Fetches the most recently updated courses for the "Recent Courses" panel.
-  const { data: recentCourses } = await supabase
-    .from('courses')
-    .select('id, name, icon, updated_at')
-    .order('updated_at', { ascending: false })
-    .limit(5)
 
   // Normalizes the stat cards so the grid can be rendered from one data structure.
   const stats = [
     { 
       label: 'Active Courses', 
-      value: coursesCount || 0, 
+      value: counts.courses || 0, 
       icon: Sparkles,
       href: '/admin/studio',
       color: 'text-primary',
@@ -39,7 +23,7 @@ export default async function DashboardPage() {
     },
     { 
       label: 'Total Modules', 
-      value: modulesCount || 0, 
+      value: counts.folders || 0, 
       icon: Folder,
       href: '/admin/studio',
       color: 'text-blue-500',
@@ -47,7 +31,7 @@ export default async function DashboardPage() {
     },
     { 
       label: 'Learning Notes', 
-      value: notesCount || 0, 
+      value: counts.files || 0, 
       icon: FileText,
       href: '/admin/studio',
       color: 'text-emerald-500',
@@ -55,7 +39,7 @@ export default async function DashboardPage() {
     },
     { 
       label: 'Quizzes', 
-      value: quizzesCount || 0, 
+      value: counts.quizzes || 0, 
       icon: BookOpen,
       href: '/admin/studio',
       color: 'text-purple-500',
@@ -111,8 +95,8 @@ export default async function DashboardPage() {
             {recentCourses && recentCourses.length > 0 ? (
               recentCourses.map((course: any) => (
                 <Link 
-                  key={course.id} 
-                  href={`/admin/studio/${course.id}`}
+                  key={course._id} 
+                  href={`/admin/studio/${course._id}`}
                   className="group flex p-4 rounded-2xl border border-border/50 hover:border-primary/20 hover:bg-muted/50 transition-all items-center gap-4"
                 >
                   <div className="w-12 h-12 rounded-xl bg-blue-50 text-2xl flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform">
@@ -120,7 +104,7 @@ export default async function DashboardPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <h4 className="font-bold text-foreground group-hover:text-primary transition-colors">{course.name}</h4>
-                    <p className="text-sm text-muted-foreground">Updated {new Date(course.updated_at).toLocaleDateString()}</p>
+                    <p className="text-sm text-muted-foreground">Created {new Date(course._creationTime).toLocaleDateString()}</p>
                   </div>
                   <div className="px-3 py-1 rounded-full bg-muted/80 text-xs font-semibold text-muted-foreground group-hover:bg-card group-hover:shadow-sm transition-all">
                     Manage

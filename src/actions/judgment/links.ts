@@ -1,15 +1,9 @@
 'use server'
 
-import { createClient as createServerClient } from '@/lib/supabase/server'
-import { createClient } from '@supabase/supabase-js'
-
-// Creates a service-role client for judgment-link mutations that should bypass end-user RLS restrictions.
-function getAdminClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
-}
+import { fetchMutation, fetchQuery } from 'convex/nextjs'
+import { convexAuthNextjsToken } from '@convex-dev/auth/nextjs/server'
+import { api } from '@convex/_generated/api'
+import type { Id } from '@convex/_generated/dataModel'
 
 export interface NotePdfLink {
   id: string
@@ -32,31 +26,39 @@ export interface CaseItem {
   created_at: string
 }
 
-// Fetches all PDF highlight/link records attached to one note or judgment item.
+function mapLink(link: any): NotePdfLink {
+  return {
+    id: link._id,
+    item_id: link.itemId,
+    link_id: link.link_id,
+    pdf_page: link.pdf_page,
+    x: link.x,
+    y: link.y,
+    width: link.width,
+    height: link.height,
+    label: link.label ?? null,
+    created_at: new Date(link._creationTime).toISOString(),
+  }
+}
+
+async function getToken() {
+  return await convexAuthNextjsToken()
+}
+
 export async function fetchLinksForItem(itemId: string): Promise<NotePdfLink[]> {
-  const supabase = await createServerClient()
-  const { data, error } = await supabase
-    .from('note_pdf_links')
-    .select('*')
-    .eq('item_id', itemId)
-    .order('created_at')
-  if (error) throw error
-  return data || []
+  const data = await fetchQuery(api.content.getNotePdfLinks, {
+    itemId: itemId as Id<'structure_items'>,
+  })
+  return data.map(mapLink)
 }
 
-// Checks whether the given structure item currently has a PDF URL attached.
 export async function checkItemHasPdf(itemId: string): Promise<string | null> {
-  const supabase = await createServerClient()
-  const { data, error } = await supabase
-    .from('structure_items')
-    .select('pdf_url')
-    .eq('id', itemId)
-    .single()
-  if (error || !data) return null
-  return (data as any).pdf_url || null
+  const item = await fetchQuery(api.content.getStructureItem, {
+    itemId: itemId as Id<'structure_items'>,
+  })
+  return item?.pdf_url ?? null
 }
 
-// Inserts a new PDF highlight/link rectangle for an item and returns the saved row.
 export async function insertLink(payload: {
   item_id: string
   link_id: string
@@ -67,81 +69,92 @@ export async function insertLink(payload: {
   height: number
   label?: string
 }): Promise<NotePdfLink> {
-  const adminClient = getAdminClient()
-  const { data, error } = await adminClient
-    .from('note_pdf_links')
-    .insert(payload)
-    .select()
-    .single()
-  if (error) throw error
-  return data
+  const token = await getToken()
+  const linkId = await fetchMutation(
+    api.content.createNotePdfLink,
+    {
+      itemId: payload.item_id as Id<'structure_items'>,
+      link_id: payload.link_id,
+      pdf_page: payload.pdf_page,
+      x: payload.x,
+      y: payload.y,
+      width: payload.width,
+      height: payload.height,
+      label: payload.label,
+    },
+    token ? { token } : undefined
+  )
+
+  return {
+    id: linkId,
+    item_id: payload.item_id,
+    link_id: payload.link_id,
+    pdf_page: payload.pdf_page,
+    x: payload.x,
+    y: payload.y,
+    width: payload.width,
+    height: payload.height,
+    label: payload.label ?? null,
+    created_at: new Date().toISOString(),
+  }
 }
 
-// Renames the label attached to an existing PDF link record.
 export async function updateLinkLabel(id: string, label: string): Promise<void> {
-  const adminClient = getAdminClient()
-  const { error } = await adminClient
-    .from('note_pdf_links')
-    .update({ label })
-    .eq('id', id)
-  if (error) throw error
+  const token = await getToken()
+  await fetchMutation(
+    api.admin.updateNotePdfLinkLabel,
+    { linkId: id as Id<'note_pdf_links'>, label },
+    token ? { token } : undefined
+  )
 }
 
-// Deletes a single PDF link/highlight record by its ID.
 export async function deleteLink(id: string): Promise<void> {
-  const adminClient = getAdminClient()
-  const { error } = await adminClient
-    .from('note_pdf_links')
-    .delete()
-    .eq('id', id)
-  if (error) throw error
+  const token = await getToken()
+  await fetchMutation(
+    api.content.deleteNotePdfLink,
+    { linkId: id as Id<'note_pdf_links'> },
+    token ? { token } : undefined
+  )
 }
 
-// Stores the uploaded PDF URL on the owning structure item.
 export async function updateItemPdfUrl(itemId: string, pdfUrl: string): Promise<void> {
-  const adminClient = getAdminClient()
-  const { error } = await adminClient
-    .from('structure_items')
-    .update({ pdf_url: pdfUrl })
-    .eq('id', itemId)
-  if (error) throw error
+  const token = await getToken()
+  await fetchMutation(
+    api.content.updateStructureItemPdf,
+    {
+      itemId: itemId as Id<'structure_items'>,
+      pdf_url: pdfUrl,
+    },
+    token ? { token } : undefined
+  )
 }
 
-// Fetches structure items that look like case records for the tagging/linking admin flows.
 export async function fetchAllCaseItems(): Promise<CaseItem[]> {
-  const supabase = await createServerClient()
-  const { data, error } = await supabase
-    .from('structure_items')
-    .select('id, title, item_type, pdf_url, created_at')
-    .or('title.ilike.CS-%,title.ilike.CQ-%,title.ilike.CR-%')
-    .order('title')
-  if (error) throw error
-  return (data || []) as CaseItem[]
+  const data = await fetchQuery(api.admin.getCaseItemsForTagging, {})
+  return data.map((item: any) => ({
+    id: item._id,
+    title: item.title,
+    item_type: item.item_type,
+    pdf_url: item.pdf_url ?? null,
+    created_at: new Date(item._creationTime).toISOString(),
+  }))
 }
 
-// Clears the PDF URL from a structure item without deleting the item itself.
 export async function clearItemPdfUrl(itemId: string): Promise<void> {
-  const adminClient = getAdminClient()
-  const { error } = await adminClient
-    .from('structure_items')
-    .update({ pdf_url: null })
-    .eq('id', itemId)
-  if (error) throw error
+  const token = await getToken()
+  await fetchMutation(
+    api.content.updateStructureItemPdf,
+    {
+      itemId: itemId as Id<'structure_items'>,
+      pdf_url: '',
+    },
+    token ? { token } : undefined
+  )
 }
 
-// Returns per-item link counts via RPC so list views can show badges without fetching every link row.
 export async function fetchLinkCountsForItems(
   itemIds: string[]
 ): Promise<Record<string, number>> {
   if (itemIds.length === 0) return {}
-  const supabase = await createServerClient()
-  // Uses a Postgres RPC (get_link_counts.sql) to aggregate server-side
-  // instead of fetching all rows and counting in JS
-  const { data, error } = await supabase.rpc('get_link_counts', { item_ids: itemIds })
-  if (error) return {}
-  const counts: Record<string, number> = {}
-  for (const row of data || []) {
-    counts[row.item_id] = Number(row.link_count)
-  }
-  return counts
+  return fetchQuery(api.admin.getNotePdfLinkCountsForItems, { itemIds })
 }

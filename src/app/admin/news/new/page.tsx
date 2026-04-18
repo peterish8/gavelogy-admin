@@ -2,9 +2,8 @@
 
 import { useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { Upload, Loader2, Newspaper, Trash2, Pencil, Check, X, ChevronLeft, ChevronRight, Globe, FileText, Sparkles, Search } from 'lucide-react'
+import { Upload, Loader2, Newspaper, ChevronLeft, FileText, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
-import { customToHtml } from '@/lib/content-converter'
 import { saveNewsCards } from '@/actions/news'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -71,20 +70,7 @@ type Step = 'input' | 'extracting' | 'generating' | 'review' | 'saving'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const CATEGORY_COLORS: Record<string, string> = {
-  'Constitutional Law': 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
-  'Criminal Law':       'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
-  'Civil Law':          'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-  'Family Law':         'bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300',
-  'Environmental Law':  'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
-  'Labour Law':         'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300',
-  'Tax Law':            'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300',
-  'Corporate Law':      'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300',
-  'Tribunal':           'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300',
-  'Legislation':        'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300',
-  'Appointments':       'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300',
-  'Other':              'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
-}
+
 
 // ─── PDF helpers ─────────────────────────────────────────────────────────────
 
@@ -182,7 +168,6 @@ export default function ProcessNewspaperPage() {
   const [cards, setCards] = useState<ArticleCard[]>([])
   const [provider, setProvider] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
-  const [reviewIndex, setReviewIndex] = useState(0)
   const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({})  // key: `${tempId}-${qi}`
   const [clippingId, setClippingId] = useState<string | null>(null)
   const [openCards, setOpenCards] = useState<Set<string>>(new Set())
@@ -380,7 +365,10 @@ export default function ProcessNewspaperPage() {
     const high = '#b91c1c', navy = '#1e3a5f', navy2 = '#2563a0', gold = '#c8920a', sage = '#166534'
 
     const toggleCard = (tempId: string) => setOpenCards(prev => {
-      const s = new Set(prev); s.has(tempId) ? s.delete(tempId) : s.add(tempId); return s
+      const s = new Set(prev)
+      if (s.has(tempId)) s.delete(tempId)
+      else s.add(tempId)
+      return s
     })
 
     const SectionLabel = ({ children }: { children: React.ReactNode }) => (
@@ -781,6 +769,7 @@ export default function ProcessNewspaperPage() {
                   <button onClick={() => setClippingId(null)} style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: cream, border: 'none', cursor: 'pointer', color: ink3, fontSize: 18, lineHeight: 1 }}>×</button>
                 </div>
                 <div style={{ overflow: 'auto', flex: 1 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={cc.previewImage} alt="Newspaper clipping" style={{ width: '100%', objectFit: 'contain' }} />
                 </div>
                 <div style={{ padding: '8px 20px', borderTop: `1px solid ${rule}`, background: cream, fontFamily: mono, fontSize: 10, color: ink3, textAlign: 'center', flexShrink: 0 }}>

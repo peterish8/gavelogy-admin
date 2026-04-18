@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Loader2, PlusCircle, Check, BookOpen, AlertCircle, Search, X } from 'lucide-react'
 import { useCourses } from '@/hooks/use-courses'
-import { createClient } from '@/lib/supabase/client'
+import { useMutation } from 'convex/react'
+import { api } from '@convex/_generated/api'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -54,140 +55,26 @@ export function CrashCourseModal({ coursesCount, onImportComplete }: CrashCourse
     )
   }
 
+  const createCrashCourseMutation = useMutation(api.adminMutations.createCrashCourse as any)
+
   // Creates the crash course row, clones structure trees from each selected course into it, then navigates to the new studio.
   const handleImport = async () => {
     if (selectedCourseIds.length === 0 || !courseName.trim()) return
     
     setIsImporting(true)
-    const supabase = createClient()
     let toastId: string | number = ''
 
     try {
       toastId = toast.loading('Creating crash course...')
-      const newCourseId = crypto.randomUUID()
 
-      // 1. Create the course DIRECTLY in DB (not through draft store)
-      const { error: courseError } = await supabase.from('courses').insert({
-        id: newCourseId,
+      const newCourseId = await createCrashCourseMutation({
         name: courseName.trim(),
         description: `Crash course bundling: ${selectedCourseIds.length} modules`,
-        icon: '🚀',
-        is_crash_course: true,
-        order_index: coursesCount,
-        is_active: false  // Hidden by default, admin can make it live later
+        sourceCourseIds: selectedCourseIds,
+        orderIndex: coursesCount
       })
 
-      if (courseError) throw courseError
-
-      // 2. Fetch ALL structure items for ALL selected courses in ONE query
-      toast.loading('Fetching source content...', { id: toastId })
-      const { data: allItems, error: itemsError } = await supabase
-        .from('structure_items')
-        .select('*')
-        .in('course_id', selectedCourseIds)
-        .order('order_index', { ascending: true })
-
-      if (itemsError) throw itemsError
-      if (!allItems || allItems.length === 0) {
-        toast.success('Crash course created (no items to clone)', { id: toastId })
-        onImportComplete()
-        setOpen(false)
-        resetState()
-        router.push(`/admin/studio/${newCourseId}`)
-        return
-      }
-
-      // 3. Build all new structure items in memory
-      toast.loading(`Cloning ${allItems.length} items...`, { id: toastId })
-      const newItems: any[] = []
-
-      // Group by course_id
-      const itemsByCourse = allItems.reduce((acc: any, item: any) => {
-        if (!acc[item.course_id]) acc[item.course_id] = []
-        acc[item.course_id].push(item)
-        return acc
-      }, {})
-
-      let rootFolderIndex = 0
-      for (const sourceCourseId of selectedCourseIds) {
-        const sourceCourse = availableCourses?.find(c => c.id === sourceCourseId)
-        if (!sourceCourse) continue
-
-        const items = itemsByCourse[sourceCourseId] || []
-        if (items.length === 0) continue
-
-        // Index by parent_id for O(1) lookup
-        const itemsByParent: Record<string, any[]> = {}
-        items.forEach((item: any) => {
-          const key = item.parent_id ?? 'null'
-          if (!itemsByParent[key]) itemsByParent[key] = []
-          itemsByParent[key].push(item)
-        })
-
-        // Create root folder for this course (use incrementing index)
-        const rootFolderId = crypto.randomUUID()
-        newItems.push({
-          id: rootFolderId,
-          course_id: newCourseId,
-          parent_id: null,
-          item_type: 'folder',
-          title: sourceCourse.name,
-          order_index: rootFolderIndex++
-        })
-
-        // Clone recursively using iteration (faster than recursion for large trees)
-        const queue: { oldParentId: string | null; newParentId: string | null }[] = [
-          { oldParentId: null, newParentId: rootFolderId }
-        ]
-
-        while (queue.length > 0) {
-          const { oldParentId, newParentId } = queue.shift()!
-          const parentKey = oldParentId ?? 'null'
-          const children = itemsByParent[parentKey] || []
-
-          for (const item of children) {
-            const newItemId = crypto.randomUUID()
-            newItems.push({
-              id: newItemId,
-              course_id: newCourseId,
-              parent_id: newParentId,
-              item_type: item.item_type,
-              title: item.title,
-              order_index: item.order_index // Keep original order within folders
-            })
-
-            if (item.item_type === 'folder') {
-              queue.push({ oldParentId: item.id, newParentId: newItemId })
-            }
-          }
-        }
-      }
-
-      // 4. Insert ALL items in CHUNKS (Avoid payload too large errors)
-      if (newItems.length > 0) {
-        const CHUNK_SIZE = 1000
-        const chunks = []
-        for (let i = 0; i < newItems.length; i += CHUNK_SIZE) {
-          chunks.push(newItems.slice(i, i + CHUNK_SIZE))
-        }
-
-        toast.loading(`Saving ${newItems.length} items (0/${chunks.length})...`, { id: toastId })
-        
-        // Process chunks sequentially to maintain basic order integrity and avoid flooding DB
-        for (let i = 0; i < chunks.length; i++) {
-           const chunk = chunks[i]
-           const { error: insertError } = await supabase
-             .from('structure_items')
-             .insert(chunk)
-             
-           if (insertError) throw insertError
-           
-           // Update progress
-           toast.loading(`Saving ${newItems.length} items (${i + 1}/${chunks.length})...`, { id: toastId })
-        }
-      }
-
-      toast.success(`Crash course created with ${newItems.length} items!`, { id: toastId })
+      toast.success(`Crash course created!`, { id: toastId })
       onImportComplete()
       setOpen(false)
       resetState()

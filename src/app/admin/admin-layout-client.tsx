@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import {
   LayoutDashboard,
   FileText,
@@ -43,6 +42,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { useAuth } from '@/lib/auth-context'
 
 const sidebarItems = [
   {
@@ -100,7 +100,7 @@ export default function AdminLayoutClient({
   const { title: headerTitle, actions: headerActions } = useHeaderStore()
   const pathname = usePathname()
   const router = useRouter()
-  const supabase = createClient()
+  const { signOut } = useAuth()
 
   // Tracks viewport width so the sidebar can switch between desktop and mobile behavior.
   useEffect(() => {
@@ -116,36 +116,15 @@ export default function AdminLayoutClient({
     return () => window.removeEventListener('resize', checkScreen)
   }, [])
 
-  // Listen for sign-out events only
-  // Watches auth state so external sign-outs still kick the admin back to the login page.
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event: string, session: any) => {
-        if (event === 'SIGNED_OUT' || !session) {
-          router.replace('/auth/login')
-        }
-      }
-    )
-
-    return () => {
-      subscription.unsubscribe()
-    }
-  }, [router, supabase])
-
-  // Closes the dialog, navigates away immediately, and finishes Supabase sign-out in the background.
   const handleLogout = async () => {
-    // Close dialog immediately for instant feedback
     setIsLogoutOpen(false)
-    
-    // Navigate immediately (don't wait for signOut)
-    router.push('/auth/login')
-    router.refresh()
-    
-    // Sign out in background
     try {
-      await supabase.auth.signOut()
+      await signOut()
     } catch (e) {
       console.error('Signout error:', e)
+    } finally {
+      router.push('/auth/login')
+      router.refresh()
     }
   }
 

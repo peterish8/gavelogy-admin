@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { useMutation } from 'convex/react'
+import { api } from '@convex/_generated/api'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { ChevronRight, Eye, EyeOff } from 'lucide-react'
@@ -78,22 +80,19 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete, activeAdmins }: 
     setShowDisableDialog(true)
   }
 
-  // Writes the live/hidden toggle directly to Supabase, then mirrors it through the parent update callback.
+  const updateEntity = useMutation(api.adminMutations.updateEntity as any)
+
+  // Writes the live/hidden toggle directly to Convex, then mirrors it through the parent update callback.
   const confirmToggle = async () => {
-    // setIsTogglingActive(true) // Unused
     setShowDisableDialog(false)
     
     try {
-      // Direct Supabase call - bypasses DraftStore for instant update
-      const { createClient } = await import('@/lib/supabase/client')
-      const supabase = createClient()
-      
-      const { error } = await supabase
-        .from('courses')
-        .update({ is_active: !course.is_active })
-        .eq('id', course.id)
-      
-      if (error) throw error
+      // Direct Convex call - bypasses DraftStore for instant update
+      await updateEntity({
+        entityType: 'course',
+        id: course.id,
+        data: { is_active: !course.is_active }
+      })
       
       // Update local state via the prop (for cache invalidation)
       onEdit?.(course.id, { is_active: !course.is_active })
@@ -101,8 +100,6 @@ export function CourseCard({ course, isAdmin, onEdit, onDelete, activeAdmins }: 
       console.error('Failed to toggle course visibility:', error)
       const { toast } = await import('sonner')
       toast.error('Failed to update course visibility')
-    } finally {
-      // setIsTogglingActive(false) // Unused
     }
   }
 

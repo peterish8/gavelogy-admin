@@ -2,7 +2,9 @@
 
 import { useState, useEffect, use } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { useQuery, useMutation } from 'convex/react'
+import { api } from '@convex/_generated/api'
+import type { Id } from '@convex/_generated/dataModel'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -48,110 +50,67 @@ interface Question {
 export default function EditQuizPage({ params }: { params: Promise<{ quizId: string }> }) {
   const resolvedParams = use(params)
   const router = useRouter()
-  const supabase = createClient()
-  const quizId = resolvedParams.quizId
-  
-  const [loading, setLoading] = useState(false)
-  const [fetching, setFetching] = useState(true)
-  const [subjects, setSubjects] = useState<{ id: string; name: string }[]>([])
-  const [questions, setQuestions] = useState<Question[]>([])
-  
-  // Quiz Metadata State
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    subject_id: '',
-    order_index: 0
-  })
+  const quizId = resolvedParams.quizId as Id<'standalone_quizzes'>
 
-  // Question Modal State
+  const quizData = useQuery(api.quizzes.getQuizWithQuestions, { quizId })
+  const rawSubjects = useQuery(api.quizzes.getAllSubjects, {})
+  const updateQuizMutation = useMutation(api.quizzes.updateQuiz)
+  const createQuestionMutation = useMutation(api.quizzes.createQuestion)
+  const updateQuestionMutation = useMutation(api.quizzes.updateQuestion)
+  const deleteQuestionMutation = useMutation(api.quizzes.deleteQuestion)
+
+  const subjects = (rawSubjects ?? []).map((s: any) => ({ id: s._id as string, name: s.name as string }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  const questions: Question[] = (quizData?.questions ?? []).map((q: any) => ({
+    id: q._id,
+    question_text: q.question_text,
+    option_a: q.option_a ?? '',
+    option_b: q.option_b ?? '',
+    option_c: q.option_c ?? '',
+    option_d: q.option_d ?? '',
+    correct_answer: q.correct_answer as 'A' | 'B' | 'C' | 'D',
+    explanation: q.explanation ?? '',
+    order_index: q.order_index ?? 0,
+  }))
+
+  const [loading, setLoading] = useState(false)
+  const [formData, setFormData] = useState({ title: '', description: '', subject_id: '', order_index: 0 })
+  const [initialized, setInitialized] = useState(false)
   const [isQuestionModalOpen, setIsQuestionModalOpen] = useState(false)
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null)
   const [questionForm, setQuestionForm] = useState({
-    question_text: '',
-    option_a: '',
-    option_b: '',
-    option_c: '',
-    option_d: '',
-    correct_answer: 'A',
-    explanation: '',
-    order_index: 0
+    question_text: '', option_a: '', option_b: '', option_c: '', option_d: '',
+    correct_answer: 'A', explanation: '', order_index: 0,
   })
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Fetch subjects
-        const { data: subjectsData } = await supabase
-          .from('subjects')
-          .select('id, name')
-          .order('name')
-        
-        if (subjectsData) setSubjects(subjectsData)
-
-        // Fetch quiz details
-        const { data: quizData, error: quizError } = await supabase
-          .from('quizzes')
-          .select('*')
-          .eq('id', quizId)
-          .single()
-
-        if (quizError) throw quizError
-        if (quizData) {
-          setFormData({
-            title: quizData.title,
-            description: quizData.description || '',
-            subject_id: quizData.subject_id,
-            order_index: quizData.order_index
-          })
-        }
-
-        // Fetch questions
-        await fetchQuestions()
-
-      } catch {
+    if (!initialized && quizData !== undefined) {
+      if (!quizData) {
         toast.error('Failed to load quiz data')
         router.push('/admin/quizzes')
-      } finally {
-        setFetching(false)
+        return
       }
+      setFormData({
+        title: quizData.quiz.title,
+        description: quizData.quiz.description ?? '',
+        subject_id: quizData.quiz.subject_id ?? '',
+        order_index: quizData.quiz.order_index ?? 0,
+      })
+      setInitialized(true)
     }
-
-    fetchData()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quizId, supabase, router])
-
-  const fetchQuestions = async () => {
-    const { data: questionsData } = await supabase
-      .from('questions')
-      .select('*')
-      .eq('quiz_id', quizId)
-      .order('order_index')
-    
-    if (questionsData) {
-      setQuestions(questionsData as Question[])
-    }
-  }
+  }, [quizData, initialized, router])
 
   const handleUpdateQuiz = async () => {
-    if (!formData.title.trim()) {
-      toast.error('Title is required')
-      return
-    }
-
+    if (!formData.title.trim()) { toast.error('Title is required'); return }
     setLoading(true)
     try {
-      const { error } = await supabase
-        .from('quizzes')
-        .update({
-          title: formData.title,
-          description: formData.description || null,
-          subject_id: formData.subject_id,
-          order_index: formData.order_index
-        })
-        .eq('id', quizId)
-
-      if (error) throw error
+      await updateQuizMutation({
+        quizId,
+        title: formData.title,
+        description: formData.description || undefined,
+        subject_id: formData.subject_id ? formData.subject_id as Id<'subjects'> : undefined,
+        order_index: formData.order_index,
+      })
       toast.success('Quiz updated successfully')
     } catch (error: any) {
       toast.error(error.message || 'Failed to update quiz')
@@ -161,52 +120,38 @@ export default function EditQuizPage({ params }: { params: Promise<{ quizId: str
   }
 
   const handleSaveQuestion = async () => {
-    if (!questionForm.question_text.trim()) {
-      toast.error('Question text is required')
-      return
-    }
-    if (!questionForm.option_a || !questionForm.option_b) {
-      toast.error('At least Option A and B are required')
-      return
-    }
-
+    if (!questionForm.question_text.trim()) { toast.error('Question text is required'); return }
+    if (!questionForm.option_a || !questionForm.option_b) { toast.error('At least Option A and B are required'); return }
     try {
       if (editingQuestionId) {
-        // Update existing question
-        const { error } = await supabase
-          .from('questions')
-          .update({
-            question_text: questionForm.question_text,
-            option_a: questionForm.option_a,
-            option_b: questionForm.option_b,
-            option_c: questionForm.option_c,
-            option_d: questionForm.option_d,
-            correct_answer: questionForm.correct_answer,
-            explanation: questionForm.explanation,
-            order_index: questionForm.order_index
-          })
-          .eq('id', editingQuestionId)
-
-        if (error) throw error
+        await updateQuestionMutation({
+          questionId: editingQuestionId as Id<'standalone_questions'>,
+          question_text: questionForm.question_text,
+          option_a: questionForm.option_a,
+          option_b: questionForm.option_b,
+          option_c: questionForm.option_c || undefined,
+          option_d: questionForm.option_d || undefined,
+          correct_answer: questionForm.correct_answer,
+          explanation: questionForm.explanation || undefined,
+          order_index: questionForm.order_index,
+        })
         toast.success('Question updated')
       } else {
-        // Create new question
-        const { error } = await supabase
-          .from('questions')
-          .insert({
-            quiz_id: quizId,
-            ...questionForm,
-            // Auto-increment order index if creating new
-            order_index: questions.length + 1
-          })
-
-        if (error) throw error
+        await createQuestionMutation({
+          quiz_id: quizId,
+          question_text: questionForm.question_text,
+          option_a: questionForm.option_a,
+          option_b: questionForm.option_b,
+          option_c: questionForm.option_c || undefined,
+          option_d: questionForm.option_d || undefined,
+          correct_answer: questionForm.correct_answer,
+          explanation: questionForm.explanation || undefined,
+          order_index: questions.length + 1,
+        })
         toast.success('Question added')
       }
-
       setIsQuestionModalOpen(false)
       resetQuestionForm()
-      fetchQuestions()
     } catch (error: any) {
       toast.error(error.message || 'Failed to save question')
     }
@@ -214,16 +159,9 @@ export default function EditQuizPage({ params }: { params: Promise<{ quizId: str
 
   const handleDeleteQuestion = async (id: string) => {
     if (!confirm('Are you sure you want to delete this question?')) return
-
     try {
-      const { error } = await supabase
-        .from('questions')
-        .delete()
-        .eq('id', id)
-
-      if (error) throw error
+      await deleteQuestionMutation({ questionId: id as Id<'standalone_questions'> })
       toast.success('Question deleted')
-      fetchQuestions()
     } catch (error: any) {
       toast.error(error.message || 'Failed to delete question')
     }
@@ -232,14 +170,9 @@ export default function EditQuizPage({ params }: { params: Promise<{ quizId: str
   const openEditQuestion = (q: Question) => {
     setEditingQuestionId(q.id)
     setQuestionForm({
-      question_text: q.question_text,
-      option_a: q.option_a,
-      option_b: q.option_b,
-      option_c: q.option_c,
-      option_d: q.option_d,
-      correct_answer: q.correct_answer,
-      explanation: q.explanation || '',
-      order_index: q.order_index
+      question_text: q.question_text, option_a: q.option_a, option_b: q.option_b,
+      option_c: q.option_c, option_d: q.option_d, correct_answer: q.correct_answer,
+      explanation: q.explanation || '', order_index: q.order_index,
     })
     setIsQuestionModalOpen(true)
   }
@@ -247,18 +180,12 @@ export default function EditQuizPage({ params }: { params: Promise<{ quizId: str
   const resetQuestionForm = () => {
     setEditingQuestionId(null)
     setQuestionForm({
-      question_text: '',
-      option_a: '',
-      option_b: '',
-      option_c: '',
-      option_d: '',
-      correct_answer: 'A',
-      explanation: '',
-      order_index: questions.length + 1
+      question_text: '', option_a: '', option_b: '', option_c: '', option_d: '',
+      correct_answer: 'A', explanation: '', order_index: questions.length + 1,
     })
   }
 
-  if (fetching) {
+  if (quizData === undefined) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />

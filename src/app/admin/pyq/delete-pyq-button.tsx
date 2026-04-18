@@ -4,7 +4,9 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, Trash2 } from 'lucide-react'
 
-import { createClient } from '@/lib/supabase/client'
+import { useMutation } from 'convex/react'
+import { api } from '@convex/_generated/api'
+import type { Id } from '@convex/_generated/dataModel'
 import { cn } from '@/lib/utils'
 
 interface DeletePyqButtonProps {
@@ -21,7 +23,7 @@ export function DeletePyqButton({
   onDeletedRedirectTo,
 }: DeletePyqButtonProps) {
   const router = useRouter()
-  const supabase = createClient()
+  const deletePyqTest = useMutation(api.pyq.deletePyqTest)
   const [isDeleting, setIsDeleting] = useState(false)
 
   const handleDelete = async () => {
@@ -30,9 +32,7 @@ export function DeletePyqButton({
 
     setIsDeleting(true)
     try {
-      const { error } = await supabase.from('pyq_tests').delete().eq('id', testId)
-      if (error) throw error
-
+      await deletePyqTest({ testId: testId as Id<'pyq_tests'> })
       if (onDeletedRedirectTo) {
         router.push(onDeletedRedirectTo)
       } else {

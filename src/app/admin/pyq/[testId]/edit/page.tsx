@@ -21,7 +21,9 @@ import {
   Unlink,
 } from 'lucide-react'
 
-import { createClient } from '@/lib/supabase/client'
+import { useQuery, useMutation } from 'convex/react'
+import { api } from '@convex/_generated/api'
+import type { Id } from '@convex/_generated/dataModel'
 import { cn } from '@/lib/utils'
 import { DeletePyqButton } from '@/app/admin/pyq/delete-pyq-button'
 import {
@@ -55,8 +57,12 @@ const EMPTY_BUNDLE: PyqDraftBundle = { passages: [], questions: [] }
 
 export default function PYQEditPage() {
   const params = useParams()
-  const testId = params.testId as string
-  const supabase = createClient()
+  const testId = params.testId as Id<'pyq_tests'>
+
+  const testDoc = useQuery(api.pyq.getPyqTest, { testId })
+  const passageDocs = useQuery(api.pyq.getPyqPassages, { testId })
+  const questionDocs = useQuery(api.pyq.getPyqQuestions, { testId })
+  const saveBundleMutation = useMutation(api.pyq.savePyqBundle)
 
   const [meta, setMeta] = useState<TestMeta>({
     title: '',
@@ -91,41 +97,29 @@ export default function PYQEditPage() {
   const standaloneCount = bundle.questions.filter((question) => !question.passage_id).length
   const passageSummary = getPassageSummary(bundle)
 
-  const loadData = useCallback(async () => {
-    setIsLoading(true)
-    setError('')
-    try {
-      const [{ data: test, error: testErr }, { data: passages, error: passagesErr }, { data: questions, error: questionsErr }] = await Promise.all([
-        supabase.from('pyq_tests').select('*').eq('id', testId).single(),
-        supabase.from('pyq_passages').select('*').eq('test_id', testId).order('order_index'),
-        supabase.from('pyq_questions').select('*').eq('test_id', testId).order('order_index'),
-      ])
-
-      if (testErr) throw testErr
-      if (passagesErr) throw passagesErr
-      if (questionsErr) throw questionsErr
-
-      setMeta({
-        title: test.title || '',
-        exam_name: test.exam_name || 'CLAT PG',
-        year: test.year?.toString() || '',
-        duration_minutes: test.duration_minutes?.toString() || '120',
-        total_marks: test.total_marks?.toString() || '120',
-        negative_marking: test.negative_marking?.toString() || '0.25',
-        instructions: test.instructions || '',
-        is_published: test.is_published || false,
-      })
-      setBundle(ensureQuestionsLinkedToPassages(buildDraftFromDb(passages || [], questions || [])))
-    } catch (e: any) {
-      setError(e.message || 'Failed to load')
-    } finally {
-      setIsLoading(false)
-    }
-  }, [supabase, testId])
+  const [initialized, setInitialized] = useState(false)
 
   useEffect(() => {
-    loadData()
-  }, [loadData])
+    if (!initialized && testDoc !== undefined && passageDocs !== undefined && questionDocs !== undefined) {
+      if (!testDoc) { setError('Test not found'); setIsLoading(false); return }
+      setMeta({
+        title: testDoc.title || '',
+        exam_name: testDoc.exam_name || 'CLAT PG',
+        year: testDoc.year?.toString() || '',
+        duration_minutes: testDoc.duration_minutes?.toString() || '120',
+        total_marks: testDoc.total_marks?.toString() || '120',
+        negative_marking: testDoc.negative_marking?.toString() || '0.25',
+        instructions: testDoc.instructions || '',
+        is_published: testDoc.is_published || false,
+      })
+      setBundle(ensureQuestionsLinkedToPassages(buildDraftFromDb(
+        (passageDocs || []).map((p: any) => ({ ...p, id: p._id })),
+        (questionDocs || []).map((q: any) => ({ ...q, id: q._id, passage_id: q.passage_id ?? null }))
+      )))
+      setInitialized(true)
+      setIsLoading(false)
+    }
+  }, [testDoc, passageDocs, questionDocs, initialized])
 
   const copyPrompt = async () => {
     await navigator.clipboard.writeText(PYQ_AI_SYSTEM_PROMPT)
@@ -278,69 +272,43 @@ export default function PYQEditPage() {
     setIsSaving(true)
     setSaveSuccess(false)
     try {
-      const { error: metaErr } = await supabase
-        .from('pyq_tests')
-        .update({
+      await saveBundleMutation({
+        testId,
+        testMeta: {
           title: meta.title.trim(),
           exam_name: meta.exam_name.trim(),
-          year: meta.year ? parseInt(meta.year, 10) : null,
+          year: meta.year ? parseInt(meta.year, 10) : undefined,
           duration_minutes: parseInt(meta.duration_minutes, 10) || 120,
           total_marks: parseInt(meta.total_marks, 10) || 120,
           negative_marking: parseFloat(meta.negative_marking) || 0.25,
-          instructions: meta.instructions.trim() || null,
+          instructions: meta.instructions.trim() || undefined,
           is_published: meta.is_published,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', testId)
-      if (metaErr) throw metaErr
-
-      const { error: deleteQuestionsErr } = await supabase.from('pyq_questions').delete().eq('test_id', testId)
-      if (deleteQuestionsErr) throw deleteQuestionsErr
-
-      const { error: deletePassagesErr } = await supabase.from('pyq_passages').delete().eq('test_id', testId)
-      if (deletePassagesErr) throw deletePassagesErr
-
-      const passageIdMap = new Map<string, string>()
-      if (bundle.passages.length > 0) {
-        const { data: insertedPassages, error: passageErr } = await supabase
-          .from('pyq_passages')
-          .insert(bundle.passages.map((passage, index) => ({
-            test_id: testId,
-            order_index: index,
-            passage_text: passage.passage_text.trim(),
-            citation: passage.passage_citation.trim() || null,
-            section_number: passage.section.trim() || null,
-            subject: passage.subject.trim() || null,
-          })))
-          .select('id')
-        if (passageErr) throw passageErr
-        insertedPassages?.forEach((row: any, index: number) => {
-          passageIdMap.set(bundle.passages[index].client_passage_id, row.id)
-        })
-      }
-
-      const { error: questionErr } = await supabase
-        .from('pyq_questions')
-        .insert(bundle.questions.map((question, index) => ({
-          test_id: testId,
+        },
+        passages: bundle.passages.map((passage, index) => ({
+          client_passage_id: passage.client_passage_id,
+          passage_text: passage.passage_text.trim(),
+          citation: passage.passage_citation.trim() || undefined,
+          section_number: passage.section.trim() || undefined,
+          subject: passage.subject.trim() || undefined,
           order_index: index,
-          passage_id: question.passage_id ? (passageIdMap.get(question.passage_id) || null) : null,
+        })),
+        questions: bundle.questions.map((question, index) => ({
+          client_passage_id: question.passage_id ?? undefined,
           question_text: question.question_text.trim(),
-          option_a: question.option_a.trim(),
-          option_b: question.option_b.trim(),
-          option_c: question.option_c.trim(),
-          option_d: question.option_d.trim(),
-          correct_answer: question.correct_answer,
-          explanation: question.explanation.trim() || null,
+          option_a: question.option_a.trim() || undefined,
+          option_b: question.option_b.trim() || undefined,
+          option_c: question.option_c.trim() || undefined,
+          option_d: question.option_d.trim() || undefined,
+          correct_answer: question.correct_answer || undefined,
+          explanation: question.explanation.trim() || undefined,
           marks: 1,
           question_type: question.question_type.trim() || 'mcq',
-          subject: question.subject.trim() || null,
-        })))
-      if (questionErr) throw questionErr
-
+          subject: question.subject.trim() || undefined,
+          order_index: index,
+        })),
+      })
       setSaveSuccess(true)
       setTimeout(() => setSaveSuccess(false), 3000)
-      await loadData()
     } catch (e: any) {
       alert(`Save failed: ${e.message}`)
     } finally {

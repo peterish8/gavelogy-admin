@@ -7,7 +7,7 @@ import { saveNoteContent } from '@/actions/judgment/note-content'
 import type { NotePdfLink } from '@/actions/judgment/links'
 import { customToHtml, htmlToCustom } from '@/lib/content-converter'
 import { encodeLinkMeta, parseLinkMeta, DEFAULT_LINK_COLOR } from '@/components/course/judgment-pdf-panel'
-import { hexToRgba, buildPageFlat, searchOnPage, findTextInPageData } from '@/lib/pdf-search'
+import { hexToRgba, findTextInPageData } from '@/lib/pdf-search'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import TagModal from './TagModal'
@@ -16,7 +16,6 @@ import {
   ChevronDown, Unlink, Eye, Pencil, Wand2,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { createClient } from '@/lib/supabase/client'
 
 const SCALE = 1.3
 
@@ -545,7 +544,7 @@ export default function NoteJudgmentEditor({
 
   async function handleConnectSave() {
     if (!connectNoteCapture || !connectPdfCapture) return
-    const { linkId, text: noteText } = connectNoteCapture
+    const { linkId } = connectNoteCapture
     const noteEl = noteEditorRef.current
     if (!noteEl) return
     setSavingLink(true)
@@ -591,14 +590,11 @@ export default function NoteJudgmentEditor({
   async function handlePdfUpload(file: File) {
     setUploadingPdf(true)
     try {
-      const supabase = createClient()
-      const { data: { session } } = await supabase.auth.getSession()
       const formData = new FormData()
       formData.append('file', file)
       formData.append('caseId', caseId)
       const res = await fetch('/api/judgment/upload', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${session?.access_token}` },
         body: formData,
       })
       const result = await res.json()
@@ -1145,7 +1141,7 @@ export default function NoteJudgmentEditor({
                 links.map(link => {
                   const noteText = getNoteText(link.link_id)
                   const isActive = connectionViz?.linkId === link.link_id || highlightedLinkId === link.link_id
-                  const { text: linkLabel, color: linkColor } = parseLinkMeta(link.label)
+                  const { color: linkColor } = parseLinkMeta(link.label)
                   return (
                     <div
                       key={link.id}

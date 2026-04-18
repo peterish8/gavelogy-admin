@@ -9,11 +9,10 @@ import { publishNewsCards, unpublishNewsCards, deleteNewsCard } from '@/actions/
 interface Props {
   cardId: string
   status: 'draft' | 'published'
-  date: string
 }
 
 // Per-article action bar with publish/unpublish toggle and delete; refreshes the page on success via router.refresh().
-export default function NewsListActions({ cardId, status, date }: Props) {
+export default function NewsListActions({ cardId, status }: Props) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
 

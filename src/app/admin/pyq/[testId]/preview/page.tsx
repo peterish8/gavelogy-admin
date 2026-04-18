@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { useQuery } from 'convex/react'
+import { api } from '@convex/_generated/api'
+import type { Id } from '@convex/_generated/dataModel'
 import {
   ArrowLeft,
   AlertTriangle,
@@ -120,8 +122,11 @@ function paletteShape(status: QuestionStatus) {
 export default function PYQPreviewPage() {
   const params = useParams()
   const router = useRouter()
-  const testId = params.testId as string
-  const supabase = createClient()
+  const testId = params.testId as Id<'pyq_tests'>
+
+  const testDoc = useQuery(api.pyq.getPyqTest, { testId })
+  const questionDocs = useQuery(api.pyq.getPyqQuestions, { testId })
+  const passageDocs = useQuery(api.pyq.getPyqPassages, { testId })
 
   // Data
   const [test, setTest] = useState<TestData | null>(null)
@@ -129,6 +134,7 @@ export default function PYQPreviewPage() {
   const [passageMap, setPassageMap] = useState<Record<string, Passage>>({})
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [initialized, setInitialized] = useState(false)
 
   // Exam state
   const [phase, setPhase] = useState<ExamPhase>('instructions')
@@ -144,32 +150,51 @@ export default function PYQPreviewPage() {
 
   const timerRef = useRef<NodeJS.Timeout | null>(null)
 
-  // ── Load ──────────────────────────────────────────────────────────────────
+  // ── Load from Convex ──────────────────────────────────────────────────────
   useEffect(() => {
-    ;(async () => {
+    if (!initialized && testDoc !== undefined && questionDocs !== undefined && passageDocs !== undefined) {
       try {
-        const [{ data: t, error: te }, { data: qs, error: qe }, { data: ps }] = await Promise.all([
-          supabase.from('pyq_tests').select('*').eq('id', testId).single(),
-          supabase.from('pyq_questions').select('*').eq('test_id', testId).order('order_index'),
-          supabase.from('pyq_passages').select('id, passage_text, citation, section_number, subject, order_index').eq('test_id', testId),
-        ])
-        if (te) throw te
-        if (qe) throw qe
-        setTest(t)
-        setQuestions(qs || [])
-        setTimeLeft((t?.duration_minutes || 120) * 60)
-        if (ps) {
-          const map: Record<string, Passage> = {}
-          ps.forEach((p: Passage) => { map[p.id] = p })
-          setPassageMap(map)
-        }
+        if (!testDoc) throw new Error('Test not found')
+        setTest({
+          id: testDoc._id,
+          title: testDoc.title,
+          exam_name: testDoc.exam_name ?? '',
+          year: testDoc.year ?? null,
+          duration_minutes: testDoc.duration_minutes ?? 120,
+          total_marks: testDoc.total_marks ?? 120,
+          negative_marking: testDoc.negative_marking ?? 0.25,
+          instructions: testDoc.instructions ?? null,
+        })
+        const qs: Question[] = (questionDocs || [])
+          .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0))
+          .map((q: any) => ({
+            id: q._id,
+            order_index: q.order_index ?? 0,
+            passage_id: q.passage_id ?? null,
+            question_text: q.question_text,
+            option_a: q.option_a ?? '',
+            option_b: q.option_b ?? '',
+            option_c: q.option_c ?? '',
+            option_d: q.option_d ?? '',
+            correct_answer: q.correct_answer ?? '',
+            explanation: q.explanation ?? null,
+          }))
+        setQuestions(qs)
+        setTimeLeft((testDoc.duration_minutes || 120) * 60)
+        const map: Record<string, Passage> = {}
+        ;(passageDocs || []).forEach((p: any) => {
+          map[p._id] = { id: p._id, passage_text: p.passage_text, order_index: p.order_index ?? 0,
+            citation: p.citation, section_number: p.section_number, subject: p.subject }
+        })
+        setPassageMap(map)
       } catch (e: any) {
         setLoadError(e.message)
       } finally {
         setIsLoading(false)
+        setInitialized(true)
       }
-    })()
-  }, [testId])
+    }
+  }, [testDoc, questionDocs, passageDocs, initialized])
 
   // ── Live clock ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -200,7 +225,7 @@ export default function PYQPreviewPage() {
       })
     }, 1000)
     return () => clearInterval(timerRef.current!)
-  }, [phase])
+  }, [phase, handleSubmit])
 
   // ── Per-question time tracking ────────────────────────────────────────────
   const [qStartTime, setQStartTime] = useState<number>(Date.now())

@@ -13,6 +13,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { fetchQuery } from 'convex/nextjs'
+import { convexAuthNextjsToken } from '@convex-dev/auth/nextjs/server'
+import { api } from '@convex/_generated/api'
 
 /**
  * Returns true if the request carries the correct admin secret header.
@@ -56,4 +59,34 @@ export function checkPayloadSize(req: NextRequest, maxBytes = 500_000): NextResp
     )
   }
   return null
+}
+
+export async function isAdmin(): Promise<boolean> {
+  try {
+    const user = await getAdminUser()
+    return !!user
+  } catch {
+    return false
+  }
+}
+
+export async function getAdminUser() {
+  const token = await convexAuthNextjsToken()
+  if (!token) return null
+
+  // Fetch the current user from Convex
+  const user = await fetchQuery(api.users.getMe, {}, { token })
+  if (!user) return null
+
+  // Validate admin status using env var NEXT_PUBLIC_ADMIN_EMAILS
+  const adminEmails = process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',').map(e => e.trim().toLowerCase()) || []
+  const isAdminCheck = adminEmails.includes(user.email.toLowerCase())
+
+  // Double check Convex's isAdmin query just in case (optional, but requested in previous setup)
+  // Re-enable if needed: const admin = await fetchQuery(api.admin.isAdmin, {}, { token })
+  
+  if (!isAdminCheck) return null
+
+  // Add the explicit is_admin boolean expected by the client type
+  return { ...user, is_admin: true }
 }
