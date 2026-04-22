@@ -6,7 +6,7 @@ import { insertLink, deleteLink, clearItemPdfUrl } from '@/actions/judgment/link
 import { saveNoteContent } from '@/actions/judgment/note-content'
 import type { NotePdfLink } from '@/actions/judgment/links'
 import { customToHtml, htmlToCustom } from '@/lib/content-converter'
-import { encodeLinkMeta, parseLinkMeta, DEFAULT_LINK_COLOR } from '@/components/course/judgment-pdf-panel'
+import { DEFAULT_LINK_COLOR, parseLinkMeta, encodeLinkMeta } from '@/lib/pdf-utils'
 import { hexToRgba, findTextInPageData } from '@/lib/pdf-search'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
