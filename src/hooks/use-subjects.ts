@@ -17,7 +17,9 @@ function mapSubject(subject: any): Subject {
     order_index: subject.order_index,
     is_active: true, // Convex subjects don't have is_active natively yet
     version: 1,
-    icon: '📖'
+    icon: '📖',
+    created_at: subject._creationTime ? new Date(subject._creationTime).toISOString() : new Date().toISOString(),
+    updated_at: subject._creationTime ? new Date(subject._creationTime).toISOString() : new Date().toISOString()
   }
 }
 
@@ -67,6 +69,8 @@ export function useSubject(subjectId: string) {
         case_number: null,
         interactive_data: null,
         pdf_url: item.pdf_url || null,
+        created_at: item._creationTime ? new Date(item._creationTime).toISOString() : new Date().toISOString(),
+        updated_at: item._creationTime ? new Date(item._creationTime).toISOString() : new Date().toISOString()
       })).sort((a: any, b: any) => a.order_index - b.order_index)
     }
   }
