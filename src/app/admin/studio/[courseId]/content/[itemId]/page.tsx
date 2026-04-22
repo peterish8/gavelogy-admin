@@ -16,9 +16,10 @@ export default async function ContentEditorPage(props: PageProps) {
   const params = await props.params;
   const { courseId, itemId } = params;
 
-  const item = await fetchQuery(api.content.getStructureItemWithRelations, {
+  const data = await fetchQuery(api.adminQueries.getEditorData as any, {
     itemId: itemId as Id<'structure_items'>,
   })
+  const item = data?.itemRes?.data
 
   if (!item) {
     return (
@@ -49,10 +50,10 @@ export default async function ContentEditorPage(props: PageProps) {
           <div className="flex flex-col">
              <div className="flex items-center gap-2">
                 {item.item_type === 'file' ? <FileText className="w-4 h-4 text-blue-500" /> : <HelpCircle className="w-4 h-4 text-purple-500" />}
-                <h1 className="text-lg font-bold text-foreground leading-none">{item.title}</h1>
+                <h1 className="text-lg font-bold text-foreground leading-none">Content Editor</h1>
              </div>
              <p className="text-xs text-muted-foreground mt-1">
-                {item.course?.name} / Editor
+                Editor
              </p>
           </div>
         </div>

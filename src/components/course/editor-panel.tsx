@@ -16,6 +16,7 @@ import Highlight from '@tiptap/extension-highlight'
 import { TextStyle } from '@tiptap/extension-text-style'
 import BubbleMenuExtension from '@tiptap/extension-bubble-menu'
 import { Node, Mark, mergeAttributes } from '@tiptap/core'
+import TextAlign from '@tiptap/extension-text-align'
 import { htmlToCustom, customToHtml, fixAiMistakes } from '@/lib/content-converter'
 import { fetchLinksForItem, insertLink, deleteLink } from '@/actions/judgment/links'
 import type { NotePdfLink } from '@/actions/judgment/links'
@@ -41,6 +42,7 @@ import {
     Highlighter, Braces, Sun, Moon,
     GripVertical, ChevronLeft, Loader2, MessageSquare, Minus, Link2, Unlink2, Wand2,
     Table as TableIcon, Check, CreditCard, Edit2,
+    AlignLeft, AlignCenter, AlignRight,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
@@ -260,6 +262,9 @@ const EDITOR_EXTENSIONS = [
   BubbleMenuExtension,
   NoteBox as any,
   LinkedText,
+  TextAlign.configure({
+    types: ['heading', 'paragraph'],
+  }),
   Table.configure({ resizable: true }),
   TableRow,
   TableHeader,
@@ -613,6 +618,40 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                         title="Inline Code"
                     >
                         <Braces className="w-4 h-4" />
+                    </button>
+                </div>
+
+                {/* Text Alignment */}
+                <div className="flex items-center gap-0.5 border-r border-border pr-1 mr-1">
+                    <button 
+                        onClick={() => editor.chain().focus().setTextAlign('left').run()}
+                        className={cn(
+                            "p-1.5 rounded hover:bg-muted/80 text-muted-foreground transition-colors",
+                            editor.isActive({ textAlign: 'left' }) && "bg-muted/80 text-blue-600"
+                        )}
+                        title="Align Left"
+                    >
+                        <AlignLeft className="w-4 h-4" />
+                    </button>
+                    <button 
+                        onClick={() => editor.chain().focus().setTextAlign('center').run()}
+                        className={cn(
+                            "p-1.5 rounded hover:bg-muted/80 text-muted-foreground transition-colors",
+                            editor.isActive({ textAlign: 'center' }) && "bg-muted/80 text-blue-600"
+                        )}
+                        title="Align Center"
+                    >
+                        <AlignCenter className="w-4 h-4" />
+                    </button>
+                    <button 
+                        onClick={() => editor.chain().focus().setTextAlign('right').run()}
+                        className={cn(
+                            "p-1.5 rounded hover:bg-muted/80 text-muted-foreground transition-colors",
+                            editor.isActive({ textAlign: 'right' }) && "bg-muted/80 text-blue-600"
+                        )}
+                        title="Align Right"
+                    >
+                        <AlignRight className="w-4 h-4" />
                     </button>
                 </div>
 
@@ -2411,7 +2450,6 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                     onLinksChange={setJLinks}
                                     connectMode={jConnectMode}
                                     connectStep={jConnectStep}
-                                    connectNoteCapture={jConnectNoteCapture}
                                     connectPdfCapture={jConnectPdfCapture}
                                     onConnectPdfCapture={setJConnectPdfCapture}
                                     highlightedLinkId={jHighlightedLinkId}

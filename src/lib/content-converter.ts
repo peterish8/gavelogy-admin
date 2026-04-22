@@ -91,13 +91,25 @@ export function htmlToCustom(html: string): string {
 
     // 7. Headings
     const h1s = Array.from(doc.querySelectorAll('h1'))
-    h1s.forEach(el => el.outerHTML = `[h1]${el.innerHTML}[/h1]`)
-    
+    h1s.forEach(el => {
+        const align = (el as HTMLElement).style.textAlign || ''
+        const attr = align ? ` align="${align}"` : ''
+        el.outerHTML = `[h1${attr}]${el.innerHTML}[/h1]`
+    })
+
     const h2s = Array.from(doc.querySelectorAll('h2'))
-    h2s.forEach(el => el.outerHTML = `[h2]${el.innerHTML}[/h2]`)
+    h2s.forEach(el => {
+        const align = (el as HTMLElement).style.textAlign || ''
+        const attr = align ? ` align="${align}"` : ''
+        el.outerHTML = `[h2${attr}]${el.innerHTML}[/h2]`
+    })
 
     const h3s = Array.from(doc.querySelectorAll('h3'))
-    h3s.forEach(el => el.outerHTML = `[h3]${el.innerHTML}[/h3]`)
+    h3s.forEach(el => {
+        const align = (el as HTMLElement).style.textAlign || ''
+        const attr = align ? ` align="${align}"` : ''
+        el.outerHTML = `[h3${attr}]${el.innerHTML}[/h3]`
+    })
 
     // 8. Lists (Unified & Reversed for Nesting)
     // We must process deeply nested lists first (e.g., UL inside LI inside UL).
@@ -112,7 +124,11 @@ export function htmlToCustom(html: string): string {
 
     // 9. Paragraphs
     const paragraphs = Array.from(doc.querySelectorAll('p'))
-    paragraphs.forEach(el => el.outerHTML = `[p]${el.innerHTML}[/p]`)
+    paragraphs.forEach(el => {
+        const align = (el as HTMLElement).style.textAlign || ''
+        const attr = align ? ` align="${align}"` : ''
+        el.outerHTML = `[p${attr}]${el.innerHTML}[/p]`
+    })
 
     // ========== CONTAINERS ==========
 
@@ -191,15 +207,15 @@ export function customToHtml(text: string): string {
     // ========== BLOCK ELEMENTS ==========
 
     // 7. Headings
-    html = html.replace(/\[h1\]/g, '<h1>')
+    html = html.replace(/\[h1(?:\s+align="([^"]+)")?\]/g, (_, align) => align ? `<h1 style="text-align:${align}">` : '<h1>')
     html = html.replace(/\[\/h1\]/g, '</h1>')
-    html = html.replace(/\[h2\]/g, '<h2>')
+    html = html.replace(/\[h2(?:\s+align="([^"]+)")?\]/g, (_, align) => align ? `<h2 style="text-align:${align}">` : '<h2>')
     html = html.replace(/\[\/h2\]/g, '</h2>')
-    html = html.replace(/\[h3\]/g, '<h3>')
+    html = html.replace(/\[h3(?:\s+align="([^"]+)")?\]/g, (_, align) => align ? `<h3 style="text-align:${align}">` : '<h3>')
     html = html.replace(/\[\/h3\]/g, '</h3>')
 
     // 8. Paragraphs
-    html = html.replace(/\[p\]/g, '<p>')
+    html = html.replace(/\[p(?:\s+align="([^"]+)")?\]/g, (_, align) => align ? `<p style="text-align:${align}">` : '<p>')
     html = html.replace(/\[\/p\]/g, '</p>')
 
     // 9. Lists

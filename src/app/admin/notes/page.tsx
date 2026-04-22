@@ -21,7 +21,7 @@ interface GroupedNotes {
   course: {
     id: string
     name: string
-    icon: string
+    icon?: string
   }
   notes: NoteItem[]
 }
@@ -43,7 +43,7 @@ export default async function NotesPage({
         course_id: item.courseId,
         courses: item.course
           ? { id: item.course._id, name: item.course.name, icon: item.course.icon }
-          : { id: '', name: 'Unknown Course' },
+          : { id: '', name: 'Unknown Course', icon: undefined },
         note_content: note ? [{ id: note._id }] : null,
       } satisfies NoteItem
     })

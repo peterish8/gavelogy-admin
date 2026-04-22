@@ -14,7 +14,7 @@ export default function NoteEditPage() {
   const itemId = params.itemId as string
 
   const item = useQuery(
-    api.content.getStructureItemWithRelations,
+    api.adminQueries.getEditorData,
     itemId ? { itemId: itemId as Id<'structure_items'> } : 'skip'
   )
 
@@ -47,12 +47,12 @@ export default function NoteEditPage() {
         </Link>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-lg">
-            {item.course?.icon || '📚'}
+            📚
           </div>
           <div>
-            <h1 className="text-xl font-bold text-foreground">{item.title}</h1>
+            <h1 className="text-xl font-bold text-foreground">Editing Note</h1>
             <p className="text-sm text-muted-foreground">
-              {item.course?.name} • Editing Note
+              Editing Note
             </p>
           </div>
         </div>
@@ -62,8 +62,8 @@ export default function NoteEditPage() {
         <EditorPanel
           itemId={itemId}
           itemType="file"
-          courseId={item.courseId}
-          title={item.title}
+          courseId={''}
+          title={'Editing Note'}
           mode="notes-only"
         />
       </div>
