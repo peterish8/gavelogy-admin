@@ -34,6 +34,10 @@ Create `.env.local`:
 CONVEX_DEPLOYMENT=<your-deployment-url>
 NEXT_PUBLIC_CONVEX_URL=<your-public-convex-url>
 
+# Google OAuth (set in Convex environment variables, not Vercel)
+AUTH_GOOGLE_ID=<your-google-client-id>
+AUTH_GOOGLE_SECRET=<your-google-client-secret>
+
 # Storage (Backblaze B2)
 BACKBLAZE_BUCKET_ENDPOINT=...
 BACKBLAZE_KEY_ID=...
