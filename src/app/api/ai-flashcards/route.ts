@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAdminRequest, unauthorizedResponse, checkPayloadSize } from '@/lib/admin-auth'
+import { isAdminApiRequest, unauthorizedResponse, checkPayloadSize } from '@/lib/admin-auth'
 
 const SYSTEM_PROMPT = `You are Gavelogy's Flashcard Engine. Your job is to read a completed Gavelogy case law note and generate exactly 6 to 8 flashcards from it, following the spaced repetition principles built into Gavelogy's SRS system.
 
@@ -127,6 +127,7 @@ async function callCerebras(messages: any[], apiKey: string, model: string): Pro
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, messages, max_completion_tokens: 2000, temperature: 0.3 }),
+    signal: AbortSignal.timeout(25_000),
   })
   if (!res.ok) throw new Error(`Cerebras(${model}) ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -140,6 +141,7 @@ async function callTogether(messages: any[], apiKey: string): Promise<string> {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: 'ServiceNow-AI/Apriel-1.6-15b-Thinker', messages, max_tokens: 2000, temperature: 0.3 }),
+    signal: AbortSignal.timeout(25_000),
   })
   if (!res.ok) throw new Error(`Together ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -152,6 +154,7 @@ async function callNvidia(messages: any[], apiKey: string): Promise<string> {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: 'moonshotai/kimi-k2.5', messages, max_tokens: 2000, temperature: 0.3 }),
+    signal: AbortSignal.timeout(25_000),
   })
   if (!res.ok) throw new Error(`NVIDIA ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -164,6 +167,7 @@ async function callGroq(messages: any[], apiKey: string): Promise<string> {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: 'llama-3.1-8b-instant', messages, max_tokens: 1500, temperature: 0.3 }),
+    signal: AbortSignal.timeout(20_000),
   })
   if (!res.ok) throw new Error(`Groq ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -179,6 +183,7 @@ async function callOpenRouter(messages: any[], apiKey: string, model: string): P
       'HTTP-Referer': 'https://gavelogy.com', 'X-Title': 'Gavelogy Flashcards AI',
     },
     body: JSON.stringify({ model, messages, max_tokens: 1500, temperature: 0.3 }),
+    signal: AbortSignal.timeout(25_000),
   })
   if (!res.ok) throw new Error(`OpenRouter(${model}) ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -187,7 +192,7 @@ async function callOpenRouter(messages: any[], apiKey: string, model: string): P
 
 // POST handler: generates 6-8 flashcards from note text by trying configured AI providers in priority order.
 export async function POST(req: NextRequest) {
-  if (!isAdminRequest(req)) return unauthorizedResponse()
+  if (!(await isAdminApiRequest(req))) return unauthorizedResponse()
   const sizeError = checkPayloadSize(req, 500_000)  // 500KB max
   if (sizeError) return sizeError
 

@@ -31,6 +31,16 @@ export function isAdminRequest(req: NextRequest): boolean {
 }
 
 /**
+ * Returns true for server-to-server admin-secret requests or logged-in admin users.
+ * Use this for browser-triggered admin routes, where exposing ADMIN_API_SECRET
+ * to client code would be unsafe.
+ */
+export async function isAdminApiRequest(req: NextRequest): Promise<boolean> {
+  if (isAdminRequest(req)) return true
+  return isAdmin()
+}
+
+/**
  * Returns a 401 Unauthorized NextResponse. Use when isAdminRequest() returns false.
  */
 export function unauthorizedResponse(): NextResponse {
@@ -71,22 +81,17 @@ export async function isAdmin(): Promise<boolean> {
 }
 
 export async function getAdminUser() {
-  const token = await convexAuthNextjsToken()
-  if (!token) return null
+  try {
+    const token = await convexAuthNextjsToken()
+    if (!token) return null
 
-  // Fetch the current user from Convex
-  const user = await fetchQuery(api.users.getMe, {}, { token })
-  if (!user) return null
+    const user = await fetchQuery(api.users.getMe, {}, { token })
+    if (!user) return null
 
-  // Validate admin status using env var NEXT_PUBLIC_ADMIN_EMAILS
-  const adminEmails = process.env.NEXT_PUBLIC_ADMIN_EMAILS?.split(',').map(e => e.trim().toLowerCase()) || []
-  const isAdminCheck = adminEmails.includes(user.email.toLowerCase())
+    if (!user.is_admin) return null
 
-  // Double check Convex's isAdmin query just in case (optional, but requested in previous setup)
-  // Re-enable if needed: const admin = await fetchQuery(api.admin.isAdmin, {}, { token })
-  
-  if (!isAdminCheck) return null
-
-  // Add the explicit is_admin boolean expected by the client type
-  return { ...user, is_admin: true }
+    return { ...user, is_admin: true }
+  } catch {
+    return null
+  }
 }

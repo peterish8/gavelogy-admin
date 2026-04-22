@@ -1,7 +1,7 @@
 export default {
   providers: [
     {
-      domain: process.env.CONVEX_SITE_URL,
+      domain: "https://wary-perch-979.convex.site",
       applicationID: "convex",
     },
   ],

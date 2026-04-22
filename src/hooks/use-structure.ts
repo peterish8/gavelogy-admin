@@ -94,7 +94,7 @@ export function useStructureActions() {
       item_type: data.item_type,
       title: data.title,
       order_index: data.order_index,
-      is_active: false,
+      is_active: true,
     })
   }, [upsertStructureItem])
 

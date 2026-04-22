@@ -4,10 +4,7 @@ import { MutationCtx, QueryCtx } from "./_generated/server";
 export async function getAuthUser(ctx: QueryCtx | MutationCtx) {
   const userId = await getAuthUserId(ctx);
   if (!userId) return null;
-  return ctx.db
-    .query("users")
-    .withIndex("by_token", (q) => q.eq("tokenIdentifier", userId))
-    .unique();
+  return ctx.db.get(userId);
 }
 
 export async function requireAuth(ctx: QueryCtx | MutationCtx) {

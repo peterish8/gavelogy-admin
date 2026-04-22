@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# agentic / temporary
+.agent/
+.agents/
+.claude/
+skills-lock.json
+test-storage.js
+

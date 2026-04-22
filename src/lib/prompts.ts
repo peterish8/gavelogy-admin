@@ -198,7 +198,7 @@ CRITERIA: creates strong recall + simple (3–5 words or short acronym) + direct
 SKIP entirely if forced or artificial.
 [h2]🧩 Memory Aid[/h2]
 [box:green]
-[p][b]🧩 [Memory trick — short phrase or acronym, max 10 words. Must be original.][/b][/p]
+[p][b]🧩 Write the mnemonic text here directly — no square brackets around it. Example: REST = Right to Environment, Sanitation and Toilets[/b][/p]
 [/box]
 [hr]
 
@@ -234,6 +234,7 @@ ABSOLUTE RULES — NEVER VIOLATE
 8. For ALL criminal law cases: list both old IPC/CrPC section AND new BNS/BNSS/BSA equivalent.
 9. Include Timeline ONLY if genuinely useful. Include Memory Aid ONLY if genuinely powerful.
 10. NEVER add MCQs. NEVER repeat content across sections. NEVER speculate.
+11. NEVER wrap actual content text in square brackets — square brackets are ONLY for tag names like [h2], [p], [b]. Mnemonics, acronyms, and all other text must be written without surrounding [ ].
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CONNECTIONS OUTPUT
@@ -241,7 +242,7 @@ CONNECTIONS OUTPUT
 After your formatted content, write exactly: ---CONNECTIONS_JSON---
 Then output a JSON array (no code block, no backticks) of 4–10 connection objects.
 
-PURPOSE: Each connection links a specific piece of text in your notes to the EXACT PAGE and EXACT REGION of the judgment PDF where that content came from. Students click the linked text in the notes to jump to that judgment page.
+PURPOSE: Each connection links a specific piece of text in your notes to the EXACT PARAGRAPH in the judgment PDF where that content came from. Students click the linked text (or the ◎ circle next to it) in the notes to jump to that judgment paragraph — which is highlighted in full.
 
 TWO TYPES of connections you must generate:
   TYPE 1 — HEADING LINK: noteAnchor = EXACT text of an [h2] heading (e.g. "Facts")
@@ -252,7 +253,8 @@ Each object MUST have ALL these fields:
   "linkId": "link-facts",           (unique, lowercase hyphens)
   "noteAnchor": "Facts",            (TYPE 1: EXACT [h2] heading text; TYPE 2: exact 4–8 word phrase from your notes)
   "pdfPage": 3,                      (the [Page N] number where this content appears in the input)
-  "pdfSearchText": "exact quote",    (8–15 CONSECUTIVE words copied VERBATIM from that page — must be unique, not boilerplate)
+  "pdfSearchText": "exact quote",    (FIRST 8–12 words of the TARGET PARAGRAPH, copied VERBATIM — must be from the START of the paragraph)
+  "pdfSearchTextEnd": "last words",  (REQUIRED — LAST 6–10 words of the SAME PARAGRAPH, copied VERBATIM from its END — together these two fields highlight the entire paragraph)
   "label": "Facts",                  (1–2 word label shown on the connection line)
   "color": "#c9922a"                 (MUST be one of the 6 approved colors below)
 }
@@ -274,20 +276,21 @@ REQUIRED COVERAGE — you must include connections from AT LEAST these sections:
 
 STRICT RULES (violations cause broken connections):
 1. pdfPage MUST be the actual [Page N] number where you found the source text — not estimated
-2. pdfSearchText MUST be 8–15 consecutive words copied VERBATIM from that page — never paraphrase
-3. pdfSearchText must be DISTINCTIVE — avoid "the court held that" alone; always include names/sections/specific terms
-4. TYPE 1: noteAnchor must EXACTLY match the [h2] heading text you used (copy-paste it without emoji — e.g. "Facts" not "📋 Facts")
-5. TYPE 2: noteAnchor must be a phrase that appears VERBATIM inside your notes (no tags, just the text)
-6. Never reuse the same pdfPage for more than 3 connections — spread across the judgment
-7. Spread connections intelligently: do not cluster all connections on one page
+2. pdfSearchText MUST be the first 8–12 consecutive words of the paragraph, copied VERBATIM from that page — never paraphrase
+3. pdfSearchTextEnd MUST be the last 6–10 consecutive words of the SAME paragraph/sentence, copied VERBATIM — this is how we highlight the full paragraph
+4. pdfSearchText must be DISTINCTIVE — avoid "the court held that" alone; always include names/sections/specific terms
+5. TYPE 1: noteAnchor must EXACTLY match the [h2] heading text you used (copy-paste it without emoji — e.g. "Facts" not "📋 Facts")
+6. TYPE 2: noteAnchor must be a phrase that appears VERBATIM inside your notes (no tags, just the text)
+7. Never reuse the same pdfPage for more than 3 connections — spread across the judgment
+8. Spread connections intelligently: do not cluster all connections on one page
 
 Example (do not copy — generate from actual judgment):
 ---CONNECTIONS_JSON---
 [
-  {"linkId":"link-facts","noteAnchor":"Facts","pdfPage":2,"pdfSearchText":"petitioner filed a writ petition challenging the order passed by the Board","label":"Facts","color":"#c9922a"},
-  {"linkId":"link-facts-2","noteAnchor":"filed a writ petition challenging the direction","pdfPage":3,"pdfSearchText":"the petitioner approached the High Court by way of writ petition under Article 226","label":"Facts","color":"#c9922a"},
-  {"linkId":"link-provisions","noteAnchor":"Key Provisions Interpreted","pdfPage":5,"pdfSearchText":"Section 33A of the Water Act empowers the Board to issue directions","label":"Provision","color":"#ea580c"},
-  {"linkId":"link-holdings","noteAnchor":"Holdings","pdfPage":9,"pdfSearchText":"we hold that Section 33A does not confer power to impose monetary penalties","label":"Ratio","color":"#2563eb"},
-  {"linkId":"link-core-ratio","noteAnchor":"Section 33A does not confer power to impose monetary penalties","pdfPage":9,"pdfSearchText":"the direction-issuing power under Section 33A is distinct from the penalty provisions","label":"Core Ratio","color":"#2563eb"},
-  {"linkId":"link-lineage","noteAnchor":"Doctrinal Lineage","pdfPage":11,"pdfSearchText":"the Polluter Pays Principle as evolved in MC Mehta does not override express statutory limitations","label":"Lineage","color":"#16a34a"}
+  {"linkId":"link-facts","noteAnchor":"Facts","pdfPage":2,"pdfSearchText":"petitioner filed a writ petition challenging the order passed","pdfSearchTextEnd":"by the Board of Directors dated 12 March 2019","label":"Facts","color":"#c9922a"},
+  {"linkId":"link-facts-2","noteAnchor":"filed a writ petition challenging the direction","pdfPage":3,"pdfSearchText":"the petitioner approached the High Court by way of","pdfSearchTextEnd":"writ petition under Article 226 of the Constitution","label":"Facts","color":"#c9922a"},
+  {"linkId":"link-provisions","noteAnchor":"Statutory / Constitutional Interpretation","pdfPage":5,"pdfSearchText":"Section 33A of the Water Act empowers the Board","pdfSearchTextEnd":"to issue directions for prevention of water pollution","label":"Provision","color":"#ea580c"},
+  {"linkId":"link-holdings","noteAnchor":"Holdings / Ratio Decidendi","pdfPage":9,"pdfSearchText":"we hold that Section 33A does not confer power","pdfSearchTextEnd":"to impose monetary penalties on defaulting industries","label":"Ratio","color":"#2563eb"},
+  {"linkId":"link-core-ratio","noteAnchor":"Section 33A does not confer power to impose monetary penalties","pdfPage":9,"pdfSearchText":"the direction-issuing power under Section 33A is distinct","pdfSearchTextEnd":"from the penalty provisions under Chapter VII of the Act","label":"Core Ratio","color":"#2563eb"},
+  {"linkId":"link-lineage","noteAnchor":"Doctrines / Principles","pdfPage":11,"pdfSearchText":"the Polluter Pays Principle as evolved in MC Mehta","pdfSearchTextEnd":"does not override express statutory limitations on penalty powers","label":"Lineage","color":"#16a34a"}
 ]`;

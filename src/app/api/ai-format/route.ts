@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAdminRequest, unauthorizedResponse, checkPayloadSize } from '@/lib/admin-auth'
+import { isAdminApiRequest, unauthorizedResponse, checkPayloadSize } from '@/lib/admin-auth'
 
 const SYSTEM_PROMPT = `You are a legal study notes formatter for Gavelogy, a law exam prep platform.
 You receive raw unformatted notes text and must return it formatted using a specific custom tag system.
@@ -51,6 +51,7 @@ async function callNvidia(messages: any[], apiKey: string, maxTokens = 4000): Pr
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: 'moonshotai/kimi-k2.5', messages, max_tokens: maxTokens, temperature: 0.3 }),
+    signal: AbortSignal.timeout(25_000),
   })
   if (!res.ok) throw new Error(`NVIDIA ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -63,6 +64,7 @@ async function callGroq(messages: any[], apiKey: string, maxTokens = 2000): Prom
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: 'llama-3.1-8b-instant', messages, max_tokens: maxTokens, temperature: 0.3 }),
+    signal: AbortSignal.timeout(20_000),
   })
   if (!res.ok) throw new Error(`Groq ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -80,6 +82,7 @@ async function callOpenRouter(messages: any[], apiKey: string, model: string, ma
       'X-Title': 'Gavelogy Notes AI',
     },
     body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.3 }),
+    signal: AbortSignal.timeout(25_000),
   })
   if (!res.ok) throw new Error(`OpenRouter(${model}) ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -88,7 +91,7 @@ async function callOpenRouter(messages: any[], apiKey: string, model: string, ma
 
 // POST handler: formats raw note text into Gavelogy custom tags with optional extra instructions.
 export async function POST(req: NextRequest) {
-  if (!isAdminRequest(req)) return unauthorizedResponse()
+  if (!(await isAdminApiRequest(req))) return unauthorizedResponse()
   const sizeError = checkPayloadSize(req, 500_000)  // 500KB max
   if (sizeError) return sizeError
 

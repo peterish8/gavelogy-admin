@@ -73,16 +73,17 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
   const searchParams = useSearchParams()
   const pathname = usePathname()
 
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Initialise directly from URL so the editor opens instantly on reload — no flash
+  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('itemId'))
   const [editingId, setEditingId] = useState<string | null>(null)
-  
+
   // Search State
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [filteredIds, setFilteredIds] = useState<Set<string> | null>(null)
 
   // Fullscreen State (Lifted for URL persistence)
-  const [fullscreen, setFullscreen] = useState(false)
+  const [fullscreen, setFullscreen] = useState<boolean>(() => searchParams.get('fullscreen') === 'true')
   
   // Resizable Sidebar State
   const [sidebarWidth, setSidebarWidth] = useState(320)
@@ -229,25 +230,6 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
     }
   }, [isResizing, resize, stopResizing])
 
-  // Reads itemId and fullscreen URL params on first mount to restore the previously selected item.
-  const hydratedRef = useRef(false)
-  
-  useEffect(() => {
-    if (hydratedRef.current) return
-    
-    const urlItemId = searchParams.get('itemId')
-    const urlFullscreen = searchParams.get('fullscreen') === 'true'
-
-    if (urlItemId) {
-        setSelectedId(urlItemId)
-    }
-    if (urlFullscreen) {
-        setFullscreen(true)
-    }
-    
-    hydratedRef.current = true
-  }, [searchParams]) // Read-only on mount/URL change
-
   // Keeps the URL query params (itemId, fullscreen) in sync with component state via router.replace.
   useEffect(() => {
     // Determine target URL state
@@ -294,6 +276,36 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
     }
     return null
   }, [])
+
+  // Returns all ancestor folder IDs for a given item ID (used to auto-expand the tree).
+  const getAncestorIds = useCallback((treeItems: StructureItem[], targetId: string, path: string[] = []): string[] | null => {
+    for (const item of treeItems) {
+      if (item.id === targetId) return path
+      if (item.children?.length) {
+        const found = getAncestorIds(item.children, targetId, [...path, item.id])
+        if (found) return found
+      }
+    }
+    return null
+  }, [])
+
+  // When selectedId changes (click or URL reload), expand all ancestor folders and scroll the item into view.
+  useEffect(() => {
+    if (!selectedId || !items?.length) return
+    const ancestors = getAncestorIds(items, selectedId)
+    if (ancestors?.length) {
+      setExpandedIds(prev => {
+        const next = new Set(prev)
+        ancestors.forEach(id => next.add(id))
+        return next
+      })
+    }
+    // Scroll after React has painted the expanded tree (~150ms)
+    setTimeout(() => {
+      const el = document.querySelector(`[data-item-id="${selectedId}"]`)
+      el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }, 150)
+  }, [selectedId, items, getAncestorIds])
 
   // Auto-expands a folder when an item is dragged over it, so the user can drop into it.
   const handleDragOver = useCallback((event: DragOverEvent) => {

@@ -29,28 +29,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await convexSignIn("password", { email, password, flow: "signIn" });
       return { success: true };
-    } catch (error: any) {
-      // ONLY allow silent setup for the exact authorized admin credentials defined by the user
-      // All other users attempting to sign up or log in with invalid credentials will be permanently rejected.
-      if (
-        email === "gavelogyakshu@mail.com" && 
-        password === "akshuisalwaysgreat@08" && 
-        (error?.message?.includes("InvalidAccountId") || error?.toString().includes("InvalidAccountId"))
-      ) {
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes("InvalidAccountId")) {
         try {
           await convexSignIn("password", { email, password, flow: "signUp" });
           return { success: true };
-        } catch (signUpError) {
-          return {
-            success: false,
-            error: "Admin account setup initialization failed.",
-          };
+        } catch (e2) {
+          return { success: false, error: e2 instanceof Error ? e2.message : "Sign up failed" };
         }
       }
-      return {
-        success: false,
-        error: "Login failed or Invalid Credentials.",
-      };
+      return { success: false, error: "Invalid credentials." };
     }
   };
 

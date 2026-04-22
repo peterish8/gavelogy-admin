@@ -66,7 +66,7 @@ export const getNoteContent = query({
     return ctx.db
       .query("note_contents")
       .withIndex("by_item", (q) => q.eq("itemId", itemId))
-      .unique();
+      .first();
   },
 });
 
@@ -80,7 +80,7 @@ export const getJudgmentReaderData = query({
       ctx.db
         .query("note_contents")
         .withIndex("by_item", (q) => q.eq("itemId", itemId))
-        .unique(),
+        .first(),
       ctx.db
         .query("note_pdf_links")
         .withIndex("by_item", (q) => q.eq("itemId", itemId))
@@ -128,7 +128,7 @@ export const updateNoteContent = mutation({
     const existing = await ctx.db
       .query("note_contents")
       .withIndex("by_item", (q) => q.eq("itemId", itemId))
-      .unique();
+      .first();
     if (existing) {
       await ctx.db.patch(existing._id, { content_html });
     } else {

@@ -76,6 +76,8 @@ interface JudgmentPdfPanelProps {
   onNavigateComplete?: () => void
   redrawTick?: number
   onAiNotesGenerated?: (formatted: string, provider: string) => void
+  isPreview?: boolean
+  onScrollNotes?: (linkId: string) => void
 }
 
 // PDF panel for the course editor: renders a lazy-loaded pdfjs PDF with drag-to-tag, link overlays, AI notes generation, and connection-line visualization.
@@ -100,6 +102,8 @@ export function JudgmentPdfPanel({
   onNavigateComplete,
   redrawTick,
   onAiNotesGenerated,
+  isPreview = false,
+  onScrollNotes,
 }: JudgmentPdfPanelProps) {
 
   // ── PDF state ──────────────────────────────────────────────────────
@@ -136,7 +140,7 @@ export function JudgmentPdfPanel({
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [colorPickerOpenId, setColorPickerOpenId] = useState<string | null>(null)
   const [readingProgress, setReadingProgress] = useState(0)
-  const [showConnections, setShowConnections] = useState(false)
+  const [showConnections, setShowConnections] = useState(true)
 
   // ── Navigate-to-link trigger from parent (e.g. clicking linked text in editor) ──
   useEffect(() => {
@@ -195,9 +199,12 @@ export function JudgmentPdfPanel({
     const pageRect = pageEl.getBoundingClientRect()
     const canvasH = pageStates[link.pdf_page]?.height ?? 792 * SCALE
     const unzoomedCanvasH = canvasH / SCALE
-    const regionTop = pageRect.top + (unzoomedCanvasH - (link.y + link.height)) * SCALE * zoomLevel
-    const regionH = link.height * SCALE * zoomLevel
-    const toY = regionTop + regionH / 2
+    // Use rendered height (same formula as the overlay) so the arrow tip lands in the middle of the visible box
+    const renderedH = Math.max(link.height * SCALE, 40) * zoomLevel
+    const storedH   = link.height * SCALE * zoomLevel
+    const topPad    = Math.max(0, renderedH - storedH) / 2
+    const regionTop = pageRect.top + (unzoomedCanvasH - (link.y + link.height)) * SCALE * zoomLevel - topPad
+    const toY = regionTop + renderedH / 2
 
     const fromY = spanRect.top + spanRect.height / 2
 
@@ -542,25 +549,25 @@ export function JudgmentPdfPanel({
     const total = pageData.length
     if (total === 0) return []
 
-    // Section definitions: heading must match exactly what the AI wrote in [h2] tags
+    // Matches the new JUDGMENT_SYSTEM_PROMPT emoji-heading format e.g. [h2]🧾 Facts[/h2].
+    // `check` is a unique substring to detect if the section was generated.
+    // `noteAnchor` is the plain text (no emoji) used for link injection via the heading regex.
     const sections: {
-      linkId: string; heading: string; label: string; color: string
-      // Typical position in the judgment as a fraction of total pages
-      fraction: number
+      linkId: string; check: string; noteAnchor: string; label: string; color: string; fraction: number
     }[] = [
-      { linkId: 'link-a3-facts',  heading: 'A3 | FACTS',                   label: 'Facts',     color: '#c9922a', fraction: 0.15 },
-      { linkId: 'link-a4-issues', heading: 'A4 | ISSUES BEFORE THE COURT', label: 'Issues',    color: '#dc2626', fraction: 0.30 },
-      { linkId: 'link-a5-ratio',  heading: 'A5 | HOLDING / RATIO',         label: 'Ratio',     color: '#2563eb', fraction: 0.80 },
-      { linkId: 'link-a7-reason', heading: "A7 | COURT'S REASONING",        label: 'Reasoning', color: '#7c3aed', fraction: 0.60 },
-      { linkId: 'link-a8-evolve', heading: 'A8 | DOCTRINAL EVOLUTION',      label: 'Evolution', color: '#16a34a', fraction: 0.20 },
+      { linkId: 'link-prog-facts',    check: 'Facts',                      noteAnchor: 'Facts',                      label: 'Facts',     color: '#c9922a', fraction: 0.12 },
+      { linkId: 'link-prog-issues',   check: 'Legal Issues',               noteAnchor: 'Legal Issues',               label: 'Issues',    color: '#dc2626', fraction: 0.28 },
+      { linkId: 'link-prog-holdings', check: 'Holdings / Ratio Decidendi', noteAnchor: 'Holdings / Ratio Decidendi', label: 'Ratio',     color: '#2563eb', fraction: 0.75 },
+      { linkId: 'link-prog-analysis', check: "Court's Analysis",           noteAnchor: "Court's Analysis",           label: 'Reasoning', color: '#7c3aed', fraction: 0.62 },
+      { linkId: 'link-prog-doctrine', check: 'Doctrines / Principles',     noteAnchor: 'Doctrines / Principles',     label: 'Doctrine',  color: '#16a34a', fraction: 0.35 },
     ]
 
     const results: { linkId: string; noteAnchor: string; pdfSearchText: string; pdfPage: number; label: string; color: string }[] = []
     const usedPages = new Set<number>()
 
     for (const sec of sections) {
-      // Only create connection if the heading actually appears in the notes
-      if (!formatted.includes(sec.heading)) continue
+      // Only create connection if this section heading appears in the notes
+      if (!formatted.includes(sec.check)) continue
 
       // Estimate which page this section's content came from
       let targetPage = Math.max(1, Math.min(total, Math.round(total * sec.fraction)))
@@ -584,7 +591,7 @@ export function JudgmentPdfPanel({
 
       results.push({
         linkId: sec.linkId,
-        noteAnchor: sec.heading,
+        noteAnchor: sec.noteAnchor,
         pdfSearchText: pageWords.join(' '),
         pdfPage: targetPage,
         label: sec.label,
@@ -640,7 +647,7 @@ export function JudgmentPdfPanel({
       const mergedConnections = [
         ...aiConnections,
         ...progConnections.filter(c => !seen.has(c.linkId)),
-      ].slice(0, 6)
+      ]
 
       toast.loading('🔗 Creating connections…', { id: toastId })
 
@@ -658,7 +665,8 @@ export function JudgmentPdfPanel({
           // Use pdfPage hint (from AI) to constrain search — avoids wrong-page matches
           const pdfPage: number | undefined = typeof conn.pdfPage === 'number' ? conn.pdfPage : undefined
           const searchText: string = conn.pdfSearchText ?? conn.searchText ?? ''
-          const pos = findTextInPageData(pageData, searchText, pdfPage)
+          const endText: string | undefined = conn.pdfSearchTextEnd ?? undefined
+          const pos = findTextInPageData(pageData, searchText, pdfPage, endText)
           if (!pos) {
             console.debug('[ai-connect] not found in PDF:', conn.linkId, searchText)
             continue
@@ -683,15 +691,14 @@ export function JudgmentPdfPanel({
           const anchor: string = conn.noteAnchor ?? conn.noteText ?? ''
           if (anchor && !formattedWithLinks.includes(`[link:${conn.linkId}]`)) {
             const escaped = anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-            // Try to wrap inside a heading tag first
-            const headingRe = new RegExp(`(\\[h[123]\\])(${escaped})(\\[/h[123]\\])`, 'i')
+            // Allow emoji/chars before the anchor inside heading — e.g. [h2]🧾 Facts[/h2]
+            const headingRe = new RegExp(`(\\[h[123]\\][^\\[]*?)(${escaped})(\\[/h[123]\\])`, 'i')
             if (headingRe.test(formattedWithLinks)) {
               formattedWithLinks = formattedWithLinks.replace(
                 headingRe,
                 `$1[link:${conn.linkId}]$2[/link]$3`,
               )
             } else {
-              // Fall back: wrap first occurrence anywhere in the text
               formattedWithLinks = formattedWithLinks.replace(
                 new RegExp(escaped, 'i'),
                 `[link:${conn.linkId}]${anchor}[/link]`,
@@ -969,8 +976,10 @@ export function JudgmentPdfPanel({
 
                       {/* Existing link overlays */}
                       {ps?.rendered && pageLinks.map(link => {
-                        const sy = canvasH - (link.y + link.height) * SCALE
-                        const sh = link.height * SCALE
+                        const sh = Math.max(link.height * SCALE, 40)
+                        // sy: top of box in canvas px (PDF y origin is bottom-left)
+                        // Centre the padded height on the stored region
+                        const sy = canvasH - (link.y + link.height) * SCALE - Math.max(0, sh - link.height * SCALE) / 2
                         const isHighlighted = highlightedLinkId === link.link_id
                         const isConnected = connectionViz?.linkId === link.link_id
                         const { text: linkLabel, color: linkColor } = parseLinkMeta(link.label)
@@ -987,7 +996,7 @@ export function JudgmentPdfPanel({
                                 : isConnected
                                 ? `${linkColor}22`
                                 : `${linkColor}12`,
-                              borderLeft: `3px solid ${linkColor}`,
+                              borderLeft: `4px solid ${linkColor}`,
                               borderTop: 'none',
                               borderRight: 'none',
                               borderBottom: 'none',
@@ -1049,8 +1058,8 @@ export function JudgmentPdfPanel({
         )}
       </div>
 
-      {/* Connections panel */}
-      <div className="shrink-0 border-t border-border bg-card">
+      {/* Connections panel — hidden in preview mode (admin-only UI) */}
+      <div className={cn("shrink-0 border-t border-border bg-card", isPreview && "hidden")}>
         <button
           onClick={() => setShowConnections(v => !v)}
           className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-muted/50 transition-colors"
@@ -1092,8 +1101,9 @@ export function JudgmentPdfPanel({
                       onClick={() => {
                         setColorPickerOpenId(null)
                         scrollToLink(link)
+                        onScrollNotes?.(link.link_id)
                         onHighlightedLinkIdChange(link.link_id)
-                        setTimeout(() => onConnectionVizChange(computeConnection(link.link_id)), 650)
+                        setTimeout(() => onConnectionVizChange(computeConnection(link.link_id)), 700)
                         setTimeout(() => onHighlightedLinkIdChange(null), 5000)
                       }}
                       className={cn(
