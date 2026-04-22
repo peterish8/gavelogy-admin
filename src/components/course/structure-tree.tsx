@@ -242,8 +242,9 @@ function StructureItemRow({
 
   return (
     <div style={style}>
-      <div 
+      <div
         ref={setNodeRef}
+        data-item-id={item.id}
         className={cn(
           "relative flex items-center gap-2 p-2 rounded-lg cursor-pointer group transition-colors pr-2", // Added relative
           isSelected ? "bg-primary/10 text-primary" : "hover:bg-muted/50",

@@ -17,6 +17,7 @@ export default defineSchema({
     longest_streak: v.number(),
     last_activity_date: v.optional(v.string()),
     dark_mode: v.boolean(),
+    is_admin: v.optional(v.boolean()),
     // tokenIdentifier links to Convex Auth identity
     tokenIdentifier: v.string(),
   })

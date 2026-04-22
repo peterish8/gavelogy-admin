@@ -2,18 +2,9 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAuth } from "./authHelpers";
 
-const ADMIN_EMAILS = [
-  ...(process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase()),
-  "gavelogyakshu@mail.com",
-].filter(Boolean);
-
 async function requireAdmin(ctx: Parameters<typeof requireAuth>[0]) {
   const user = await requireAuth(ctx);
-  if (!ADMIN_EMAILS.includes(user.email.toLowerCase())) {
-    throw new Error("Admin access required");
-  }
+  if (!user.is_admin) throw new Error("Admin access required");
   return user;
 }
 
@@ -21,8 +12,7 @@ export const isAdmin = query({
   args: {},
   handler: async (ctx) => {
     const user = await requireAuth(ctx).catch(() => null);
-    if (!user) return false;
-    return ADMIN_EMAILS.includes(user.email.toLowerCase());
+    return !!user?.is_admin;
   },
 });
 
@@ -395,5 +385,21 @@ export const migrateAttachedQuizzes = mutation({
     }
 
     return { migratedQuizzes, migratedQuestions };
+  },
+});
+
+// One-time: activate all structure items that were created with is_active: false
+export const activateAllStructureItems = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const items = await ctx.db.query("structure_items").collect();
+    let count = 0;
+    for (const item of items) {
+      if (!item.is_active) {
+        await ctx.db.patch(item._id, { is_active: true });
+        count++;
+      }
+    }
+    return { activated: count };
   },
 });

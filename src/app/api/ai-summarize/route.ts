@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { fixNestedHighlights } from '@/lib/content-converter'
-import { isAdminRequest, unauthorizedResponse, checkPayloadSize } from '@/lib/admin-auth'
+import { isAdminApiRequest, unauthorizedResponse, checkPayloadSize } from '@/lib/admin-auth'
 import { JUDGMENT_SYSTEM_PROMPT as SYSTEM_PROMPT } from '@/lib/prompts'
 
 // Calls Cerebras with a large-output budget for structured note generation.
@@ -9,6 +9,7 @@ async function callCerebras(messages: any[], apiKey: string, model: string, maxT
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, messages, max_completion_tokens: maxTokens, temperature: 0.2 }),
+    signal: AbortSignal.timeout(30_000),
   })
   if (!res.ok) throw new Error(`Cerebras(${model}) ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -21,6 +22,7 @@ async function callNvidia(messages: any[], apiKey: string, maxTokens = 10000): P
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: 'moonshotai/kimi-k2.5', messages, max_tokens: maxTokens, temperature: 0.2 }),
+    signal: AbortSignal.timeout(30_000),
   })
   if (!res.ok) throw new Error(`NVIDIA ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -38,6 +40,7 @@ async function callGroq(messages: any[], apiKey: string, maxTokens = 3000): Prom
       max_tokens: maxTokens,
       temperature: 0.2,
     }),
+    signal: AbortSignal.timeout(20_000),
   })
   if (!res.ok) throw new Error(`Groq ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -55,6 +58,7 @@ async function callOpenRouter(messages: any[], apiKey: string, model: string, ma
       'X-Title': 'Gavelogy Case Notes AI',
     },
     body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.2 }),
+    signal: AbortSignal.timeout(25_000),
   })
   if (!res.ok) throw new Error(`OpenRouter(${model}) ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -87,8 +91,8 @@ function parseAiResponse(raw: string): { formatted: string; connections: any[] }
 
 // POST handler: turns extracted PDF text into a formatted Gavelogy note plus note-to-PDF connection metadata.
 export async function POST(req: NextRequest) {
-  // Security: require admin secret header on all AI routes
-  if (!isAdminRequest(req)) return unauthorizedResponse()
+  // Security: require either admin session auth or the server-to-server secret header.
+  if (!(await isAdminApiRequest(req))) return unauthorizedResponse()
 
   // Security: reject oversized payloads before buffering into memory
   const sizeError = checkPayloadSize(req, 2_000_000)  // 2MB max

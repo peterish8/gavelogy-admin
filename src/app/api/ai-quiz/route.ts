@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAdminRequest, unauthorizedResponse, checkPayloadSize } from '@/lib/admin-auth'
+import { isAdminApiRequest, unauthorizedResponse, checkPayloadSize } from '@/lib/admin-auth'
 
 const SYSTEM_PROMPT = `You are Gavelogy's Quiz Engine. Your job is to read a completed Gavelogy case law note and generate exactly 10 MCQ questions from it, strictly following the CLAT PG question pattern.
 
@@ -123,6 +123,7 @@ async function callCerebras(messages: any[], apiKey: string, model: string, maxT
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, messages, max_completion_tokens: maxTokens, temperature: 0.3 }),
+    signal: AbortSignal.timeout(25_000),
   })
   if (!res.ok) throw new Error(`Cerebras(${model}) ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -136,6 +137,7 @@ async function callTogether(messages: any[], apiKey: string, maxTokens = 4000): 
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: 'ServiceNow-AI/Apriel-1.6-15b-Thinker', messages, max_tokens: maxTokens, temperature: 0.3 }),
+    signal: AbortSignal.timeout(25_000),
   })
   if (!res.ok) throw new Error(`Together ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -148,6 +150,7 @@ async function callNvidia(messages: any[], apiKey: string, maxTokens = 4000): Pr
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: 'moonshotai/kimi-k2.5', messages, max_tokens: maxTokens, temperature: 0.3 }),
+    signal: AbortSignal.timeout(25_000),
   })
   if (!res.ok) throw new Error(`NVIDIA ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -160,6 +163,7 @@ async function callGroq(messages: any[], apiKey: string, maxTokens = 2000): Prom
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: 'llama-3.1-8b-instant', messages, max_tokens: maxTokens, temperature: 0.3 }),
+    signal: AbortSignal.timeout(20_000),
   })
   if (!res.ok) throw new Error(`Groq ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -177,6 +181,7 @@ async function callOpenRouter(messages: any[], apiKey: string, model: string, ma
       'X-Title': 'Gavelogy Quiz AI',
     },
     body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.3 }),
+    signal: AbortSignal.timeout(25_000),
   })
   if (!res.ok) throw new Error(`OpenRouter(${model}) ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -185,7 +190,7 @@ async function callOpenRouter(messages: any[], apiKey: string, model: string, ma
 
 // POST handler: generates a 10-question quiz from note text, falling back across multiple AI providers.
 export async function POST(req: NextRequest) {
-  if (!isAdminRequest(req)) return unauthorizedResponse()
+  if (!(await isAdminApiRequest(req))) return unauthorizedResponse()
   const sizeError = checkPayloadSize(req, 500_000)  // 500KB max
   if (sizeError) return sizeError
 

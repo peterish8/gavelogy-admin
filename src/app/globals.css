@@ -945,14 +945,72 @@
 }
 
 
-/* Make linked-text spans visible and clickable inside Tiptap */
-.linked-text, span[data-link-id] {
-  color: #c9922a !important;
-  border-bottom: 2px solid #c9922a;
-  cursor: pointer;
+/* Heading-level linked text: keep visible (no badge, heading itself is the trigger) */
+h1 span[data-link-id], h2 span[data-link-id], h3 span[data-link-id],
+h1 .linked-text, h2 .linked-text, h3 .linked-text {
+  color: inherit !important;
+  border-bottom: 2px dashed currentColor !important;
+  cursor: pointer !important;
   padding-bottom: 1px;
+  display: inline !important;
+  opacity: 0.75;
 }
-.linked-text:hover, span[data-link-id]:hover {
-  background: rgba(201,146,42,0.1);
-  border-radius: 2px;
+h1 span[data-link-id]:hover, h2 span[data-link-id]:hover, h3 span[data-link-id]:hover {
+  opacity: 1;
+}
+
+/* Phrase-level linked text: invisible by default — badge reveals it on click */
+p span[data-link-id], li span[data-link-id],
+p .linked-text,       li .linked-text {
+  color: inherit !important;
+  border-bottom: none !important;
+  cursor: default !important;
+  display: inline !important;
+}
+
+/* Citation badge must not inherit linked-text span styles */
+button.citation-badge[data-link-id] {
+  color: #fff !important;
+  border-bottom: none !important;
+  cursor: pointer !important;
+  pointer-events: all !important;
+  position: relative;
+  z-index: 20;
+}
+
+/* ── Citation badge: small colored circle at end of paragraph ─────────────── */
+.citation-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #c9922a;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-left: 5px;
+  vertical-align: middle;
+  border: none;
+  line-height: 1;
+  flex-shrink: 0;
+  position: relative;
+  top: -1px;
+  transition: transform 0.15s, opacity 0.15s;
+  user-select: none;
+}
+.citation-badge:hover { transform: scale(1.25); opacity: 0.85; }
+
+/* ── Note span highlight flash when connection activates ─────────────────── */
+@keyframes note-span-flash {
+  0%   { background: transparent; }
+  15%  { background: rgba(201,146,42,0.35); border-radius: 3px; color: #c9922a; border-bottom: 2px solid #c9922a; }
+  70%  { background: rgba(201,146,42,0.15); border-radius: 3px; color: #c9922a; border-bottom: 2px solid #c9922a; }
+  100% { background: transparent; color: inherit; border-bottom: none; }
+}
+.note-span-flash {
+  animation: note-span-flash 2s ease-out forwards;
+  cursor: pointer !important;
 }

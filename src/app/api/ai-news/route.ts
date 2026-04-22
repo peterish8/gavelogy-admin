@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAdminRequest, unauthorizedResponse, checkPayloadSize } from '@/lib/admin-auth'
+import { isAdminApiRequest, unauthorizedResponse, checkPayloadSize } from '@/lib/admin-auth'
 
 export const maxDuration = 120  // seconds — Kimi K2.5 is slow, needs headroom
 
@@ -374,7 +374,7 @@ async function runModel(
 
 // POST handler: extracts CLAT-relevant legal news articles, ranked and structured for Gavelogy.
 export async function POST(req: NextRequest) {
-  if (!isAdminRequest(req)) return unauthorizedResponse()
+  if (!(await isAdminApiRequest(req))) return unauthorizedResponse()
   const sizeError = checkPayloadSize(req, 1_000_000)  // 1MB max
   if (sizeError) return sizeError
 

@@ -240,7 +240,7 @@ const LinkedText = Mark.create({
   renderHTML({ HTMLAttributes }) {
     return ['span', mergeAttributes(HTMLAttributes, {
       class: 'linked-text',
-      style: 'color:#c9922a;border-bottom:2px solid #c9922a;cursor:pointer;padding-bottom:1px',
+      style: 'color:#c9922a;border-bottom:2px dashed #c9922a;cursor:pointer;padding-bottom:1px;display:inline',
     }), 0]
   },
 })
@@ -447,7 +447,8 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
 
         for (const conn of connections) {
             const searchText = conn.pdfSearchText || conn.searchText || ''
-            const pos = findTextInPageData(pageData, searchText, conn.pdfPage)
+            const endText = conn.pdfSearchTextEnd || undefined
+            const pos = findTextInPageData(pageData, searchText, conn.pdfPage, endText)
             
             if (pos) {
                 const label = encodeLinkMeta(conn.label || '', conn.color || '#c9922a')
@@ -467,8 +468,8 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                 const anchor = conn.noteAnchor || conn.noteText || ''
                 if (anchor && !taggedFormatted.includes(`[link:${conn.linkId}]`)) {
                     const escaped = anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-                    // Try to wrap inside a heading tag first
-                    const headingRe = new RegExp(`(\\[h[123]\\])(${escaped})(\\[/h[123]\\])`, 'i')
+                    // Try to wrap inside a heading tag — allow emoji/chars before the anchor text
+                    const headingRe = new RegExp(`(\\[h[123]\\][^\\[]*?)(${escaped})(\\[/h[123]\\])`, 'i')
                     if (headingRe.test(taggedFormatted)) {
                         taggedFormatted = taggedFormatted.replace(headingRe, `$1[link:${conn.linkId}]$2[/link]$3`)
                     } else {
@@ -977,6 +978,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
 
   const [jLinks, setJLinks] = useState<NotePdfLink[]>([])
   const [jLinksLoaded, setJLinksLoaded] = useState(false)
+  const [badgePositions, setBadgePositions] = useState<{ linkId: string; color: string; top: number }[]>([])
   const [jConnectMode, setJConnectMode] = useState(false)
   const [jConnectStep, setJConnectStep] = useState<'note' | 'pdf' | null>(null)
   const [jConnectNoteCapture, setJConnectNoteCapture] = useState<{ text: string; linkId: string } | null>(null)
@@ -1071,6 +1073,14 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
     return () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
   }, [])
 
+  // Recalc badge positions after content/mode/links change
+  useEffect(() => {
+    if (!judgmentMode || !jLinks.length) { setBadgePositions([]); return }
+    const timer = setTimeout(recalcBadgePositions, 250)
+    return () => clearTimeout(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jPreviewHtml, jNoteMode, jLinks, judgmentMode])
+
   // ── Ctrl+Scroll Zoom Handler for Note Editor ──
   useEffect(() => {
     const el = jNoteContainerRef.current
@@ -1102,6 +1112,56 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   function getJNoteText(linkId: string): string {
     const el = getNoteLinkSpan(linkId)
     return el?.textContent?.trim() || linkId
+  }
+
+  function flashNoteSpan(linkId: string) {
+    const span = getNoteLinkSpan(linkId)
+    if (!span) return
+    span.classList.remove('note-span-flash')
+    void (span as HTMLElement).offsetWidth  // force reflow to restart animation
+    span.classList.add('note-span-flash')
+    setTimeout(() => span.classList.remove('note-span-flash'), 2100)
+  }
+
+  function scrollNotesToLink(linkId: string) {
+    const span = getNoteLinkSpan(linkId)
+    if (!span) return
+    span.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    flashNoteSpan(linkId)
+  }
+
+  // Calculate citation badge positions from span getBoundingClientRect.
+  // Badges are rendered as React elements in an overlay — completely outside TipTap's DOM.
+  function recalcBadgePositions() {
+    const container = jNoteContainerRef.current
+    if (!container || !judgmentMode || !jLinks.length) { setBadgePositions([]); return }
+    const scrollEl = container.querySelector('.notes-editor-scroll') as HTMLElement | null
+    const scrollTop = scrollEl?.scrollTop ?? 0
+    const containerRect = container.getBoundingClientRect()
+    const seenLinkIds = new Set<string>()
+    const positions: { linkId: string; color: string; top: number }[] = []
+    
+    container.querySelectorAll<HTMLElement>('span[data-link-id]').forEach(span => {
+      if (span.closest('h1,h2,h3')) return
+      const linkId = span.getAttribute('data-link-id')!
+      if (seenLinkIds.has(linkId)) return
+      seenLinkIds.add(linkId)
+      const para = span.closest('p,li') as HTMLElement | null
+      if (!para) return
+      
+      const paraRect = para.getBoundingClientRect()
+      const link = jLinks.find(l => l.link_id === linkId)
+      const color = link ? parseLinkMeta(link.label).color : '#c9922a'
+      
+      // Fix for zoom skewing hitboxes:
+      // When CSS zoom is active, getBoundingClientRect returns scaled values.
+      // We divide the visual delta by jNoteZoom to get the correct unscaled offset.
+      const visualDelta = paraRect.bottom - containerRect.top
+      const top = (visualDelta / jNoteZoom) + scrollTop - 10
+      
+      positions.push({ linkId, color, top })
+    })
+    setBadgePositions(positions)
   }
 
   async function extractTextForLink(link: NotePdfLink) {
@@ -1173,7 +1233,8 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
 
     setJNavigateToLinkId(linkId)
     setJHighlightedLinkId(linkId)
-    setJRightTab('judgment') // Always show PDF when a connection is clicked
+    setJRightTab('judgment')
+    flashNoteSpan(linkId)
     setTimeout(() => setJHighlightedLinkId(null), 2000)
   }
 
@@ -1325,8 +1386,20 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
         // LOCAL AUTOSAVE: Debounced save to local storage
         if (!itemId) return
         const html = editor.getHTML()
-        setInitialContent(html) // Keep tracking current content
         debouncedSave(itemId, html)
+
+        // AUTO-DELETE: if a linked span was deleted from the editor, remove the DB connection too
+        if (judgmentMode && jLinks.length > 0) {
+          const presentIds = new Set(
+            Array.from(html.matchAll(/data-link-id="([^"]+)"/g)).map(m => m[1])
+          )
+          jLinks.forEach(link => {
+            if (!presentIds.has(link.link_id)) {
+              deleteLink(link.id).catch(() => {})
+              setJLinks(prev => prev.filter(l => l.id !== link.id))
+            }
+          })
+        }
     }
   })
 
@@ -1769,7 +1842,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
         setHasDraft(false)
         setDraftId(null)
         setInitialContent(currentHtml)
-        setPublishedContent(customSyntax) 
+        setPublishedContent(currentHtml)
         
         toast.success("Content published successfully", {
             description: "Draft cleared and content is now live."
@@ -2009,7 +2082,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                         <Button 
                             size="sm" 
                             onClick={() => handleSaveDraft(false)} 
-                            disabled={!editor || saveLoading || isStructureDraft}
+                            disabled={!editor || saveLoading || isStructureDraft || (!hasDraft && editor?.getHTML() === initialContent)}
                             variant="secondary"
                             className="bg-amber-100 text-amber-900 hover:bg-amber-200 border border-amber-200"
                             title="Save changes as draft (not visible to users)"
@@ -2240,6 +2313,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                     onClick={handleJLinkedTextClick}
                                     onScroll={() => {
                                         if (jConnectionViz) setJRedrawTick(t => t + 1)
+                                        recalcBadgePositions()
                                     }}
                                 >
                                     <div className={cn("relative", forceLightMode && "force-light")} style={{ zoom: jNoteZoom }}>
@@ -2253,6 +2327,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                         className="notes-editor-scroll flex-1 overflow-y-auto"
                                         onScroll={() => {
                                             if (jConnectionViz) setJRedrawTick(t => t + 1)
+                                            recalcBadgePositions()
                                         }}
                                     >
                                         <div
@@ -2261,6 +2336,27 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                             onClick={handleJLinkedTextClick}
                                             dangerouslySetInnerHTML={{ __html: jPreviewHtml }}
                                         />
+                                    </div>
+                                )}
+
+                                {/* Citation badge overlay — rendered as React elements, completely outside TipTap DOM */}
+                                {judgmentMode && badgePositions.length > 0 && (
+                                    <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 25 }}>
+                                        {badgePositions.map((b, idx) => (
+                                            <button
+                                                key={b.linkId}
+                                                className="citation-badge pointer-events-auto absolute"
+                                                style={{ top: b.top, right: 10, background: b.color }}
+                                                title="Jump to judgment"
+                                                onClick={() => {
+                                                    setJNavigateToLinkId(b.linkId)
+                                                    setJHighlightedLinkId(b.linkId)
+                                                    setJRightTab('judgment')
+                                                    flashNoteSpan(b.linkId)
+                                                    setTimeout(() => setJHighlightedLinkId(null), 2000)
+                                                }}
+                                            >{idx + 1}</button>
+                                        ))}
                                     </div>
                                 )}
                             </div>
@@ -2329,7 +2425,9 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                     savingLink={jSavingLink}
                                     navigateToLinkId={jNavigateToLinkId}
                                     onNavigateComplete={() => setJNavigateToLinkId(null)}
+                                    onScrollNotes={scrollNotesToLink}
                                     redrawTick={jRedrawTick}
+                                    isPreview={jNoteMode === 'preview'}
                                     onAiNotesGenerated={(formatted, provider) => {
                                         if (!editor) return
                                         const html = customToHtml(formatted)
