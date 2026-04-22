@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button'
 import TagModal from './TagModal'
 import {
   ArrowLeft, Upload, Save, Link2, X, Loader2, FileText, Trash2, CheckCircle, Trash,
-  ChevronDown, Unlink, Eye, Pencil, Wand2,
+  ChevronDown, Unlink, Eye, Pencil, Wand2, AlignLeft, AlignCenter, AlignRight,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -1630,6 +1630,43 @@ function SelectionToolbar({
         ) : (
           <p className="text-xs mt-1 text-muted-foreground">Auto-generated from selection · edit if needed</p>
         )}
+      </div>
+
+      {/* Text alignment buttons */}
+      <div className="flex items-center gap-1.5 py-1.5 border-t border-border pt-2">
+        <span className="text-xs text-muted-foreground">Text align:</span>
+        <div className="flex gap-0.5 ml-auto">
+          <button
+            onClick={() => {
+              document.execCommand('justifyLeft', false, '')
+              onDismiss()
+            }}
+            className="p-1 rounded hover:bg-muted/80 text-muted-foreground transition-colors"
+            title="Align Left"
+          >
+            <AlignLeft className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => {
+              document.execCommand('justifyCenter', false, '')
+              onDismiss()
+            }}
+            className="p-1 rounded hover:bg-muted/80 text-muted-foreground transition-colors"
+            title="Align Center"
+          >
+            <AlignCenter className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => {
+              document.execCommand('justifyRight', false, '')
+              onDismiss()
+            }}
+            className="p-1 rounded hover:bg-muted/80 text-muted-foreground transition-colors"
+            title="Align Right"
+          >
+            <AlignRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-2">

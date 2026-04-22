@@ -211,6 +211,13 @@ export default function PYQPreviewPage() {
     return () => clearInterval(id)
   }, [])
 
+  // ── Submit ─────────────────────────────────────────────────────────────────
+  const handleSubmit = useCallback((autoSubmit = false) => {
+    if (!autoSubmit) setShowSubmitModal(false)
+    clearInterval(timerRef.current!)
+    setPhase('submitted')
+  }, [])
+
   // ── Main timer ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (phase !== 'active') return
@@ -323,13 +330,6 @@ export default function PYQPreviewPage() {
       setShowSubmitModal(true)
     }
   }
-
-  // ── Submit ─────────────────────────────────────────────────────────────────
-  const handleSubmit = useCallback((autoSubmit = false) => {
-    if (!autoSubmit) setShowSubmitModal(false)
-    clearInterval(timerRef.current!)
-    setPhase('submitted')
-  }, [])
 
   // ── Results calc ───────────────────────────────────────────────────────────
   const results = (() => {

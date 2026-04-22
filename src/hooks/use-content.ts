@@ -9,6 +9,10 @@ import { useDraftStore } from '@/lib/stores/draft-store'
 
 // Helper to reliably map Convex structure_items back to ContentItem for the draft store UI
 function mapStructureItemToContentItem(item: any): ContentItem {
+  const createdAt = item._creationTime
+    ? new Date(item._creationTime).toISOString()
+    : new Date().toISOString()
+
   return {
     id: item._id,
     subject_id: item.courseId || item.parentId || '', // fallback
@@ -16,13 +20,14 @@ function mapStructureItemToContentItem(item: any): ContentItem {
     content_type: (item.item_type as any) || 'note',
     order_index: item.order_index || 0,
     is_active: item.is_active ?? true,
+    created_at: createdAt,
+    updated_at: createdAt,
     version: 1,
     // Add null fallbacks for fields used by the UI
     note_content: null,
     quiz_id: null,
     case_number: null,
     interactive_data: null,
-    pdf_url: item.pdf_url || null,
   }
 }
 

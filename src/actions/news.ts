@@ -145,20 +145,20 @@ export async function updateNewsCard(
     update.content_html = customToHtml(patch.content_custom);
   }
 
-  await fetchMutation(api.adminMutations.updateDailyNews, { id, patch: update }, { token });
+  await fetchMutation(api.adminMutations.updateDailyNews, { id: id as any, patch: update }, { token });
 }
 
 export async function publishNewsCards(ids: string[]): Promise<void> {
   const token = await convexAuthNextjsToken();
-  await fetchMutation(api.adminMutations.bulkPublishNews, { ids, status: 'published' }, { token });
+  await fetchMutation(api.adminMutations.bulkPublishNews, { ids: ids as any, status: 'published' }, { token });
 }
 
 export async function unpublishNewsCards(ids: string[]): Promise<void> {
   const token = await convexAuthNextjsToken();
-  await fetchMutation(api.adminMutations.bulkPublishNews, { ids, status: 'draft' }, { token });
+  await fetchMutation(api.adminMutations.bulkPublishNews, { ids: ids as any, status: 'draft' }, { token });
 }
 
 export async function deleteNewsCard(id: string): Promise<void> {
   const token = await convexAuthNextjsToken();
-  await fetchMutation(api.adminMutations.deleteDailyNews, { id }, { token });
+  await fetchMutation(api.adminMutations.deleteDailyNews, { id: id as any }, { token });
 }

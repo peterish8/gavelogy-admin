@@ -78,9 +78,9 @@ export function useCourseActions() {
     return await upsertCourse({
       courseId: courseId as Id<'courses'>,
       name: updates.name ?? existing.name,
-      description: updates.description ?? existing.description,
-      price: updates.price ?? existing.price,
-      is_active: updates.is_active ?? existing.is_active,
+      description: updates.description ?? existing.description ?? '',
+      price: updates.price ?? existing.price ?? 0,
+      is_active: updates.is_active ?? existing.is_active ?? true,
       is_free: existing.is_free,
     })
   }, [allCourses, upsertCourse])

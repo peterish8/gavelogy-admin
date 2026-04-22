@@ -325,7 +325,7 @@ export default function PYQEditPage() {
       <div className="flex flex-col items-center justify-center h-[60vh] text-center gap-4">
         <AlertCircle className="w-10 h-10 text-red-500" />
         <p className="text-destructive font-medium">{error}</p>
-        <button onClick={loadData} className="flex items-center gap-2 px-4 py-2 bg-muted rounded-lg text-sm font-medium">
+        <button onClick={() => window.location.reload()} className="flex items-center gap-2 px-4 py-2 bg-muted rounded-lg text-sm font-medium">
           <RefreshCw className="w-4 h-4" /> Retry
         </button>
       </div>
