@@ -34,6 +34,7 @@ export default function LoginPage() {
 
   const ADMIN_EMAILS = (process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? '')
     .split(',').map(e => e.trim().toLowerCase())
+  const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD ?? ''
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -44,6 +45,11 @@ export default function LoginPage() {
       // Reject non-admin emails immediately before even hitting Convex
       if (!ADMIN_EMAILS.includes(email.trim().toLowerCase())) {
         throw new Error('Access denied. You do not have admin privileges.')
+      }
+
+      // Validate against env-based admin password
+      if (ADMIN_PASSWORD && password !== ADMIN_PASSWORD) {
+        throw new Error('Invalid password.')
       }
 
       const result = await signIn(email, password)
