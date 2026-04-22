@@ -1,26 +1,26 @@
 # Gavelogy Admin Panel
 
-Admin dashboard for managing **Gavelogy** — a legal education platform built with **Next.js 16**, **Supabase**, and **TypeScript**.
+Admin dashboard for managing **Gavelogy** — a legal education platform built with **Next.js 16**, **Convex**, and **TypeScript**.
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Framework | Next.js 16.1.1 (App Router, Turbopack) |
+| Framework | Next.js 16 (App Router) |
 | Language | TypeScript (strict) |
-| Database / Auth | Supabase (PostgreSQL, Auth, Realtime) |
+| Backend / DB | **Convex** (Serverless DB, Realtime) |
+| Authentication | **Convex Auth** (@convex-dev/auth) |
+| Storage | **Backblaze B2** (via S3-compatible SDK) |
+| AI Pipeline | Multi-provider (NVIDIA, Groq, OpenRouter, Cerebras) |
 | Styling | Tailwind CSS v4 |
 | UI Components | shadcn/ui (Radix primitives) |
-| State Management | Zustand (client-side caching) |
-| Drag & Drop | @dnd-kit/core + @dnd-kit/sortable |
-| Animations | Framer Motion |
-| Package Manager | pnpm |
+| Package Manager | npm |
 
 ## Getting Started
 
 ```bash
-pnpm install
-pnpm run dev
+npm install
+npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). You will be redirected to `/auth/login` or `/admin/dashboard` based on auth state.
@@ -30,37 +30,53 @@ Open [http://localhost:3000](http://localhost:3000). You will be redirected to `
 Create `.env.local`:
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL=<your-supabase-project-url>
-NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-supabase-anon-key>
+# Convex
+CONVEX_DEPLOYMENT=<your-deployment-url>
+NEXT_PUBLIC_CONVEX_URL=<your-public-convex-url>
+
+# Storage (Backblaze B2)
+BACKBLAZE_BUCKET_ENDPOINT=...
+BACKBLAZE_KEY_ID=...
+BACKBLAZE_APP_KEY=...
+BACKBLAZE_BUCKET_NAME=...
+
+# AI API Keys
+GROQ_API_KEY=...
+OPENROUTER_API_KEY=...
+NVIDIA_API_KEY=...
+CEREBRAS_API_KEY=...
+
+# Admin Secret (Internal server-to-server calls)
+ADMIN_API_SECRET=...
 ```
 
 ## Architecture
 
-### Server-Side Rendering (SSR) Strategy
+### Authentication Strategy
 
-All admin pages use **Server Components** for instant loading — no client-side loading spinners.
+The admin panel uses a **hybrid authentication system** to support both browser-based users and automated server-to-server calls (e.g., Telegram bots, MCP agents).
 
-**How it works:**
+1.  **Browser Session**: Users are authenticated via `@convex-dev/auth`. The `AdminLayout` ensures all sessions are valid before rendering admin features.
+2.  **Server Secret**: API routes accept the `x-admin-secret` header. This allows trusted external services (like the Telegram Bot or Python scripts) to trigger AI processing.
+3.  **Unified Auth Check**: All AI routes use `isAdminApiRequest(req)` (see `src/lib/admin-auth.ts`) which validates either the Convex session OR the secret header.
 
-1. **`src/proxy.ts`** (Next.js 16 proxy, formerly middleware) — Runs on every request. Calls `supabase.auth.getUser()` to revalidate and refresh JWT tokens. This ensures all subsequent `getSession()` calls are instant local cookie reads.
+### Admin AI Pipeline
 
-2. **`src/app/admin/layout.tsx`** (Server Component) — Performs a single server-side auth check: fetches the user, validates admin status, and passes the `adminUser` object down to `AdminLayoutClient` as props.
+Most AI features (Case Summarization, News Extraction, Quiz Generation) follow a **reliable fallback cascade**:
 
-3. **`AdminLayoutClient`** — Client component that wraps children in `AdminProvider` and `RealtimeProvider`, receiving user data as props (no client-side auth calls).
+- **Priority Cascade**: Tries high-capacity models first (e.g., NVIDIA Kimi K2.5) then falls back to fast/free models (Groq Llama 3.3, OpenRouter Gemini Flash).
+- **Timeouts**: Every provider call is wrapped in an `AbortSignal.timeout(25_000)` to ensure a single slow provider doesn't hang the entire request.
+- **Provider Transparency**: Each successful AI response includes a `provider` field identifying which model finally produced the result.
 
-4. **Data-heavy pages** (e.g., Course Studio, Notes, Quizzes) — Fetch data server-side via `createClient()` from `@/lib/supabase/server` and pass it as props or render directly.
-
-**Key files:**
-- `src/proxy.ts` — Token refresh proxy (runs before every request)
-- `src/app/admin/layout.tsx` — Server-side auth gate
-- `src/app/admin/admin-layout-client.tsx` — Client shell with providers
-- `src/contexts/admin-context.tsx` — Simplified admin context (props only, no fetching)
-- `src/lib/supabase/server.ts` — Server-side Supabase client factory
-- `src/lib/supabase/client.ts` — Client-side Supabase client factory
+**Key AI API Routes:**
+- `src/app/api/ai-summarize` — Judgment-to-Note generation
+- `src/app/api/ai-news` — Legal news extraction from newspapers
+- `src/app/api/ai-quiz` — Automatic MCQ generation from case notes
+- `src/app/api/ai-format` — Raw text to Gavelogy tagged markup
 
 ### Realtime Presence System
 
-File-level presence tracking showing which admin is working on which course. Designed to be **Supabase free-tier friendly** (no cursor tracking, no high-frequency updates).
+Shows which admins are currently online and what they're viewing. Powered by **Convex Realtime**.
 
 **How it works:**
 
@@ -93,74 +109,31 @@ File-level presence tracking showing which admin is working on which course. Des
 ```
 src/
 ├── app/
-│   ├── page.tsx                    # Root redirect (SSR)
-│   ├── auth/login/                 # Login page
-│   └── admin/
-│       ├── layout.tsx              # Server Component auth gate
-│       ├── admin-layout-client.tsx # Client shell (sidebar, header, providers)
-│       ├── dashboard/              # Admin dashboard
-│       ├── studio/                 # Course Studio (main feature)
-│       │   ├── page.tsx            # Course list (SSR)
-│       │   ├── studio-client.tsx   # Client-side course grid + DnD
-│       │   └── [courseId]/         # Course detail IDE
-│       │       ├── page.tsx        # SSR data fetch
-│       │       └── course-detail-client.tsx # Structure tree + editor
-│       ├── notes/                  # Case Notes (SSR)
-│       └── quizzes/                # Quizzes (SSR)
+│   ├── auth/                       # Login and signup flows
+│   ├── admin/                      # Auth-gated admin shell
+│   │   ├── layout.tsx              # Auth gate (Convex-based)
+│   │   ├── studio/                 # Course Studio (Main feature)
+│   │   ├── notes/                  # Notes management
+│   │   └── quizzes/                # Quiz management
+│   └── api/
+│       ├── ai-*/                   # AI processing endpoints
+│       └── auth/                   # Custom auth handlers
 ├── components/
-│   ├── admin/                      # Admin-specific components
-│   │   ├── presence-badge.tsx      # Realtime presence badges
-│   │   ├── presence-avatars.tsx    # Header presence display
-│   │   └── case-list-view.tsx      # Case list grouped by year
-│   ├── course/                     # Course components
-│   │   ├── course-card.tsx         # Course card with DnD + presence
-│   │   └── structure-tree.tsx      # Recursive folder/file tree
-│   ├── editor/                     # Rich text + quiz editors
+│   ├── admin/                      # Presence and layout components
+│   ├── course/                     # Studio-specific UI (Trees, Cards)
 │   └── ui/                         # shadcn/ui primitives
 ├── contexts/
-│   ├── admin-context.tsx           # Admin auth context
-│   └── draft-context.tsx           # Unsaved changes tracking
-├── hooks/
-│   ├── use-courses.ts              # Course CRUD + caching
-│   └── use-structure.ts            # Structure CRUD + caching
+│   └── auth-context.tsx            # Global Convex auth state
 ├── lib/
-│   ├── realtime/
-│   │   └── realtime-provider.tsx   # Supabase Realtime + Presence
-│   ├── stores/
-│   │   ├── course-store.ts         # Zustand course cache
-│   │   ├── draft-store.ts          # Draft state
-│   │   └── header-store.ts         # Dynamic header title/actions
-│   ├── supabase/
-│   │   ├── client.ts               # Browser Supabase client
-│   │   └── server.ts               # Server Supabase client
-│   └── utils.ts                    # cn() utility
-├── types/                          # TypeScript type definitions
-└── proxy.ts                        # Token refresh proxy (Next.js 16)
+│   ├── admin-auth.ts               # Unified API auth logic
+│   ├── b2-client.ts                # Backblaze B2 S3 Client
+│   └── prompts.ts                  # Legal-specialized system prompts
+└── convex/                         # Backend functions and schema
 ```
 
-## Database Schema (Supabase)
+## Database Schema (Convex)
 
-### Core Tables
-
-| Table | Purpose |
-|-------|---------|
-| `users` | Admin users with `is_admin` flag |
-| `courses` | Course metadata (name, description, icon, order) |
-| `structure_items` | Recursive tree structure (folders/files) with `parent_id` |
-| `note_contents` | Rich text content linked to structure items |
-| `attached_quizzes` | Quiz metadata linked to structure items |
-| `quiz_questions` | Individual quiz questions with options |
-| `contemporary_case_quizzes` | Standalone case-based quizzes |
-
-### Key Relationships
-
-```
-courses → structure_items (1:many via course_id)
-structure_items → structure_items (self-referential via parent_id)
-structure_items → note_contents (1:many via item_id)
-structure_items → attached_quizzes (1:1 via note_item_id)
-attached_quizzes → quiz_questions (1:many via quiz_id)
-```
+Convex handles all indexing and relationships automatically. Key objects include `courses`, `structure_items`, `note_contents`, and `quiz_questions`.
 
 ## Key Features
 
@@ -183,17 +156,15 @@ attached_quizzes → quiz_questions (1:many via quiz_id)
 ### Realtime Presence
 - Shows which admins are currently online and what they're viewing
 - Initials badges on course cards and course detail headers
-- Header bar shows all online admins with page labels
-- Free-tier Supabase friendly (page-level, not cursor-level)
+- Global Header bar shows all online admins with page labels
+- Powered by Convex realtime presence
 
 ## Important Conventions
 
-1. **SSR first** — All pages fetch data server-side. Client components receive data as props.
-2. **Proxy for auth** — `proxy.ts` refreshes tokens; never call `getUser()` in client components.
-3. **Zustand for caching** — Use stores to cache fetched data; seed stores from SSR props using `useEffect` (not during render).
-4. **No `isLoading` for auth** — Auth data is always available via SSR; no loading states needed for admin checks.
-5. **URL search params** — Search on list pages uses `?q=` URL params with form submission (not client-side state).
-6. **Tailwind v4** — Uses `bg-linear-to-br` (not `bg-gradient-to-br`).
+1.  **Auth Guard**: Always check auth via `isAdminApiRequest(req)` in new API routes.
+2.  **Provider Timeouts**: Every `fetch` to an AI provider MUST include a `signal: AbortSignal.timeout(ms)` to prevent hanging.
+3.  **No `proxy.ts`**: The project no longer uses a middleware-based proxy; auth is now handled directly by Convex and the `AdminLayout`.
+4.  **Tailwind v4**: Uses modern CSS variables and `bg-linear-to-br` syntax.
 
 ## Scripts
 
