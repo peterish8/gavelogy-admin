@@ -32,6 +32,7 @@ import {
   Undo,
   Redo,
   Table as TableIcon,
+  Minus,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -209,13 +210,22 @@ const Toolbar = ({ editor }: { editor: Editor | null }) => {
       >
         <AlignRight className="w-4 h-4" />
       </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => editor.chain().focus().setTextAlign('justify').run()}
+        className={cn(editor.isActive({ textAlign: 'justify' }) && 'bg-muted')}
+        title="Align Justify"
+      >
+        <AlignJustify className="w-4 h-4" />
+      </Button>
 
       <div className="w-px h-6 bg-border mx-1" />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="sm" title="Line Height">
-            <AlignJustify className="w-4 h-4" />
+            <Minus className="w-4 h-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent>

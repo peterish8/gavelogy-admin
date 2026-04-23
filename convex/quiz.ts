@@ -24,6 +24,11 @@ export const saveAttempt = mutation({
   },
   handler: async (ctx, args) => {
     const user = await requireAuth(ctx);
+    
+    // Validate quiz exists
+    const quiz = await ctx.db.get(args.quizId);
+    if (!quiz) throw new Error(`Quiz not found: ${args.quizId}`);
+    
     const now = new Date().toISOString();
 
     const attemptId = await ctx.db.insert("quiz_attempts", {
