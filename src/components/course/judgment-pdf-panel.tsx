@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
   Upload, Loader2, FileText, Trash2, Trash, Link2, Unlink, ChevronDown, Sparkles, Copy,
+  Search, X, ChevronUp,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -26,7 +27,7 @@ import {
   hexToRgb
 } from '@/lib/pdf-utils'
 
-const SCALE = 1.3
+const SCALE = 2.0
 
 interface Region {
   page: number
@@ -141,6 +142,22 @@ export function JudgmentPdfPanel({
   const [colorPickerOpenId, setColorPickerOpenId] = useState<string | null>(null)
   const [readingProgress, setReadingProgress] = useState(0)
   const [showConnections, setShowConnections] = useState(true)
+
+  // ── Search state ───────────────────────────────────────────────────
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchMatchCount, setSearchMatchCount] = useState(0)
+  const [searchMatchIndex, setSearchMatchIndex] = useState(0)
+  const searchMatchElsRef = useRef<HTMLElement[]>([])
+  const searchQueryRef = useRef('')
+  const searchInputRef = useRef<HTMLInputElement>(null)
+
+  // ── Annotation overlays (PDF internal/external links) ─────────────
+  const [pageAnnotations, setPageAnnotations] = useState<Record<number, Array<{
+    left: number; top: number; width: number; height: number
+    dest?: any; url?: string
+  }>>>({})
+  const pageAnnotationsRef = useRef<Record<number, boolean>>({})
 
   // ── Navigate-to-link trigger from parent (e.g. clicking linked text in editor) ──
   useEffect(() => {
@@ -264,9 +281,15 @@ export function JudgmentPdfPanel({
       const viewport = page.getViewport({ scale: SCALE })
       const canvas = canvasRefs.current.get(pageNum)
       if (!canvas) return
-      canvas.width = viewport.width
-      canvas.height = viewport.height
+
+      // HiDPI / retina quality fix — render at device pixel ratio
+      const dpr = window.devicePixelRatio || 1
+      canvas.width = Math.floor(viewport.width * dpr)
+      canvas.height = Math.floor(viewport.height * dpr)
+      canvas.style.width = `${viewport.width}px`
+      canvas.style.height = `${viewport.height}px`
       const ctx = canvas.getContext('2d')!
+      ctx.scale(dpr, dpr)
       await page.render({ canvasContext: ctx, viewport }).promise
 
       const tlContainer = textLayerContainerRefs.current.get(pageNum)
@@ -280,6 +303,32 @@ export function JudgmentPdfPanel({
         await tl.render()
       }
 
+      // Extract PDF annotations (internal/external links) once per page
+      if (!pageAnnotationsRef.current[pageNum]) {
+        pageAnnotationsRef.current[pageNum] = true
+        try {
+          const annotations = await page.getAnnotations()
+          const linkAnns = annotations
+            .filter((a: any) => a.subtype === 'Link' && (a.dest || a.url || a.action?.URI))
+            .map((a: any) => {
+              const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(a.rect)
+              return {
+                left: Math.min(vx1, vx2),
+                top: Math.min(vy1, vy2),
+                width: Math.abs(vx2 - vx1),
+                height: Math.abs(vy2 - vy1),
+                dest: a.dest ?? null,
+                url: a.url ?? a.action?.URI ?? null,
+              }
+            })
+          if (linkAnns.length > 0) {
+            setPageAnnotations(prev => ({ ...prev, [pageNum]: linkAnns }))
+          }
+        } catch {
+          // annotations are non-critical — ignore errors
+        }
+      }
+
       setPageStates(prev => ({
         ...prev,
         [pageNum]: { rendered: true, width: viewport.width, height: viewport.height },
@@ -288,6 +337,136 @@ export function JudgmentPdfPanel({
       console.error(`Page ${pageNum} render error:`, err)
     }
   }, [])
+
+  // ── PDF search helpers ────────────────────────────────────────────
+  function clearSearchHighlights() {
+    for (let p = 1; p <= numPages; p++) {
+      const c = textLayerContainerRefs.current.get(p)
+      if (!c) continue
+      c.querySelectorAll('mark.pdf-search-hl').forEach(mark => {
+        const parent = mark.parentNode
+        if (!parent) return
+        parent.replaceChild(document.createTextNode(mark.textContent || ''), mark)
+        parent.normalize()
+      })
+    }
+  }
+
+  function highlightInContainer(container: HTMLElement, query: string): HTMLElement[] {
+    const marks: HTMLElement[] = []
+    const regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
+    const walkNode = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent || ''
+        const ranges: Array<{ s: number; e: number; m: string }> = []
+        let match
+        regex.lastIndex = 0
+        while ((match = regex.exec(text)) !== null) {
+          ranges.push({ s: match.index, e: match.index + match[0].length, m: match[0] })
+        }
+        if (ranges.length === 0) return
+        const parent = node.parentNode!
+        const frag = document.createDocumentFragment()
+        let offset = 0
+        for (const { s, e, m } of ranges) {
+          if (offset < s) frag.appendChild(document.createTextNode(text.slice(offset, s)))
+          const mark = document.createElement('mark')
+          mark.className = 'pdf-search-hl'
+          mark.textContent = m
+          frag.appendChild(mark)
+          marks.push(mark)
+          offset = e
+        }
+        if (offset < text.length) frag.appendChild(document.createTextNode(text.slice(offset)))
+        parent.replaceChild(frag, node)
+      } else if (node.nodeType === Node.ELEMENT_NODE && (node as Element).tagName !== 'MARK') {
+        Array.from(node.childNodes).forEach(walkNode)
+      }
+    }
+    Array.from(container.childNodes).forEach(walkNode)
+    return marks
+  }
+
+  const runSearch = useCallback((query: string) => {
+    clearSearchHighlights()
+    searchMatchElsRef.current = []
+    setSearchMatchCount(0)
+    setSearchMatchIndex(0)
+    searchQueryRef.current = query
+    if (!query.trim()) return
+    const allMarks: HTMLElement[] = []
+    for (let p = 1; p <= numPages; p++) {
+      const c = textLayerContainerRefs.current.get(p)
+      if (!c) continue
+      allMarks.push(...highlightInContainer(c, query))
+    }
+    searchMatchElsRef.current = allMarks
+    setSearchMatchCount(allMarks.length)
+    if (allMarks.length > 0) {
+      allMarks[0].classList.add('pdf-search-hl-active')
+      allMarks[0].scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [numPages])
+
+  const navigateMatch = useCallback((direction: 1 | -1) => {
+    const els = searchMatchElsRef.current
+    if (els.length === 0) return
+    setSearchMatchIndex(prev => {
+      const next = (prev + direction + els.length) % els.length
+      els[prev]?.classList.remove('pdf-search-hl-active')
+      els[next]?.classList.add('pdf-search-hl-active')
+      els[next]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return next
+    })
+  }, [])
+
+  // Clear highlights when search closes
+  useEffect(() => {
+    if (!searchOpen) {
+      clearSearchHighlights()
+      searchMatchElsRef.current = []
+      setSearchMatchCount(0)
+      setSearchMatchIndex(0)
+      setSearchQuery('')
+      searchQueryRef.current = ''
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchOpen])
+
+  // Ctrl+F shortcut to open search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f' && signedUrl) {
+        e.preventDefault()
+        setSearchOpen(true)
+        setTimeout(() => searchInputRef.current?.focus(), 50)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [signedUrl])
+
+  // ── PDF annotation navigation ────────────────────────────────────
+  async function navigateToDest(dest: any) {
+    if (!pdfDocRef.current) return
+    try {
+      let destArray = dest
+      if (typeof dest === 'string') {
+        destArray = await pdfDocRef.current.getDestination(dest)
+      }
+      if (!Array.isArray(destArray) || destArray.length === 0) return
+      const pageIndex = await pdfDocRef.current.getPageIndex(destArray[0])
+      const targetPage = pageIndex + 1
+      const pageEl = pageContainerRefs.current.get(targetPage)
+      if (pageEl && pdfScrollRef.current) {
+        const offsetTop = (pageEl as HTMLElement).offsetTop - 80
+        pdfScrollRef.current.scrollTo({ top: Math.max(0, offsetTop), behavior: 'smooth' })
+      }
+    } catch (e) {
+      console.warn('PDF dest navigation error:', e)
+    }
+  }
 
   useEffect(() => {
     if (!signedUrl) return
@@ -827,6 +1006,52 @@ export function JudgmentPdfPanel({
               </DropdownMenuContent>
             </DropdownMenu>
           )}
+          {/* Search bar */}
+          {signedUrl && (
+            <div className="flex items-center gap-1">
+              {searchOpen && (
+                <div className="flex items-center gap-1 bg-muted/80 rounded-md border border-border px-2 h-7">
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    value={searchQuery}
+                    onChange={e => { setSearchQuery(e.target.value); runSearch(e.target.value) }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') navigateMatch(e.shiftKey ? -1 : 1)
+                      if (e.key === 'Escape') setSearchOpen(false)
+                    }}
+                    placeholder="Search in PDF…"
+                    className="w-36 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+                    autoFocus
+                  />
+                  {searchQuery.trim() && (
+                    <span className={cn('text-[10px] font-mono whitespace-nowrap', searchMatchCount === 0 ? 'text-destructive' : 'text-muted-foreground')}>
+                      {searchMatchCount === 0 ? 'No results' : `${searchMatchIndex + 1}/${searchMatchCount}`}
+                    </span>
+                  )}
+                  <button onClick={() => navigateMatch(-1)} disabled={searchMatchCount === 0} className="hover:bg-background rounded p-0.5 disabled:opacity-30" title="Previous (Shift+Enter)">
+                    <ChevronUp className="w-3 h-3" />
+                  </button>
+                  <button onClick={() => navigateMatch(1)} disabled={searchMatchCount === 0} className="hover:bg-background rounded p-0.5 disabled:opacity-30" title="Next (Enter)">
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                  <button onClick={() => setSearchOpen(false)} className="hover:bg-background rounded p-0.5 text-muted-foreground hover:text-foreground" title="Close search">
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => { setSearchOpen(v => !v); if (!searchOpen) setTimeout(() => searchInputRef.current?.focus(), 50) }}
+                className={cn('h-7 w-7 p-0', searchOpen && 'bg-muted')}
+                title="Search in PDF (Ctrl+F)"
+              >
+                <Search className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          )}
+
           {signedUrl && (
             <div className="flex items-center gap-px bg-muted/60 p-0.5 rounded-md border border-border">
               <button onClick={() => setZoomLevel(p => Math.max(0.5, p - 0.1))} className="w-6 h-6 flex items-center justify-center text-xs hover:bg-background rounded-sm text-muted-foreground hover:text-foreground" title="Zoom Out">-</button>
@@ -1025,17 +1250,36 @@ export function JudgmentPdfPanel({
                         )
                       })}
 
-                      {/* Drag overlay — only in normal mode */}
-                      {!connectMode && (
+                      {/* PDF internal/external link annotations */}
+                      {ps?.rendered && (pageAnnotations[pageNum] || []).map((ann, i) => (
                         <div
-                          className="absolute inset-0"
-                          style={{ cursor: 'crosshair', zIndex: 10 }}
-                          onMouseDown={e => handleMouseDown(e, pageNum)}
-                          onMouseMove={dragState?.pageNum === pageNum ? handleMouseMove : undefined}
-                          onMouseUp={dragState?.pageNum === pageNum ? handleMouseUp : undefined}
-                          onMouseLeave={dragState?.pageNum === pageNum ? () => setDragState(null) : undefined}
+                          key={`ann-${i}`}
+                          className="absolute"
+                          style={{
+                            left: ann.left, top: ann.top,
+                            width: Math.max(ann.width, 8), height: Math.max(ann.height, 8),
+                            zIndex: 6,
+                            cursor: connectMode ? 'default' : 'pointer',
+                            pointerEvents: connectMode ? 'none' : 'all',
+                          }}
+                          onClick={() => {
+                            if (connectMode) return
+                            if (ann.url) window.open(ann.url, '_blank', 'noopener,noreferrer')
+                            else if (ann.dest) navigateToDest(ann.dest)
+                          }}
+                          title={ann.url ? ann.url : 'Jump to linked page'}
                         />
-                      )}
+                      ))}
+
+                      {/* Drag overlay — crosshair cursor only in connect mode */}
+                      <div
+                        className="absolute inset-0"
+                        style={{ cursor: connectMode ? 'crosshair' : 'default', zIndex: 10 }}
+                        onMouseDown={e => handleMouseDown(e, pageNum)}
+                        onMouseMove={dragState?.pageNum === pageNum ? handleMouseMove : undefined}
+                        onMouseUp={dragState?.pageNum === pageNum ? handleMouseUp : undefined}
+                        onMouseLeave={dragState?.pageNum === pageNum ? () => setDragState(null) : undefined}
+                      />
 
                       {/* Live selection rectangle */}
                       {dragState?.active && dragState.pageNum === pageNum && selRect && (
