@@ -81,7 +81,8 @@ export const createEntity = mutation({
       insertData.quiz_id = normalized;
     }
     
-    return await ctx.db.insert(table, pickAllowedFields(insertData, table));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return await ctx.db.insert(table, pickAllowedFields(insertData, table) as any);
   },
 });
 
@@ -107,7 +108,8 @@ export const updateEntity = mutation({
     const existing = await ctx.db.get(convexId);
     if (!existing) throw new Error(`Failed to update ${entityType}: Entity not found with ID "${id}"`);
     
-    await ctx.db.patch(convexId, pickAllowedFields(patchData, table));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await ctx.db.patch(convexId, pickAllowedFields(patchData, table) as any);
   },
 });
 
