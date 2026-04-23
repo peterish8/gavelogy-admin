@@ -33,6 +33,7 @@ import {
   Redo,
   Table as TableIcon,
   Minus,
+  Sparkles,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -98,6 +99,56 @@ const A4Overlays = ({ editor, tick }: { editor: Editor | null, tick: number }) =
     );
 };
 
+const BEAUTIFY_PROMPT = `You are a formatting assistant for CLAT PG law education notes. Beautify the notes I paste below using ONLY the TipTap-compatible HTML formatting listed here. Output only the formatted HTML — no explanations, no markdown code fences.
+
+## AVAILABLE FORMATTING
+
+### Headings
+- <h1> — Main section / case name / major topic
+- <h2> — Subsection headings
+
+### Inline Text
+- <strong> — Bold: key legal terms, holdings, definitions
+- <em> — Italic: Latin phrases, citations, emphasis
+- <u> — Underline: statutory terms, defined words
+
+### Lists
+- <ul><li> — Bullet list: facts, enumerated points
+- <ol><li> — Numbered list: steps, hierarchy, sequence
+
+### Text Alignment (add style attribute on <p> or heading)
+- style="text-align:left"   — default
+- style="text-align:center" — titles, headings
+- style="text-align:right"  — dates, citations
+- style="text-align:justify"— body paragraphs for readability
+
+### Highlight Colors (apply as <mark style="background-color:COLOR">)
+- #D4A96A Gold     → Key legal terms, definitions
+- #7EC8B8 Teal     → Doctrines, legal tests
+- #F0A0A0 Rose     → Holdings, principles, rulings
+- #9EC4D8 Sky      → Case references, citations
+- #C4A8E0 Lavender → Side notes, additional commentary
+
+### Note Boxes (wrap content in <div class="note-COLOR">)
+- note-blue   → General context, background
+- note-green  → Favourable rules, exceptions that help
+- note-red    → Critical warnings, strict rules, traps
+- note-amber  → Cautions, nuanced or grey-area points
+- note-purple → Doctrinal explanations, theory
+- note-cyan   → Procedural notes, timelines
+
+### Tables
+- Standard <table><thead><tbody><tr><th><td> for comparative analysis
+
+## INSTRUCTIONS
+1. Structure with H1/H2 headings logically
+2. Highlight key terms with the colour matching their category
+3. Wrap important blocks in note boxes where it adds clarity
+4. Use lists to replace run-on bullet sentences
+5. Keep all existing content — only reformat, never remove text
+
+Paste the notes now:`
+
 const highlightColors = [
   { label: 'Gold (Key Terms)',     value: '#D4A96A', class: 'bg-[#D4A96A]' },
   { label: 'Teal (Doctrines)',     value: '#7EC8B8', class: 'bg-[#7EC8B8]' },
@@ -108,6 +159,14 @@ const highlightColors = [
 
 const Toolbar = ({ editor }: { editor: Editor | null }) => {
   if (!editor) return null
+  const [copied, setCopied] = useState(false)
+
+  const copyBeautifyPrompt = () => {
+    navigator.clipboard.writeText(BEAUTIFY_PROMPT).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
 
   return (
     <div className="border-b border-border p-2 flex flex-wrap gap-1 items-center bg-muted/30">
@@ -296,6 +355,19 @@ const Toolbar = ({ editor }: { editor: Editor | null }) => {
         title="Insert Table"
       >
         <TableIcon className="w-4 h-4" />
+      </Button>
+
+      <div className="w-px h-6 bg-border mx-1" />
+
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={copyBeautifyPrompt}
+        title="Copy AI Beautify Prompt — paste into any AI chat to reformat these notes"
+        className={cn('gap-1 text-xs font-medium transition-colors', copied ? 'text-green-600 bg-green-50' : 'text-purple-600 hover:bg-purple-50')}
+      >
+        <Sparkles className="w-4 h-4" />
+        {copied ? 'Copied!' : 'Beautify'}
       </Button>
 
       <div className="flex-1" />

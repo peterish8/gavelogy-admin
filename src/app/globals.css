@@ -605,7 +605,8 @@
   }
 
   /* ── TipTap Table Styles ─────────────────────────────────────────────── */
-  .ProseMirror table {
+  .ProseMirror table,
+  .note-prose-render table {
     border-collapse: collapse;
     width: 100%;
     margin: 1rem 0;
@@ -614,7 +615,9 @@
   }
 
   .ProseMirror table td,
-  .ProseMirror table th {
+  .ProseMirror table th,
+  .note-prose-render table td,
+  .note-prose-render table th {
     border: 1px solid #D1D5DB;
     padding: 0.5rem 0.75rem;
     vertical-align: top;
@@ -623,7 +626,8 @@
     box-sizing: border-box;
   }
 
-  .ProseMirror table th {
+  .ProseMirror table th,
+  .note-prose-render table th {
     background: #F3F4F6;
     font-weight: 600;
     text-align: left;
@@ -632,7 +636,8 @@
     color: #374151;
   }
 
-  .ProseMirror table tr:nth-child(even) td {
+  .ProseMirror table tr:nth-child(even) td,
+  .note-prose-render table tr:nth-child(even) td {
     background: rgba(0, 0, 0, 0.02);
   }
 
@@ -655,16 +660,20 @@
   }
 
   .dark .ProseMirror table td,
-  .dark .ProseMirror table th {
+  .dark .ProseMirror table th,
+  .dark .note-prose-render table td,
+  .dark .note-prose-render table th {
     border-color: #374151;
   }
 
-  .dark .ProseMirror table th {
+  .dark .ProseMirror table th,
+  .dark .note-prose-render table th {
     background: #1F2937;
     color: #D1D5DB;
   }
 
-  .dark .ProseMirror table tr:nth-child(even) td {
+  .dark .ProseMirror table tr:nth-child(even) td,
+  .dark .note-prose-render table tr:nth-child(even) td {
     background: rgba(255, 255, 255, 0.03);
   }
 
@@ -926,6 +935,20 @@
 }
 .pdfTextLayer span::selection {
   background: rgba(59, 130, 246, 0.35);
+}
+
+/* ── PDF In-page Search Highlights ──────────────────────────────────────── */
+.pdfTextLayer mark.pdf-search-hl {
+  background: rgba(255, 220, 50, 0.70);
+  color: inherit;
+  border-radius: 2px;
+}
+.pdfTextLayer mark.pdf-search-hl-active {
+  background: rgba(255, 130, 0, 0.90);
+  color: inherit;
+  border-radius: 2px;
+  outline: 2px solid rgba(255, 130, 0, 0.85);
+  outline-offset: 1px;
 }
 
 /* ── Note link navigation flash ──────────────────────────────────────────── */
