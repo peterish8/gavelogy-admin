@@ -19,12 +19,10 @@ export const createEntity = mutation({
     data: v.any(),
   },
   handler: async (ctx, { entityType, data }) => {
-    await requireAuth(ctx);
-    // Security check: only admins can create arbitrary entities
-    const user = await ctx.auth.getUserIdentity();
+    const { getAuthUser } = await import("./authHelpers");
+    const user = await getAuthUser(ctx);
     if (!user) throw new Error("Unauthenticated");
-    const userRecord = await ctx.db.query("users").withIndex("by_token", q => q.eq("tokenIdentifier", user.tokenIdentifier)).unique();
-    if (!userRecord?.is_admin) throw new Error("Admin access required to create entities");
+    if (!user.is_admin) throw new Error("Admin access required to create entities");
     
     const table = getTableName(entityType);
     
@@ -82,12 +80,10 @@ export const updateEntity = mutation({
     data: v.any(),
   },
   handler: async (ctx, { entityType, id, data }) => {
-    await requireAuth(ctx);
-    // Security check: only admins can update arbitrary entities
-    const user = await ctx.auth.getUserIdentity();
+    const { getAuthUser } = await import("./authHelpers");
+    const user = await getAuthUser(ctx);
     if (!user) throw new Error("Unauthenticated");
-    const userRecord = await ctx.db.query("users").withIndex("by_token", q => q.eq("tokenIdentifier", user.tokenIdentifier)).unique();
-    if (!userRecord?.is_admin) throw new Error("Admin access required to update entities");
+    if (!user.is_admin) throw new Error("Admin access required to update entities");
     
     const table = getTableName(entityType);
     
@@ -112,12 +108,10 @@ export const deleteEntity = mutation({
     id: v.string(),
   },
   handler: async (ctx, { entityType, id }) => {
-    await requireAuth(ctx);
-    // Security check: only admins can delete arbitrary entities
-    const user = await ctx.auth.getUserIdentity();
+    const { getAuthUser } = await import("./authHelpers");
+    const user = await getAuthUser(ctx);
     if (!user) throw new Error("Unauthenticated");
-    const userRecord = await ctx.db.query("users").withIndex("by_token", q => q.eq("tokenIdentifier", user.tokenIdentifier)).unique();
-    if (!userRecord?.is_admin) throw new Error("Admin access required to delete entities");
+    if (!user.is_admin) throw new Error("Admin access required to delete entities");
     
     const table = getTableName(entityType);
     
