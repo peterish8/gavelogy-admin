@@ -157,7 +157,7 @@ export function JudgmentPdfPanel({
   // ── Annotation overlays (PDF internal/external links) ─────────────
   const [pageAnnotations, setPageAnnotations] = useState<Record<number, Array<{
     left: number; top: number; width: number; height: number
-    dest?: any; url?: string
+    dest?: any; url?: string; targetPage?: number
   }>>>({})
   const pageAnnotationsRef = useRef<Record<number, boolean>>({})
 
@@ -310,19 +310,39 @@ export function JudgmentPdfPanel({
         pageAnnotationsRef.current[pageNum] = true
         try {
           const annotations = await page.getAnnotations()
-          const linkAnns = annotations
-            .filter((a: any) => a.subtype === 'Link' && (a.dest || a.url || a.action?.URI))
-            .map((a: any) => {
-              const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(a.rect)
-              return {
-                left: Math.min(vx1, vx2),
-                top: Math.min(vy1, vy2),
-                width: Math.abs(vx2 - vx1),
-                height: Math.abs(vy2 - vy1),
-                dest: a.dest ?? null,
-                url: a.url ?? a.action?.URI ?? null,
-              }
-            })
+          const linkAnns = await Promise.all(
+            annotations
+              .filter((a: any) => a.subtype === 'Link' && (a.dest || a.url || a.action?.URI))
+              .map(async (a: any) => {
+                const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(a.rect)
+                const dest = a.dest
+                let targetPage: number | undefined
+                if (dest && pdfDocRef.current) {
+                  try {
+                    let destArray = dest
+                    if (typeof dest === 'string') {
+                      destArray = await pdfDocRef.current.getDestination(dest)
+                    }
+                    if (Array.isArray(destArray) && destArray.length > 0) {
+                      const pageIndex = await pdfDocRef.current.getPageIndex(destArray[0])
+                      targetPage = pageIndex + 1
+                    }
+                  } catch {
+                    // non-critical: tooltip can fall back to generic label
+                  }
+                }
+
+                return {
+                  left: Math.min(vx1, vx2),
+                  top: Math.min(vy1, vy2),
+                  width: Math.abs(vx2 - vx1),
+                  height: Math.abs(vy2 - vy1),
+                  dest,
+                  url: a.url || a.action?.URI,
+                  targetPage,
+                }
+              })
+          )
           if (linkAnns.length > 0) {
             setPageAnnotations(prev => ({ ...prev, [pageNum]: linkAnns }))
           }
@@ -1272,7 +1292,7 @@ export function JudgmentPdfPanel({
                       {ps?.rendered && (pageAnnotations[pageNum] || []).map((ann, i) => (
                         <div
                           key={`ann-${i}`}
-                          className="absolute"
+                          className="absolute group"
                           style={{
                             left: ann.left, top: ann.top,
                             width: Math.max(ann.width, 8), height: Math.max(ann.height, 8),
@@ -1285,8 +1305,15 @@ export function JudgmentPdfPanel({
                             if (ann.url) window.open(ann.url, '_blank', 'noopener,noreferrer')
                             else if (ann.dest) navigateToDest(ann.dest)
                           }}
-                          title={ann.url ? ann.url : 'Jump to linked page'}
-                        />
+                        >
+                          <div className="absolute bottom-full left-0 mb-1 px-2 py-1 rounded-md text-xs font-semibold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20 bg-popover text-popover-foreground border border-border shadow-md">
+                            {ann.url
+                              ? 'Open link'
+                              : typeof ann.targetPage === 'number'
+                              ? `Jump to page ${ann.targetPage}`
+                              : 'Jump to linked page'}
+                          </div>
+                        </div>
                       ))}
 
                       {/* Drag overlay — only when tagging is enabled */}
