@@ -197,6 +197,8 @@ export function CourseDeclarationModal({
     setSaving(true)
 
     try {
+      // Build a map of temp IDs to actual Convex IDs
+      const idMap = new Map<string, string>()
       const itemsToInsert: any[] = []
       
       // Helper to process items recursively and prepare for batch insert
@@ -206,20 +208,26 @@ export function CourseDeclarationModal({
         orderStart: number
       ) => {
         items.forEach((item, index) => {
-          const newId = crypto.randomUUID()
+          const tempId = item.id
           
-          itemsToInsert.push({
-            id: newId,
-            courseId: courseId, // mapped correctly for Convex
-            parentId: parentId || undefined,
+          // Prepare item data WITHOUT parentId initially (will update after)
+          const itemData = {
+            courseId: courseId,
+            parentId: undefined,
             item_type: item.type,
             title: item.title,
             order_index: orderStart + index,
             is_active: true,
+          }
+          
+          itemsToInsert.push({
+            tempId,
+            parentId: parentId, // Store the parent's tempId for later mapping
+            data: itemData
           })
 
           if (item.children && item.children.length > 0) {
-            processItems(item.children, newId, 0)
+            processItems(item.children, tempId, 0)
           }
         })
       }
@@ -228,8 +236,27 @@ export function CourseDeclarationModal({
       
       if (itemsToInsert.length > 0) {
         console.log('Inserting', itemsToInsert.length, 'structure items...')
+        
+        // First pass: Insert all items and build ID map
         for (const item of itemsToInsert) {
-           await createEntity({ entityType: 'structure_item', data: item });
+          const convexId = await createEntity({ entityType: 'structure_item', data: item.data });
+          idMap.set(item.tempId, convexId as string)
+        }
+        
+        // Second pass: Update parent references using actual Convex IDs
+        for (const item of itemsToInsert) {
+          if (item.parentId && idMap.has(item.parentId)) {
+            const actualParentId = idMap.get(item.parentId)
+            const actualItemId = idMap.get(item.tempId)
+            
+            if (actualParentId && actualItemId) {
+              // Update the item with the correct parentId
+              await createEntity({ 
+                entityType: 'structure_item', 
+                data: { id: actualItemId, parentId: actualParentId } 
+              })
+            }
+          }
         }
       }
 

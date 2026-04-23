@@ -3,11 +3,11 @@ import { v } from "convex/values";
 import { requireAuth } from "./authHelpers";
 
 // Helper to map entityType string to actual table name literal
-function getTableName(entityType: string) {
+function getTableName(entityType: string): "courses" | "subjects" | "structure_items" {
   switch (entityType) {
     case 'course': return 'courses';
     case 'subject': return 'subjects';
-    case 'content_item': return 'content_items'; // wait, we might have mapped content_items to structure_items earlier
+    case 'content_item': return 'structure_items'; // content_items maps to structure_items
     case 'structure_item': return 'structure_items';
     default: throw new Error(`Unknown entity type: ${entityType}`);
   }
@@ -20,12 +20,56 @@ export const createEntity = mutation({
   },
   handler: async (ctx, { entityType, data }) => {
     await requireAuth(ctx);
-    const table = getTableName(entityType) as any;
+    // Security check: only admins can create arbitrary entities
+    const user = await ctx.auth.getUserIdentity();
+    if (!user) throw new Error("Unauthenticated");
+    const userRecord = await ctx.db.query("users").withIndex("by_token", q => q.eq("tokenIdentifier", user.tokenIdentifier)).unique();
+    if (!userRecord?.is_admin) throw new Error("Admin access required to create entities");
+    
+    const table = getTableName(entityType);
     
     // In Convex, _id is auto-generated. Usually we omit id on create unless needed. 
     // If the frontend passed an 'id' property, we should remove it before inserting, 
     // unless there's a reason to keep it (which we can't for _id).
     const { id, ...insertData } = data;
+    
+    // Normalize relational IDs to prevent validation errors
+    if (insertData.courseId && typeof insertData.courseId === 'string') {
+      const normalized = ctx.db.normalizeId("courses", insertData.courseId);
+      if (!normalized) throw new Error(`Invalid courseId: ${insertData.courseId} for entity type ${entityType}`);
+      // Validate that the course exists
+      const course = await ctx.db.get(normalized);
+      if (!course) throw new Error(`Course not found: ${insertData.courseId}`);
+      insertData.courseId = normalized;
+    }
+    if (insertData.parentId && typeof insertData.parentId === 'string') {
+      const normalized = ctx.db.normalizeId("structure_items", insertData.parentId);
+      if (!normalized) throw new Error(`Invalid parentId: ${insertData.parentId} for entity type ${entityType}`);
+      // Validate that the parent structure item exists
+      const parent = await ctx.db.get(normalized);
+      if (!parent) throw new Error(`Parent structure item not found: ${insertData.parentId}`);
+      insertData.parentId = normalized;
+    }
+    if (insertData.subject_id && typeof insertData.subject_id === 'string') {
+      const normalized = ctx.db.normalizeId("subjects", insertData.subject_id);
+      if (!normalized) throw new Error(`Invalid subject_id: ${insertData.subject_id} for entity type ${entityType}`);
+      insertData.subject_id = normalized;
+    }
+    if (insertData.noteItemId && typeof insertData.noteItemId === 'string') {
+      const normalized = ctx.db.normalizeId("structure_items", insertData.noteItemId);
+      if (!normalized) throw new Error(`Invalid noteItemId: ${insertData.noteItemId} for entity type ${entityType}`);
+      insertData.noteItemId = normalized;
+    }
+    if (insertData.quizId && typeof insertData.quizId === 'string') {
+      const normalized = ctx.db.normalizeId("attached_quizzes", insertData.quizId);
+      if (!normalized) throw new Error(`Invalid quizId: ${insertData.quizId} for entity type ${entityType}`);
+      insertData.quizId = normalized;
+    }
+    if (insertData.quiz_id && typeof insertData.quiz_id === 'string') {
+      const normalized = ctx.db.normalizeId("attached_quizzes", insertData.quiz_id);
+      if (!normalized) throw new Error(`Invalid quiz_id: ${insertData.quiz_id} for entity type ${entityType}`);
+      insertData.quiz_id = normalized;
+    }
     
     return await ctx.db.insert(table, insertData);
   },
@@ -39,14 +83,24 @@ export const updateEntity = mutation({
   },
   handler: async (ctx, { entityType, id, data }) => {
     await requireAuth(ctx);
-    const table = getTableName(entityType) as any;
+    // Security check: only admins can update arbitrary entities
+    const user = await ctx.auth.getUserIdentity();
+    if (!user) throw new Error("Unauthenticated");
+    const userRecord = await ctx.db.query("users").withIndex("by_token", q => q.eq("tokenIdentifier", user.tokenIdentifier)).unique();
+    if (!userRecord?.is_admin) throw new Error("Admin access required to update entities");
+    
+    const table = getTableName(entityType);
     
     // Remove id from patch data if it exists
     const { id: _, ...patchData } = data;
     
     // Normalize id as Id type
     const convexId = ctx.db.normalizeId(table, id);
-    if (!convexId) throw new Error(`Invalid ID ${id} for table ${table}`);
+    if (!convexId) throw new Error(`Failed to update ${entityType}: Invalid ID "${id}" for table "${table}"`);
+    
+    // Validate that the entity exists
+    const existing = await ctx.db.get(convexId);
+    if (!existing) throw new Error(`Failed to update ${entityType}: Entity not found with ID "${id}"`);
     
     await ctx.db.patch(convexId, patchData);
   },
@@ -59,10 +113,20 @@ export const deleteEntity = mutation({
   },
   handler: async (ctx, { entityType, id }) => {
     await requireAuth(ctx);
-    const table = getTableName(entityType) as any;
+    // Security check: only admins can delete arbitrary entities
+    const user = await ctx.auth.getUserIdentity();
+    if (!user) throw new Error("Unauthenticated");
+    const userRecord = await ctx.db.query("users").withIndex("by_token", q => q.eq("tokenIdentifier", user.tokenIdentifier)).unique();
+    if (!userRecord?.is_admin) throw new Error("Admin access required to delete entities");
+    
+    const table = getTableName(entityType);
     
     const convexId = ctx.db.normalizeId(table, id);
-    if (!convexId) throw new Error(`Invalid ID ${id} for table ${table}`);
+    if (!convexId) throw new Error(`Failed to delete ${entityType}: Invalid ID "${id}" for table "${table}"`);
+    
+    // Validate that the entity exists
+    const existing = await ctx.db.get(convexId);
+    if (!existing) throw new Error(`Failed to delete ${entityType}: Entity not found with ID "${id}"`);
     
     await ctx.db.delete(convexId);
   },
@@ -94,7 +158,7 @@ export const bulkPublishNews = mutation({
   handler: async (ctx, { ids, status }) => {
     await requireAuth(ctx);
     for (const id of ids) {
-      await ctx.db.patch(id, { status } as any);
+      await ctx.db.patch(id, { status });
     }
   },
 });
@@ -117,7 +181,7 @@ export const saveDraft = mutation({
       await ctx.db.patch(existingDraft._id, { draft_data: { content_html: contentHtml } });
     } else {
       await ctx.db.insert("draft_content_cache", {
-        original_content_id: itemId as any,
+        original_content_id: itemId,
         draft_data: { content_html: contentHtml }
       });
     }
@@ -184,15 +248,11 @@ export const saveQuiz = mutation({
       });
     }
 
-    const oldQuestions = await ctx.db.query("quiz_questions")
-        .withIndex("by_quiz", q => q.eq("quizId", quizId)).collect();
-    for (const q of oldQuestions) {
-      await ctx.db.delete(q._id);
-    }
-
+    // Insert new questions FIRST to prevent data loss if insertion fails
+    const newQuestionIds: any[] = [];
     let i = 0;
     for (const q of questions) {
-      await ctx.db.insert("quiz_questions", {
+      const newId = await ctx.db.insert("quiz_questions", {
         quizId,
         question_text: q.questionText,
         options: q.options,
@@ -200,6 +260,16 @@ export const saveQuiz = mutation({
         explanation: q.explanation,
         order_index: i++
       });
+      newQuestionIds.push(newId);
+    }
+
+    // Only after successful insertion, delete old questions
+    const allQuestions = await ctx.db.query("quiz_questions")
+        .withIndex("by_quiz", q => q.eq("quizId", quizId))
+        .collect();
+    const oldQuestions = allQuestions.filter(q => !newQuestionIds.includes(q._id));
+    for (const q of oldQuestions) {
+      await ctx.db.delete(q._id);
     }
   }
 });
@@ -213,6 +283,19 @@ export const createCrashCourse = mutation({
   },
   handler: async (ctx, { name, description, sourceCourseIds, orderIndex }) => {
     await requireAuth(ctx);
+    
+    // Validate that source courses exist
+    const validSourceCourses: any[] = [];
+    for (const sourceCourseId of sourceCourseIds) {
+      const course = await ctx.db.get(sourceCourseId);
+      if (!course) throw new Error(`Source course not found: ${sourceCourseId}`);
+      validSourceCourses.push(course);
+    }
+    
+    if (validSourceCourses.length === 0) {
+      throw new Error("At least one valid source course is required");
+    }
+    
     const newCourseId = await ctx.db.insert("courses", {
       name,
       description,
@@ -222,12 +305,9 @@ export const createCrashCourse = mutation({
 
     // We fetch structures for all selected courses
     let rootFolderIndex = 0;
-    for (const sourceCourseId of sourceCourseIds) {
-      const sourceCourse = await ctx.db.get(sourceCourseId);
-      if (!sourceCourse) continue;
-
+    for (const sourceCourse of validSourceCourses) {
       const items = await ctx.db.query("structure_items")
-          .filter(q => q.eq(q.field("courseId"), sourceCourseId))
+          .filter(q => q.eq(q.field("courseId"), sourceCourse._id))
           .collect();
 
       if (items.length === 0) continue;
@@ -249,7 +329,7 @@ export const createCrashCourse = mutation({
         is_active: true
       });
 
-      const queue: { oldParentId: string | null; newParentId: string | null }[] = [
+      const queue: { oldParentId: any; newParentId: any }[] = [
         { oldParentId: null, newParentId: rootFolderId }
       ];
 
@@ -261,7 +341,7 @@ export const createCrashCourse = mutation({
         for (const item of children) {
           const newItemId = await ctx.db.insert("structure_items", {
             courseId: newCourseId,
-            parentId: newParentId! as any,
+            parentId: newParentId!,
             item_type: item.item_type,
             title: item.title,
             order_index: item.order_index,

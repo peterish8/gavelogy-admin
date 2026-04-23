@@ -125,6 +125,11 @@ export const updateNoteContent = mutation({
   args: { itemId: v.id("structure_items"), content_html: v.string() },
   handler: async (ctx, { itemId, content_html }) => {
     await requireAuth(ctx);
+    
+    // Validate structure item exists
+    const item = await ctx.db.get(itemId);
+    if (!item) throw new Error(`Structure item not found: ${itemId}`);
+    
     const existing = await ctx.db
       .query("note_contents")
       .withIndex("by_item", (q) => q.eq("itemId", itemId))
@@ -371,7 +376,7 @@ export const getUserCoursesWithFolders = query({
 
         const itemIds = new Set(items.map((i) => i._id));
         const allQuizzes = await ctx.db.query("attached_quizzes").collect();
-        const quizzes = allQuizzes.filter((q) => itemIds.has(q.noteItemId as never));
+        const quizzes = allQuizzes.filter((q) => q.noteItemId && itemIds.has(q.noteItemId));
 
         const quizIds = new Set(quizzes.map((q) => q._id));
         const allQuestions = await ctx.db.query("quiz_questions").collect();
@@ -381,7 +386,7 @@ export const getUserCoursesWithFolders = query({
 
         const questionCounts: Record<string, number> = {};
         allQuestions
-          .filter((q) => quizIds.has(q.quizId as never))
+          .filter((q) => q.quizId && quizIds.has(q.quizId))
           .forEach((q) => {
             const itemId = quizToItem[q.quizId as string];
             if (itemId) questionCounts[itemId] = (questionCounts[itemId] ?? 0) + 1;
@@ -420,10 +425,10 @@ export const getSpeedCourtQuestions = query({
     quizzes.forEach((q) => { quizToItem[q._id] = q.noteItemId as string; });
 
     const allQuestions = await ctx.db.query("quiz_questions").collect();
-    const questions = allQuestions.filter((q) => quizIdSet.has(q.quizId as never));
+    const questions = allQuestions.filter((q) => q.quizId && quizIdSet.has(q.quizId as any));
 
     const itemIds = [...new Set(Object.values(quizToItem))];
-    const items = await Promise.all(itemIds.map((id) => ctx.db.get(id as never)));
+    const items = await Promise.all(itemIds.map((id) => ctx.db.get(id as any)));
     const titleMap: Record<string, string> = {};
     items.forEach((item) => {
       if (item) titleMap[item._id] = (item as Doc<"structure_items">).title;
@@ -461,7 +466,7 @@ export const getSearchableContent = query({
     );
 
     const allQuizzes = await ctx.db.query("attached_quizzes").collect();
-    const quizzes = allQuizzes.filter((q) => noteItemIds.has(q.noteItemId as never));
+    const quizzes = allQuizzes.filter((q) => q.noteItemId && noteItemIds.has(q.noteItemId as any));
 
     return { courses: activeCourses, items, quizzes };
   },

@@ -89,22 +89,20 @@ const questionInputSchema = v.object({
 
 async function insertBundle(
   ctx: any, // eslint-disable-line @typescript-eslint/no-explicit-any
-  testId: string,
+  testId: any, // eslint-disable-line @typescript-eslint/no-explicit-any
   passages: Array<{ client_passage_id: string; passage_text: string; [key: string]: unknown }>,
   questions: Array<{ client_passage_id?: string; question_text: string; [key: string]: unknown }>
 ) {
   const passageIdMap = new Map<string, string>();
   for (let i = 0; i < passages.length; i++) {
     const { client_passage_id, ...rest } = passages[i];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const id = await ctx.db.insert("pyq_passages", { test_id: testId as any, ...rest, order_index: i });
+    const id = await ctx.db.insert("pyq_passages", { test_id: testId, ...rest, order_index: i });
     passageIdMap.set(client_passage_id, id);
   }
   for (let i = 0; i < questions.length; i++) {
     const { client_passage_id, ...rest } = questions[i];
     await ctx.db.insert("pyq_questions", {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      test_id: testId as any,
+      test_id: testId,
       passage_id: client_passage_id ? passageIdMap.get(client_passage_id) : undefined,
       ...rest,
       order_index: i,

@@ -127,6 +127,68 @@ export const deleteCourse = mutation({
   args: { courseId: v.id("courses") },
   handler: async (ctx, { courseId }) => {
     await requireAdmin(ctx);
+    
+    // Delete all structure items for this course
+    const items = await ctx.db
+      .query("structure_items")
+      .withIndex("by_course", (q) => q.eq("courseId", courseId))
+      .collect();
+    
+    for (const item of items) {
+      // Delete note_contents for this item
+      const noteContents = await ctx.db
+        .query("note_contents")
+        .withIndex("by_item", (q) => q.eq("itemId", item._id))
+        .collect();
+      for (const nc of noteContents) await ctx.db.delete(nc._id);
+      
+      // Delete note_pdf_links for this item
+      const pdfLinks = await ctx.db
+        .query("note_pdf_links")
+        .withIndex("by_item", (q) => q.eq("itemId", item._id))
+        .collect();
+      for (const link of pdfLinks) await ctx.db.delete(link._id);
+      
+      // Delete attached_quizzes and their questions for this item
+      const quizzes = await ctx.db
+        .query("attached_quizzes")
+        .withIndex("by_note_item", (q) => q.eq("noteItemId", item._id))
+        .collect();
+      for (const quiz of quizzes) {
+        const questions = await ctx.db
+          .query("quiz_questions")
+          .withIndex("by_quiz", (q) => q.eq("quizId", quiz._id))
+          .collect();
+        for (const q of questions) await ctx.db.delete(q._id);
+        await ctx.db.delete(quiz._id);
+      }
+      
+      // Delete user_completed_items for this item
+      const completedItems = await ctx.db
+        .query("user_completed_items")
+        .filter((q) => q.eq(q.field("itemId"), item._id))
+        .collect();
+      for (const ci of completedItems) await ctx.db.delete(ci._id);
+      
+      // Delete the structure item itself
+      await ctx.db.delete(item._id);
+    }
+    
+    // Delete user_courses for this course
+    const userCourses = await ctx.db
+      .query("user_courses")
+      .filter((q) => q.eq(q.field("courseId"), courseId))
+      .collect();
+    for (const uc of userCourses) await ctx.db.delete(uc._id);
+    
+    // Delete payment_orders for this course
+    const paymentOrders = await ctx.db
+      .query("payment_orders")
+      .filter((q) => q.eq(q.field("courseId"), courseId))
+      .collect();
+    for (const po of paymentOrders) await ctx.db.delete(po._id);
+    
+    // Finally delete the course
     await ctx.db.delete(courseId);
   },
 });
@@ -136,6 +198,103 @@ export const deleteStructureItem = mutation({
   args: { itemId: v.id("structure_items") },
   handler: async (ctx, { itemId }) => {
     await requireAdmin(ctx);
+    
+    // Helper to collect all descendants recursively
+    const collectDescendants = async (parentId: any): Promise<any[]> => {
+      const children = await ctx.db
+        .query("structure_items")
+        .withIndex("by_parent", (q) => q.eq("parentId", parentId))
+        .collect();
+      
+      let allDescendants: any[] = [];
+      for (const child of children) {
+        allDescendants.push(child._id);
+        allDescendants = allDescendants.concat(await collectDescendants(child._id));
+      }
+      return allDescendants;
+    };
+    
+    // Collect all descendants (children, grandchildren, etc.)
+    const descendantIds = await collectDescendants(itemId);
+    
+    // Delete all descendants first (in any order since they're independent)
+    for (const descId of descendantIds) {
+      // Delete note_contents
+      const noteContents = await ctx.db
+        .query("note_contents")
+        .withIndex("by_item", (q) => q.eq("itemId", descId))
+        .collect();
+      for (const nc of noteContents) await ctx.db.delete(nc._id);
+      
+      // Delete note_pdf_links
+      const pdfLinks = await ctx.db
+        .query("note_pdf_links")
+        .withIndex("by_item", (q) => q.eq("itemId", descId))
+        .collect();
+      for (const link of pdfLinks) await ctx.db.delete(link._id);
+      
+      // Delete attached_quizzes and their questions
+      const quizzes = await ctx.db
+        .query("attached_quizzes")
+        .withIndex("by_note_item", (q) => q.eq("noteItemId", descId))
+        .collect();
+      for (const quiz of quizzes) {
+        const questions = await ctx.db
+          .query("quiz_questions")
+          .withIndex("by_quiz", (q) => q.eq("quizId", quiz._id))
+          .collect();
+        for (const q of questions) await ctx.db.delete(q._id);
+        await ctx.db.delete(quiz._id);
+      }
+      
+      // Delete user_completed_items
+      const completedItems = await ctx.db
+        .query("user_completed_items")
+        .filter((q) => q.eq(q.field("itemId"), descId))
+        .collect();
+      for (const ci of completedItems) await ctx.db.delete(ci._id);
+      
+      // Delete the structure item
+      await ctx.db.delete(descId);
+    }
+    
+    // Now delete the original item's related data
+    // Delete note_contents for this item
+    const noteContents = await ctx.db
+      .query("note_contents")
+      .withIndex("by_item", (q) => q.eq("itemId", itemId))
+      .collect();
+    for (const nc of noteContents) await ctx.db.delete(nc._id);
+    
+    // Delete note_pdf_links for this item
+    const pdfLinks = await ctx.db
+      .query("note_pdf_links")
+      .withIndex("by_item", (q) => q.eq("itemId", itemId))
+      .collect();
+    for (const link of pdfLinks) await ctx.db.delete(link._id);
+    
+    // Delete attached_quizzes and their questions for this item
+    const quizzes = await ctx.db
+      .query("attached_quizzes")
+      .withIndex("by_note_item", (q) => q.eq("noteItemId", itemId))
+      .collect();
+    for (const quiz of quizzes) {
+      const questions = await ctx.db
+        .query("quiz_questions")
+        .withIndex("by_quiz", (q) => q.eq("quizId", quiz._id))
+        .collect();
+      for (const q of questions) await ctx.db.delete(q._id);
+      await ctx.db.delete(quiz._id);
+    }
+    
+    // Delete user_completed_items for this item
+    const completedItems = await ctx.db
+      .query("user_completed_items")
+      .filter((q) => q.eq(q.field("itemId"), itemId))
+      .collect();
+    for (const ci of completedItems) await ctx.db.delete(ci._id);
+    
+    // Delete the structure item itself
     await ctx.db.delete(itemId);
   },
 });

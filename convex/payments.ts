@@ -45,6 +45,10 @@ export const recordPurchase = mutation({
   handler: async (ctx, args) => {
     const user = await requireAuth(ctx);
 
+    // Validate course exists
+    const course = await ctx.db.get(args.courseId);
+    if (!course) throw new Error(`Course not found: ${args.courseId}`);
+
     // Idempotency: don't insert duplicate purchases
     const existing = await ctx.db
       .query("user_courses")
