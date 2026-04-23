@@ -107,6 +107,8 @@ export function JudgmentPdfPanel({
   onScrollNotes,
 }: JudgmentPdfPanelProps) {
 
+  const allowTagging = connectMode && connectStep === null
+
   // ── PDF state ──────────────────────────────────────────────────────
   const [signedUrl, setSignedUrl] = useState<string | null>(null)
   const [uploadingPdf, setUploadingPdf] = useState(false)
@@ -572,7 +574,7 @@ export function JudgmentPdfPanel({
 
   // Starts a drag selection in normal (non-connect) mode, recording start coords adjusted for zoom level.
   function handleMouseDown(e: React.MouseEvent<HTMLDivElement>, pageNum: number) {
-    if (connectMode) return
+    if (!allowTagging) return
     e.preventDefault()
     const rect = e.currentTarget.getBoundingClientRect()
     setDragState({
@@ -1287,15 +1289,17 @@ export function JudgmentPdfPanel({
                         />
                       ))}
 
-                      {/* Drag overlay — crosshair cursor only in connect mode */}
-                      <div
-                        className="absolute inset-0"
-                        style={{ cursor: connectMode ? 'crosshair' : 'default', zIndex: 10 }}
-                        onMouseDown={e => handleMouseDown(e, pageNum)}
-                        onMouseMove={dragState?.pageNum === pageNum ? handleMouseMove : undefined}
-                        onMouseUp={dragState?.pageNum === pageNum ? handleMouseUp : undefined}
-                        onMouseLeave={dragState?.pageNum === pageNum ? () => setDragState(null) : undefined}
-                      />
+                      {/* Drag overlay — only when tagging is enabled */}
+                      {allowTagging && (
+                        <div
+                          className="absolute inset-0"
+                          style={{ cursor: 'crosshair', zIndex: 10 }}
+                          onMouseDown={e => handleMouseDown(e, pageNum)}
+                          onMouseMove={dragState?.pageNum === pageNum ? handleMouseMove : undefined}
+                          onMouseUp={dragState?.pageNum === pageNum ? handleMouseUp : undefined}
+                          onMouseLeave={dragState?.pageNum === pageNum ? () => setDragState(null) : undefined}
+                        />
+                      )}
 
                       {/* Live selection rectangle */}
                       {dragState?.active && dragState.pageNum === pageNum && selRect && (
