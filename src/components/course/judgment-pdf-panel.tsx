@@ -1259,9 +1259,11 @@ export function JudgmentPdfPanel({
                             left: ann.left, top: ann.top,
                             width: Math.max(ann.width, 8), height: Math.max(ann.height, 8),
                             zIndex: 6,
-                            cursor: 'pointer',
+                            cursor: connectMode ? 'default' : 'pointer',
+                            pointerEvents: connectMode ? 'none' : 'all',
                           }}
                           onClick={() => {
+                            if (connectMode) return
                             if (ann.url) window.open(ann.url, '_blank', 'noopener,noreferrer')
                             else if (ann.dest) navigateToDest(ann.dest)
                           }}
@@ -1269,17 +1271,15 @@ export function JudgmentPdfPanel({
                         />
                       ))}
 
-                      {/* Drag overlay — only in normal mode */}
-                      {!connectMode && (
-                        <div
-                          className="absolute inset-0"
-                          style={{ cursor: 'crosshair', zIndex: 10 }}
-                          onMouseDown={e => handleMouseDown(e, pageNum)}
-                          onMouseMove={dragState?.pageNum === pageNum ? handleMouseMove : undefined}
-                          onMouseUp={dragState?.pageNum === pageNum ? handleMouseUp : undefined}
-                          onMouseLeave={dragState?.pageNum === pageNum ? () => setDragState(null) : undefined}
-                        />
-                      )}
+                      {/* Drag overlay — crosshair cursor only in connect mode */}
+                      <div
+                        className="absolute inset-0"
+                        style={{ cursor: connectMode ? 'crosshair' : 'default', zIndex: 10 }}
+                        onMouseDown={e => handleMouseDown(e, pageNum)}
+                        onMouseMove={dragState?.pageNum === pageNum ? handleMouseMove : undefined}
+                        onMouseUp={dragState?.pageNum === pageNum ? handleMouseUp : undefined}
+                        onMouseLeave={dragState?.pageNum === pageNum ? () => setDragState(null) : undefined}
+                      />
 
                       {/* Live selection rectangle */}
                       {dragState?.active && dragState.pageNum === pageNum && selRect && (
