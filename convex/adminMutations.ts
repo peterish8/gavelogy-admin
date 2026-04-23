@@ -1,16 +1,31 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { requireAuth, requireAdmin } from "./authHelpers";
+import { requireAdmin } from "./authHelpers";
 
 // Helper to map entityType string to actual table name literal
 function getTableName(entityType: string): "courses" | "subjects" | "structure_items" {
   switch (entityType) {
     case 'course': return 'courses';
     case 'subject': return 'subjects';
-    case 'content_item': return 'structure_items'; // content_items maps to structure_items
+    case 'content_item': return 'structure_items';
     case 'structure_item': return 'structure_items';
     default: throw new Error(`Unknown entity type: ${entityType}`);
   }
+}
+
+// Whitelisted fields per table — prevents extra fields from causing schema errors
+const TABLE_ALLOWED_FIELDS: Record<string, string[]> = {
+  courses: ['name', 'description', 'price', 'is_active', 'is_free', 'icon'],
+  subjects: ['name', 'description', 'courseId', 'order_index'],
+  structure_items: ['courseId', 'parentId', 'title', 'description', 'item_type', 'order_index', 'icon', 'is_active', 'pdf_url'],
+};
+
+function pickAllowedFields(data: Record<string, unknown>, table: string): Record<string, unknown> {
+  const allowed = TABLE_ALLOWED_FIELDS[table];
+  if (!allowed) return data;
+  return Object.fromEntries(
+    Object.entries(data).filter(([k, v]) => allowed.includes(k) && v !== undefined)
+  );
 }
 
 export const createEntity = mutation({
@@ -19,8 +34,7 @@ export const createEntity = mutation({
     data: v.any(),
   },
   handler: async (ctx, { entityType, data }) => {
-    const user = await requireAuth(ctx);
-    if (!user.is_admin) throw new Error("Admin access required to create entities");
+    await requireAdmin(ctx);
     
     const table = getTableName(entityType);
     
@@ -67,7 +81,7 @@ export const createEntity = mutation({
       insertData.quiz_id = normalized;
     }
     
-    return await ctx.db.insert(table, insertData);
+    return await ctx.db.insert(table, pickAllowedFields(insertData, table));
   },
 });
 
@@ -78,8 +92,7 @@ export const updateEntity = mutation({
     data: v.any(),
   },
   handler: async (ctx, { entityType, id, data }) => {
-    const user = await requireAuth(ctx);
-    if (!user.is_admin) throw new Error("Admin access required to update entities");
+    await requireAdmin(ctx);
     
     const table = getTableName(entityType);
     
@@ -94,7 +107,7 @@ export const updateEntity = mutation({
     const existing = await ctx.db.get(convexId);
     if (!existing) throw new Error(`Failed to update ${entityType}: Entity not found with ID "${id}"`);
     
-    await ctx.db.patch(convexId, patchData);
+    await ctx.db.patch(convexId, pickAllowedFields(patchData, table));
   },
 });
 
@@ -104,8 +117,7 @@ export const deleteEntity = mutation({
     id: v.string(),
   },
   handler: async (ctx, { entityType, id }) => {
-    const user = await requireAuth(ctx);
-    if (!user.is_admin) throw new Error("Admin access required to delete entities");
+    await requireAdmin(ctx);
     
     const table = getTableName(entityType);
     
