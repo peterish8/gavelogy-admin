@@ -100,11 +100,13 @@ export const updatePaymentStatus = mutation({
     ),
   },
   handler: async (ctx, { order_id, status }) => {
+    const user = await requireAuth(ctx);
     const record = await ctx.db
       .query("payment_orders")
       .withIndex("by_order_id", (q) => q.eq("order_id", order_id))
       .unique();
     if (!record) throw new Error("Payment order not found");
+    if (record.userId !== user._id) throw new Error("Unauthorized: order does not belong to this user");
     await ctx.db.patch(record._id, { status });
   },
 });

@@ -178,7 +178,7 @@ export const saveDraft = mutation({
   handler: async (ctx, { itemId, contentHtml }) => {
     await requireAdmin(ctx);
     const existingDraft = await ctx.db.query("draft_content_cache")
-        .filter(q => q.eq(q.field("original_content_id"), itemId)).first();
+        .withIndex("by_content", q => q.eq("original_content_id", itemId as string)).first();
     if (existingDraft) {
       await ctx.db.patch(existingDraft._id, { draft_data: { content_html: contentHtml } });
     } else {
@@ -205,7 +205,7 @@ export const publishNoteContent = mutation({
       });
     }
     const draft = await ctx.db.query("draft_content_cache")
-        .filter(q => q.eq(q.field("original_content_id"), itemId)).first();
+        .withIndex("by_content", q => q.eq("original_content_id", itemId as string)).first();
     if (draft) {
       await ctx.db.delete(draft._id);
     }
@@ -217,7 +217,7 @@ export const discardDraft = mutation({
   handler: async (ctx, { itemId }) => {
     await requireAdmin(ctx);
     const draft = await ctx.db.query("draft_content_cache")
-        .filter(q => q.eq(q.field("original_content_id"), itemId)).first();
+        .withIndex("by_content", q => q.eq("original_content_id", itemId as string)).first();
     if (draft) {
       await ctx.db.delete(draft._id);
     }
