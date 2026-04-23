@@ -458,13 +458,29 @@ export function JudgmentPdfPanel({
       if (!Array.isArray(destArray) || destArray.length === 0) return
       const pageIndex = await pdfDocRef.current.getPageIndex(destArray[0])
       const targetPage = pageIndex + 1
+      console.log('[PDF nav] Navigating to page:', targetPage, 'from dest:', dest)
+      
+      // Ensure the page is rendered before scrolling
       const pageEl = pageContainerRefs.current.get(targetPage)
-      if (pageEl && pdfScrollRef.current) {
-        const offsetTop = (pageEl as HTMLElement).offsetTop - 80
+      if (!pageEl) {
+        console.warn('[PDF nav] Page element not found for page:', targetPage)
+        // Try to render the page if not found
+        await renderPage(targetPage)
+      }
+      
+      // Wait a bit for rendering to complete
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      const pageElAfter = pageContainerRefs.current.get(targetPage)
+      if (pageElAfter && pdfScrollRef.current) {
+        const offsetTop = (pageElAfter as HTMLElement).offsetTop - 120
         pdfScrollRef.current.scrollTo({ top: Math.max(0, offsetTop), behavior: 'smooth' })
+        console.log('[PDF nav] Scrolled to offset:', offsetTop)
+      } else {
+        console.warn('[PDF nav] Still cannot find page element after render attempt')
       }
     } catch (e) {
-      console.warn('PDF dest navigation error:', e)
+      console.warn('[PDF nav] Navigation error:', e)
     }
   }
 
