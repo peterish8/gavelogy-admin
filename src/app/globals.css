@@ -619,7 +619,7 @@
   .note-prose-render table td,
   .note-prose-render table th {
     border: 1px solid #D1D5DB;
-    padding: 0.5rem 0.75rem;
+    padding: 0.5rem 0.75rem !important;
     vertical-align: top;
     min-width: 80px;
     position: relative;
