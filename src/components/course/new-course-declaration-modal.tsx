@@ -208,9 +208,8 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
           name: parsedData.courseName,
           description: parsedData.courseDescription || 'Course description',
           icon: '📚',
-          order_index: coursesCount,
-          is_active: false, // PRIVATE by default
-          version: 1,
+          is_active: false,
+          is_free: false,
           price: 0
         }
       })
