@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireAdmin } from "./authHelpers";
 
 export const getAllPyqTests = query({
   args: {},
@@ -47,6 +48,7 @@ export const getPyqQuestions = query({
 export const deletePyqTest = mutation({
   args: { testId: v.id("pyq_tests") },
   handler: async (ctx, { testId }) => {
+    await requireAdmin(ctx);
     const passages = await ctx.db
       .query("pyq_passages")
       .withIndex("by_test", (q) => q.eq("test_id", testId))
@@ -124,6 +126,7 @@ export const createPyqTestWithBundle = mutation({
     questions: v.array(questionInputSchema),
   },
   handler: async (ctx, { passages, questions, ...testData }) => {
+    await requireAdmin(ctx);
     const testId = await ctx.db.insert("pyq_tests", testData);
     await insertBundle(ctx, testId, passages, questions);
     return testId;
@@ -149,6 +152,7 @@ export const savePyqBundle = mutation({
     questions: v.array(questionInputSchema),
   },
   handler: async (ctx, { testId, testMeta, passages, questions }) => {
+    await requireAdmin(ctx);
     if (testMeta) {
       const patch: Record<string, unknown> = {};
       for (const [k, val] of Object.entries(testMeta)) {

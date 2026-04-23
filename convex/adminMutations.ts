@@ -1,6 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { requireAuth } from "./authHelpers";
+import { requireAuth, requireAdmin } from "./authHelpers";
 
 // Helper to map entityType string to actual table name literal
 function getTableName(entityType: string): "courses" | "subjects" | "structure_items" {
@@ -19,9 +19,7 @@ export const createEntity = mutation({
     data: v.any(),
   },
   handler: async (ctx, { entityType, data }) => {
-    const { getAuthUser } = await import("./authHelpers");
-    const user = await getAuthUser(ctx);
-    if (!user) throw new Error("Unauthenticated");
+    const user = await requireAuth(ctx);
     if (!user.is_admin) throw new Error("Admin access required to create entities");
     
     const table = getTableName(entityType);
@@ -80,9 +78,7 @@ export const updateEntity = mutation({
     data: v.any(),
   },
   handler: async (ctx, { entityType, id, data }) => {
-    const { getAuthUser } = await import("./authHelpers");
-    const user = await getAuthUser(ctx);
-    if (!user) throw new Error("Unauthenticated");
+    const user = await requireAuth(ctx);
     if (!user.is_admin) throw new Error("Admin access required to update entities");
     
     const table = getTableName(entityType);
@@ -108,9 +104,7 @@ export const deleteEntity = mutation({
     id: v.string(),
   },
   handler: async (ctx, { entityType, id }) => {
-    const { getAuthUser } = await import("./authHelpers");
-    const user = await getAuthUser(ctx);
-    if (!user) throw new Error("Unauthenticated");
+    const user = await requireAuth(ctx);
     if (!user.is_admin) throw new Error("Admin access required to delete entities");
     
     const table = getTableName(entityType);
@@ -129,7 +123,7 @@ export const deleteEntity = mutation({
 export const createDailyNews = mutation({
   args: { rows: v.array(v.any()) },
   handler: async (ctx, { rows }) => {
-    await requireAuth(ctx);
+    await requireAdmin(ctx);
     const ids = [];
     for (const row of rows) {
       const id = await ctx.db.insert("daily_news", row);
@@ -142,7 +136,7 @@ export const createDailyNews = mutation({
 export const updateDailyNews = mutation({
   args: { id: v.id("daily_news"), patch: v.any() },
   handler: async (ctx, { id, patch }) => {
-    await requireAuth(ctx);
+    await requireAdmin(ctx);
     await ctx.db.patch(id, patch);
   },
 });
@@ -150,7 +144,7 @@ export const updateDailyNews = mutation({
 export const bulkPublishNews = mutation({
   args: { ids: v.array(v.id("daily_news")), status: v.string() },
   handler: async (ctx, { ids, status }) => {
-    await requireAuth(ctx);
+    await requireAdmin(ctx);
     for (const id of ids) {
       await ctx.db.patch(id, { status });
     }
@@ -160,7 +154,7 @@ export const bulkPublishNews = mutation({
 export const deleteDailyNews = mutation({
   args: { id: v.id("daily_news") },
   handler: async (ctx, { id }) => {
-    await requireAuth(ctx);
+    await requireAdmin(ctx);
     await ctx.db.delete(id);
   },
 });
@@ -168,7 +162,7 @@ export const deleteDailyNews = mutation({
 export const saveDraft = mutation({
   args: { itemId: v.id("structure_items"), contentHtml: v.string() },
   handler: async (ctx, { itemId, contentHtml }) => {
-    await requireAuth(ctx);
+    await requireAdmin(ctx);
     const existingDraft = await ctx.db.query("draft_content_cache")
         .filter(q => q.eq(q.field("original_content_id"), itemId)).first();
     if (existingDraft) {
@@ -185,7 +179,7 @@ export const saveDraft = mutation({
 export const publishNoteContent = mutation({
   args: { itemId: v.id("structure_items"), contentHtml: v.string() },
   handler: async (ctx, { itemId, contentHtml }) => {
-    await requireAuth(ctx);
+    await requireAdmin(ctx);
     const existing = await ctx.db.query("note_contents")
         .withIndex("by_item", q => q.eq("itemId", itemId)).first();
     if (existing) {
@@ -207,7 +201,7 @@ export const publishNoteContent = mutation({
 export const discardDraft = mutation({
   args: { itemId: v.id("structure_items") },
   handler: async (ctx, { itemId }) => {
-    await requireAuth(ctx);
+    await requireAdmin(ctx);
     const draft = await ctx.db.query("draft_content_cache")
         .filter(q => q.eq(q.field("original_content_id"), itemId)).first();
     if (draft) {
@@ -228,7 +222,7 @@ export const saveQuiz = mutation({
     }))
   },
   handler: async (ctx, { itemId, title, questions }) => {
-    await requireAuth(ctx);
+    await requireAdmin(ctx);
     let quizId;
     const existingQuiz = await ctx.db.query("attached_quizzes")
         .withIndex("by_note_item", q => q.eq("noteItemId", itemId)).first();
@@ -276,7 +270,7 @@ export const createCrashCourse = mutation({
     orderIndex: v.number()
   },
   handler: async (ctx, { name, description, sourceCourseIds, orderIndex }) => {
-    await requireAuth(ctx);
+    await requireAdmin(ctx);
     
     // Validate that source courses exist
     const validSourceCourses: any[] = [];
@@ -301,7 +295,7 @@ export const createCrashCourse = mutation({
     let rootFolderIndex = 0;
     for (const sourceCourse of validSourceCourses) {
       const items = await ctx.db.query("structure_items")
-          .filter(q => q.eq(q.field("courseId"), sourceCourse._id))
+          .withIndex("by_course", q => q.eq("courseId", sourceCourse._id))
           .collect();
 
       if (items.length === 0) continue;

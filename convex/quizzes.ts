@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireAdmin } from "./authHelpers";
 
 export const getAllSubjects = query({
   args: {},
@@ -50,6 +51,7 @@ export const createQuiz = mutation({
     order_index: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requireAdmin(ctx);
     return await ctx.db.insert("standalone_quizzes", args);
   },
 });
@@ -63,6 +65,7 @@ export const updateQuiz = mutation({
     order_index: v.optional(v.number()),
   },
   handler: async (ctx, { quizId, ...patch }) => {
+    await requireAdmin(ctx);
     const cleaned: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(patch)) {
       if (val !== undefined) cleaned[k] = val;
@@ -84,6 +87,7 @@ export const createQuestion = mutation({
     order_index: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requireAdmin(ctx);
     return await ctx.db.insert("standalone_questions", args);
   },
 });
@@ -101,6 +105,7 @@ export const updateQuestion = mutation({
     order_index: v.optional(v.number()),
   },
   handler: async (ctx, { questionId, ...patch }) => {
+    await requireAdmin(ctx);
     const cleaned: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(patch)) {
       if (val !== undefined) cleaned[k] = val;
@@ -112,6 +117,7 @@ export const updateQuestion = mutation({
 export const deleteQuestion = mutation({
   args: { questionId: v.id("standalone_questions") },
   handler: async (ctx, { questionId }) => {
+    await requireAdmin(ctx);
     await ctx.db.delete(questionId);
   },
 });

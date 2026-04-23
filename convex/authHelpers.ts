@@ -12,3 +12,9 @@ export async function requireAuth(ctx: QueryCtx | MutationCtx) {
   if (!user) throw new Error("Not authenticated");
   return user;
 }
+
+export async function requireAdmin(ctx: QueryCtx | MutationCtx) {
+  const user = await requireAuth(ctx);
+  if (!user.is_admin) throw new Error("Admin access required");
+  return user;
+}

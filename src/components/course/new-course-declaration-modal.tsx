@@ -116,6 +116,7 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
   const [copied, setCopied] = useState(false)
 
   const createEntity = useMutation(api.adminMutations.createEntity as any)
+  const updateEntity = useMutation(api.adminMutations.updateEntity as any)
 
   // Parses and validates the pasted JSON declaration, advancing to the preview step on success.
   const handleParse = useCallback(() => {
@@ -267,12 +268,12 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
           if (item.parentId && idMap.has(item.parentId)) {
             const actualParentId = idMap.get(item.parentId)
             const actualItemId = idMap.get(item.tempId)
-            
+
             if (actualParentId && actualItemId) {
-              // Update the item with the correct parentId
-              await createEntity({ 
-                entityType: 'structure_item', 
-                data: { id: actualItemId, parentId: actualParentId } 
+              await updateEntity({
+                entityType: 'structure_item',
+                id: actualItemId,
+                data: { parentId: actualParentId }
               })
             }
           }

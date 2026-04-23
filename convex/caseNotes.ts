@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireAdmin } from "./authHelpers";
 
 export const getCaseNote = query({
   args: { case_number: v.string() },
@@ -14,6 +15,7 @@ export const getCaseNote = query({
 export const createCaseNote = mutation({
   args: { case_number: v.string(), overall_content: v.optional(v.string()) },
   handler: async (ctx, args) => {
+    await requireAdmin(ctx);
     return await ctx.db.insert("case_notes", args);
   },
 });
@@ -21,6 +23,7 @@ export const createCaseNote = mutation({
 export const updateCaseNote = mutation({
   args: { case_number: v.string(), overall_content: v.string() },
   handler: async (ctx, { case_number, overall_content }) => {
+    await requireAdmin(ctx);
     const existing = await ctx.db
       .query("case_notes")
       .withIndex("by_case_number", (q) => q.eq("case_number", case_number))
@@ -32,6 +35,7 @@ export const updateCaseNote = mutation({
 export const deleteCaseNote = mutation({
   args: { case_number: v.string() },
   handler: async (ctx, { case_number }) => {
+    await requireAdmin(ctx);
     const existing = await ctx.db
       .query("case_notes")
       .withIndex("by_case_number", (q) => q.eq("case_number", case_number))
