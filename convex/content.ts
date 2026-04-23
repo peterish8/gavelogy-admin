@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { requireAuth, getAuthUser } from "./authHelpers";
+import { requireAuth, requireAdmin, getAuthUser } from "./authHelpers";
 
 // ─── Courses ──────────────────────────────────────────────────────────────
 
@@ -53,7 +53,7 @@ export const getStructureItem = query({
 export const updateStructureItemPdf = mutation({
   args: { itemId: v.id("structure_items"), pdf_url: v.string() },
   handler: async (ctx, { itemId, pdf_url }) => {
-    await requireAuth(ctx);
+    await requireAdmin(ctx);
     await ctx.db.patch(itemId, { pdf_url });
   },
 });
@@ -124,7 +124,7 @@ export const getJudgmentReaderData = query({
 export const updateNoteContent = mutation({
   args: { itemId: v.id("structure_items"), content_html: v.string() },
   handler: async (ctx, { itemId, content_html }) => {
-    await requireAuth(ctx);
+    await requireAdmin(ctx);
     
     // Validate structure item exists
     const item = await ctx.db.get(itemId);
@@ -189,7 +189,7 @@ export const createNotePdfLink = mutation({
     label: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireAuth(ctx);
+    await requireAdmin(ctx);
     return ctx.db.insert("note_pdf_links", args);
   },
 });
@@ -197,7 +197,7 @@ export const createNotePdfLink = mutation({
 export const deleteNotePdfLink = mutation({
   args: { linkId: v.id("note_pdf_links") },
   handler: async (ctx, { linkId }) => {
-    await requireAuth(ctx);
+    await requireAdmin(ctx);
     await ctx.db.delete(linkId);
   },
 });

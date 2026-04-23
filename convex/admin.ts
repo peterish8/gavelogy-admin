@@ -515,6 +515,7 @@ export const getMockTestQuestions = query({
 export const migrateAttachedQuizzes = mutation({
   args: {},
   handler: async (ctx) => {
+    await requireAdmin(ctx);
     const rows = await ctx.db.query("attached_quizzes").collect();
     let migratedQuizzes = 0;
     for (const row of rows) {
@@ -551,6 +552,7 @@ export const migrateAttachedQuizzes = mutation({
 export const activateAllStructureItems = mutation({
   args: {},
   handler: async (ctx) => {
+    await requireAdmin(ctx);
     const items = await ctx.db.query("structure_items").collect();
     let count = 0;
     for (const item of items) {

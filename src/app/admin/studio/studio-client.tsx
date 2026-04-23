@@ -140,7 +140,14 @@ export default function StudioClient({ initialCourses }: StudioClientProps) {
         }
       ])
 
-      await createCourse(newCourse)
+      const realId = await createCourse(newCourse)
+
+      // Replace the temp UUID with the real Convex ID so deletes/updates work
+      if (realId) {
+        setLocalCourses((prev) => prev.map((c) =>
+          c.id === newCourseId ? { ...c, id: realId as string } : c
+        ))
+      }
 
       toast.success('Course created')
       
