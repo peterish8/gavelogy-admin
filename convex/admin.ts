@@ -166,7 +166,7 @@ export const deleteCourse = mutation({
       // Delete user_completed_items for this item
       const completedItems = await ctx.db
         .query("user_completed_items")
-        .filter((q) => q.eq(q.field("itemId"), item._id))
+        .withIndex("by_item", (q) => q.eq("itemId", item._id))
         .collect();
       for (const ci of completedItems) await ctx.db.delete(ci._id);
       
@@ -177,14 +177,14 @@ export const deleteCourse = mutation({
     // Delete user_courses for this course
     const userCourses = await ctx.db
       .query("user_courses")
-      .filter((q) => q.eq(q.field("courseId"), courseId))
+      .withIndex("by_course", (q) => q.eq("courseId", courseId))
       .collect();
     for (const uc of userCourses) await ctx.db.delete(uc._id);
-    
+
     // Delete payment_orders for this course
     const paymentOrders = await ctx.db
       .query("payment_orders")
-      .filter((q) => q.eq(q.field("courseId"), courseId))
+      .withIndex("by_course", (q) => q.eq("courseId", courseId))
       .collect();
     for (const po of paymentOrders) await ctx.db.delete(po._id);
     

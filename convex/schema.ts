@@ -522,6 +522,7 @@ export default defineSchema({
   })
     .index("by_user", ["userId"])
     .index("by_user_course", ["userId", "courseId"])
+    .index("by_course", ["courseId"])
     .index("by_status", ["status"]),
 
   payment_orders: defineTable({
@@ -537,7 +538,8 @@ export default defineSchema({
     payment_method: v.optional(v.string()),
   })
     .index("by_user", ["userId"])
-    .index("by_order_id", ["order_id"]),
+    .index("by_order_id", ["order_id"])
+    .index("by_course", ["courseId"]),
 
   user_completed_items: defineTable({
     userId: v.id("users"),
@@ -546,7 +548,8 @@ export default defineSchema({
     completed_at: v.string(),
   })
     .index("by_user", ["userId"])
-    .index("by_user_item", ["userId", "itemId"]),
+    .index("by_user_item", ["userId", "itemId"])
+    .index("by_item", ["itemId"]),
 
   draft_content_cache: defineTable({
     userId: v.optional(v.id("users")),
