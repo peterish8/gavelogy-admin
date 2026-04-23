@@ -166,7 +166,7 @@ export const deleteCourse = mutation({
       // Delete user_completed_items for this item
       const completedItems = await ctx.db
         .query("user_completed_items")
-        .filter((q) => q.eq(q.field("itemId"), item._id))
+        .withIndex("by_item", (q) => q.eq("itemId", item._id))
         .collect();
       for (const ci of completedItems) await ctx.db.delete(ci._id);
       
@@ -177,14 +177,14 @@ export const deleteCourse = mutation({
     // Delete user_courses for this course
     const userCourses = await ctx.db
       .query("user_courses")
-      .filter((q) => q.eq(q.field("courseId"), courseId))
+      .withIndex("by_course", (q) => q.eq("courseId", courseId))
       .collect();
     for (const uc of userCourses) await ctx.db.delete(uc._id);
-    
+
     // Delete payment_orders for this course
     const paymentOrders = await ctx.db
       .query("payment_orders")
-      .filter((q) => q.eq(q.field("courseId"), courseId))
+      .withIndex("by_course", (q) => q.eq("courseId", courseId))
       .collect();
     for (const po of paymentOrders) await ctx.db.delete(po._id);
     
@@ -366,6 +366,62 @@ export const deleteAllLinksForItem = mutation({
       .withIndex("by_item", (q) => q.eq("itemId", itemId))
       .collect();
     for (const l of links) await ctx.db.delete(l._id);
+  },
+});
+
+// Admin: all users with their course purchase count + streak/coins summary
+export const getAllUsersWithPurchases = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    const users = await ctx.db.query("users").collect();
+    return Promise.all(
+      users.map(async (user) => {
+        const purchases = await ctx.db
+          .query("user_courses")
+          .withIndex("by_user", (q) => q.eq("userId", user._id))
+          .collect();
+        return {
+          _id: user._id,
+          email: user.email,
+          full_name: user.full_name ?? null,
+          username: user.username,
+          total_coins: user.total_coins,
+          streak_count: user.streak_count,
+          is_admin: user.is_admin ?? false,
+          _creationTime: user._creationTime,
+          courseCount: purchases.length,
+          activeCourseCount: purchases.filter((p) => p.status === "active").length,
+        };
+      })
+    );
+  },
+});
+
+// Admin: all purchased courses for a specific user
+export const getUserPurchases = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    await requireAdmin(ctx);
+    const purchases = await ctx.db
+      .query("user_courses")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+    return Promise.all(
+      purchases.map(async (p) => {
+        const course = await ctx.db.get(p.courseId);
+        return {
+          _id: p._id,
+          courseId: p.courseId,
+          courseName: course?.name ?? p.course_name ?? "Unknown",
+          courseActive: course?.is_active ?? false,
+          status: p.status,
+          purchased_at: p.purchased_at,
+          course_price: p.course_price ?? null,
+          order_id: p.order_id ?? null,
+        };
+      })
+    );
   },
 });
 

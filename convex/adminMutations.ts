@@ -178,7 +178,7 @@ export const saveDraft = mutation({
   handler: async (ctx, { itemId, contentHtml }) => {
     await requireAdmin(ctx);
     const existingDraft = await ctx.db.query("draft_content_cache")
-        .filter(q => q.eq(q.field("original_content_id"), itemId)).first();
+        .withIndex("by_content", q => q.eq("original_content_id", itemId as string)).first();
     if (existingDraft) {
       await ctx.db.patch(existingDraft._id, { draft_data: { content_html: contentHtml } });
     } else {
@@ -205,7 +205,7 @@ export const publishNoteContent = mutation({
       });
     }
     const draft = await ctx.db.query("draft_content_cache")
-        .filter(q => q.eq(q.field("original_content_id"), itemId)).first();
+        .withIndex("by_content", q => q.eq("original_content_id", itemId as string)).first();
     if (draft) {
       await ctx.db.delete(draft._id);
     }
@@ -217,7 +217,7 @@ export const discardDraft = mutation({
   handler: async (ctx, { itemId }) => {
     await requireAdmin(ctx);
     const draft = await ctx.db.query("draft_content_cache")
-        .filter(q => q.eq(q.field("original_content_id"), itemId)).first();
+        .withIndex("by_content", q => q.eq("original_content_id", itemId as string)).first();
     if (draft) {
       await ctx.db.delete(draft._id);
     }
@@ -274,6 +274,84 @@ export const saveQuiz = mutation({
       await ctx.db.delete(q._id);
     }
   }
+});
+
+// Single-mutation course import: creates course + all structure items in one server-side pass.
+// Replaces N+M sequential client calls with 1 network round trip.
+export const importCourseStructure = mutation({
+  args: {
+    courseName: v.string(),
+    courseDescription: v.optional(v.string()),
+    items: v.array(v.object({
+      tempId: v.string(),
+      parentTempId: v.optional(v.string()),
+      item_type: v.string(),
+      title: v.string(),
+      order_index: v.number(),
+    })),
+  },
+  handler: async (ctx, { courseName, courseDescription, items }) => {
+    await requireAdmin(ctx);
+
+    // 1. Create the course
+    const courseId = await ctx.db.insert("courses", {
+      name: courseName,
+      description: courseDescription || '',
+      is_active: false,
+      is_free: false,
+      price: 0,
+    });
+
+    // 2. Process items in topological order (BFS: parents before children).
+    //    Build a tempId → real Convex ID map as we go.
+    const idMap = new Map<string, string>();
+
+    // Separate root items (no parent) and child items
+    const rootItems = items.filter(i => !i.parentTempId);
+    const childItems = items.filter(i => !!i.parentTempId);
+
+    // Process roots first
+    for (const item of rootItems) {
+      const realId = await ctx.db.insert("structure_items", {
+        courseId,
+        item_type: item.item_type,
+        title: item.title,
+        order_index: item.order_index,
+        is_active: true,
+      });
+      idMap.set(item.tempId, realId as string);
+    }
+
+    // BFS for children: keep processing until all items are resolved
+    let remaining = [...childItems];
+    let maxPasses = items.length + 1; // guard against cycles
+
+    while (remaining.length > 0 && maxPasses-- > 0) {
+      const nextRemaining: typeof remaining = [];
+
+      for (const item of remaining) {
+        const parentRealId = item.parentTempId ? idMap.get(item.parentTempId) : undefined;
+        if (!parentRealId) {
+          // Parent not inserted yet — defer to next pass
+          nextRemaining.push(item);
+          continue;
+        }
+        const realId = await ctx.db.insert("structure_items", {
+          courseId,
+          parentId: parentRealId as any,
+          item_type: item.item_type,
+          title: item.title,
+          order_index: item.order_index,
+          is_active: true,
+        });
+        idMap.set(item.tempId, realId as string);
+      }
+
+      remaining = nextRemaining;
+    }
+
+    return courseId;
+  },
 });
 
 export const createCrashCourse = mutation({

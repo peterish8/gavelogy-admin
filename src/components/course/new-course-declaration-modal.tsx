@@ -115,8 +115,7 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
   const [step, setStep] = useState<'input' | 'preview'>('input')
   const [copied, setCopied] = useState(false)
 
-  const createEntity = useMutation(api.adminMutations.createEntity as any)
-  const updateEntity = useMutation(api.adminMutations.updateEntity as any)
+  const importCourseStructure = useMutation(api.adminMutations.importCourseStructure)
 
   // Parses and validates the pasted JSON declaration, advancing to the preview step on success.
   const handleParse = useCallback(() => {
@@ -192,102 +191,45 @@ export function NewCourseDeclarationModal({ coursesCount, onComplete }: NewCours
     toast.success('Item removed. Children promoted to parent level.')
   }, [parsedData])
 
-  // Inserts the course row and all structure items directly to Convex.
+  // Flattens the nested tree into a list and sends one single Convex mutation.
   const handleSave = async () => {
     if (!parsedData) return
     setSaving(true)
-    let toastId: string | number = ''
+    const toastId = toast.loading('Creating course...')
 
     try {
-      toastId = toast.loading('Creating course...')
+      // Flatten nested tree → flat list with parentTempId references
+      const flatItems: { tempId: string; parentTempId: string | null; item_type: string; title: string; order_index: number }[] = []
 
-      // 1. Create the course directly in database (PRIVATE by default: is_active = false)
-      const newCourseId = await createEntity({
-        entityType: 'course',
-        data: {
-          name: parsedData.courseName,
-          description: parsedData.courseDescription || 'Course description',
-          icon: '📚',
-          is_active: false,
-          is_free: false,
-          price: 0
-        }
-      })
-
-      if (!newCourseId) throw new Error('Failed to create course')
-
-      // 2. Prepare Structure Items for Batch Insert
-      toast.loading(`Preparing ${(stats?.files ?? 0) + (stats?.folders ?? 0)} items...`, { id: toastId })
-      
-      // Build a map of temp IDs to actual Convex IDs
-      const idMap = new Map<string, string>()
-      const itemsToInsert: any[] = []
-
-      const processItems = (items: CourseDeclarationItem[], parentId: string | null, orderStart: number = 0) => {
+      const flatten = (items: CourseDeclarationItem[], parentTempId: string | null) => {
         items.forEach((item, i) => {
-          const tempId = item.id
-          
-          // Prepare item data WITHOUT parentId initially (will update after)
-          const itemData = {
-            courseId: newCourseId,
-            parentId: undefined, // Will set this after we have the actual Convex ID
-            item_type: item.type,
-            title: item.title,
-            order_index: orderStart + i,
-            is_active: true
-          }
-          
-          itemsToInsert.push({
-            tempId,
-            parentId: parentId, // Store the parent's tempId for later mapping
-            data: itemData
-          })
-
-          if (item.children && item.children.length > 0) {
-            processItems(item.children, tempId, 0)
-          }
+          flatItems.push({ tempId: item.id, parentTempId, item_type: item.type, title: item.title, order_index: i })
+          if (item.children?.length) flatten(item.children, item.id)
         })
       }
+      flatten(parsedData.structure, null)
 
-      processItems(parsedData.structure, null, 0)
+      // Single network call — everything happens server-side
+      const newCourseId = await importCourseStructure({
+        courseName: parsedData.courseName,
+        courseDescription: parsedData.courseDescription || '',
+        items: flatItems.map(i => ({
+          tempId: i.tempId,
+          parentTempId: i.parentTempId ?? undefined,
+          item_type: i.item_type,
+          title: i.title,
+          order_index: i.order_index,
+        })),
+      })
 
-      // 3. Batch Insert Structure Items
-      if (itemsToInsert.length > 0) {
-        console.log(`Inserting ${itemsToInsert.length} items...`)
-        toast.loading(`Saving items...`, { id: toastId })
-        
-        // First pass: Insert all items and build ID map
-        for (const item of itemsToInsert) {
-          const convexId = await createEntity({ entityType: 'structure_item', data: item.data });
-          idMap.set(item.tempId, convexId as string)
-        }
-        
-        // Second pass: Update parent references using actual Convex IDs
-        for (const item of itemsToInsert) {
-          if (item.parentId && idMap.has(item.parentId)) {
-            const actualParentId = idMap.get(item.parentId)
-            const actualItemId = idMap.get(item.tempId)
-
-            if (actualParentId && actualItemId) {
-              await updateEntity({
-                entityType: 'structure_item',
-                id: actualItemId,
-                data: { parentId: actualParentId }
-              })
-            }
-          }
-        }
-      }
-      
-      toast.success('Course created successfully!', { id: toastId })
+      toast.success('Course created!', { id: toastId })
       onComplete()
       setOpen(false)
       resetModal()
       router.push(`/admin/studio/${newCourseId}`)
     } catch (e: any) {
       console.error('Error creating course:', e)
-      const errorMessage = e?.message || 'Failed to create course'
-      toast.error(errorMessage, { id: toastId })
+      toast.error(e?.message || 'Failed to create course', { id: toastId })
     } finally {
       setSaving(false)
     }

@@ -323,7 +323,7 @@ export const deductEntryFee = mutation({
     const user = await requireAuth(ctx);
     if (user.total_coins < args.fee) throw new Error("Insufficient coins");
     await ctx.db.patch(user._id, {
-      total_coins: user.total_coins - args.fee,
+      total_coins: Math.max(0, user.total_coins - args.fee),
     });
     await ctx.db.insert("coin_transactions", {
       userId: user._id,

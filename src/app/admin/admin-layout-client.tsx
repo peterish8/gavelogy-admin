@@ -16,7 +16,8 @@ import {
   User,
   Settings,
   Newspaper,
-  ClipboardList
+  ClipboardList,
+  Users
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { RealtimeProvider } from '@/lib/realtime/realtime-provider'
@@ -74,6 +75,11 @@ const sidebarItems = [
     title: 'PYQ Tests',
     href: '/admin/pyq',
     icon: ClipboardList
+  },
+  {
+    title: 'Users',
+    href: '/admin/users',
+    icon: Users
   },
 ]
 
