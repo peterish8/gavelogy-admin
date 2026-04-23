@@ -159,10 +159,12 @@ function YearSection({ year, cases, styles }: { year: string, cases: CaseItem[],
                             </div>
                         </Link>
 
-                        {/* Quiz Button - placeholder for future feature */}
-                        <div className="w-10 h-10 rounded-full bg-muted/80 text-muted-foreground/70 flex items-center justify-center">
-                            <HelpCircle className="w-4 h-4" />
-                        </div>
+                        <Link href={`/admin/quizzes/new?caseId=${item.case_number}`}>
+                            <div className="flex items-center gap-2 px-4 py-1.5 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors cursor-pointer font-medium text-sm">
+                                <HelpCircle className="w-4 h-4" />
+                                Quiz
+                            </div>
+                        </Link>
                     </div>
                   </div>
                 ))}

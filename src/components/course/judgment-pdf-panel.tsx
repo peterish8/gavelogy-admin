@@ -22,12 +22,17 @@ import { JUDGMENT_SYSTEM_PROMPT } from '@/lib/prompts'
 import { 
   LINK_COLORS, 
   DEFAULT_LINK_COLOR, 
-  parseLinkMeta, 
+  parseLinkMeta,
   encodeLinkMeta,
   hexToRgb
 } from '@/lib/pdf-utils'
 
-const SCALE = 2.0
+// Adaptive PDF rendering scale based on device pixel ratio and quality setting
+const getScale = (quality: 'low' | 'medium' | 'high' = 'high') => {
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+  const baseScale = quality === 'low' ? 1.0 : quality === 'medium' ? 1.5 : 2.0
+  return Math.min(baseScale * dpr, 3.0) // Cap at 3.0 to prevent excessive memory usage
+}
 
 interface Region {
   page: number
@@ -79,6 +84,7 @@ interface JudgmentPdfPanelProps {
   onAiNotesGenerated?: (formatted: string, provider: string) => void
   isPreview?: boolean
   onScrollNotes?: (linkId: string) => void
+  quality?: 'low' | 'medium' | 'high'
 }
 
 // PDF panel for the course editor: renders a lazy-loaded pdfjs PDF with drag-to-tag, link overlays, AI notes generation, and connection-line visualization.
@@ -105,9 +111,11 @@ export function JudgmentPdfPanel({
   onAiNotesGenerated,
   isPreview = false,
   onScrollNotes,
+  quality = 'high',
 }: JudgmentPdfPanelProps) {
 
   const allowTagging = connectMode && connectStep === null
+  const SCALE = getScale(quality)
 
   // ── PDF state ──────────────────────────────────────────────────────
   const [signedUrl, setSignedUrl] = useState<string | null>(null)
@@ -265,6 +273,68 @@ export function JudgmentPdfPanel({
     const pageTopInContainer = pageRect.top - containerRect.top + pdfContainer.scrollTop
     const target = Math.max(0, pageTopInContainer + regionTopOnPage - 100)
     pdfContainer.scrollTo({ top: target, behavior: 'smooth' })
+  }
+
+  const navigateToDest = async (dest: any) => {
+    if (!pdfDocRef.current) return
+
+    let pageIndex = -1
+    try {
+      let destArray = dest
+      if (typeof dest === 'string') {
+        destArray = await pdfDocRef.current.getDestination(dest)
+      }
+      if (Array.isArray(destArray) && destArray.length > 0) {
+        pageIndex = await pdfDocRef.current.getPageIndex(destArray[0])
+      }
+    } catch (e) {
+      // Destination resolution error - non-critical
+    }
+
+    if (pageIndex === -1) {
+      return
+    }
+
+    const targetPage = pageIndex + 1
+
+    // Ensure the target page is rendered before scrolling
+    if (!pageStates[targetPage]?.rendered) {
+      const pageEl = pageContainerRefs.current.get(targetPage)
+      if (!pageEl) {
+        return
+      }
+      // Trigger render by accessing the element
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            setTimeout(() => {
+              const pageEl = pageContainerRefs.current.get(targetPage)
+              if (pageEl) {
+                pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
+            }, 100)
+            observer.disconnect()
+          }
+        })
+      })
+      observer.observe(pageEl)
+      return
+    }
+
+    const pageEl = pageContainerRefs.current.get(targetPage)
+    if (!pageEl) {
+      return
+    }
+
+    const offsetTop = pageEl.offsetTop
+
+    try {
+      if (pdfScrollRef.current) {
+        pdfScrollRef.current.scrollTo({ top: offsetTop, behavior: 'smooth' })
+      }
+    } catch (e) {
+      // Navigation error - non-critical
+    }
   }
 
   // Triggers a rAF-deferred recomputation of the active connection line coordinates.
@@ -465,49 +535,6 @@ export function JudgmentPdfPanel({
         setTimeout(() => searchInputRef.current?.focus(), 50)
       }
     }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [signedUrl])
-
-  // ── PDF annotation navigation ────────────────────────────────────
-  async function navigateToDest(dest: any) {
-    if (!pdfDocRef.current) return
-    try {
-      let destArray = dest
-      if (typeof dest === 'string') {
-        destArray = await pdfDocRef.current.getDestination(dest)
-      }
-      if (!Array.isArray(destArray) || destArray.length === 0) return
-      const pageIndex = await pdfDocRef.current.getPageIndex(destArray[0])
-      const targetPage = pageIndex + 1
-      console.log('[PDF nav] Navigating to page:', targetPage, 'from dest:', dest)
-      
-      // Ensure the page is rendered before scrolling
-      const pageEl = pageContainerRefs.current.get(targetPage)
-      if (!pageEl) {
-        console.warn('[PDF nav] Page element not found for page:', targetPage)
-        // Try to render the page if not found
-        await renderPage(targetPage)
-      }
-      
-      // Wait a bit for rendering to complete
-      await new Promise(resolve => setTimeout(resolve, 100))
-      
-      const pageElAfter = pageContainerRefs.current.get(targetPage)
-      if (pageElAfter && pdfScrollRef.current) {
-        const offsetTop = (pageElAfter as HTMLElement).offsetTop - 120
-        pdfScrollRef.current.scrollTo({ top: Math.max(0, offsetTop), behavior: 'smooth' })
-        console.log('[PDF nav] Scrolled to offset:', offsetTop)
-      } else {
-        console.warn('[PDF nav] Still cannot find page element after render attempt')
-      }
-    } catch (e) {
-      console.warn('[PDF nav] Navigation error:', e)
-    }
-  }
-
-  useEffect(() => {
-    if (!signedUrl) return
     let cancelled = false
     async function load() {
       setPdfLoading(true)
@@ -1216,9 +1243,16 @@ export function JudgmentPdfPanel({
 
                 return (
                   <div key={pageNum} className="flex flex-col items-center">
-                    <p className="text-xs font-semibold uppercase tracking-widest mb-2 text-muted-foreground">
-                      Page {pageNum}
-                    </p>
+                    <div className="flex items-center gap-2 mb-2">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                        Page {pageNum}
+                      </p>
+                      {ps?.rendered && (!pageAnnotations[pageNum] || pageAnnotations[pageNum].length === 0) && !connectMode && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground/60">
+                          No links
+                        </span>
+                      )}
+                    </div>
                     <div
                       ref={el => { if (el) pageContainerRefs.current.set(pageNum, el) }}
                       data-page-num={pageNum}

@@ -90,7 +90,7 @@ export const getEditorData = query({
   args: { itemId: v.id("structure_items") },
   handler: async (ctx, { itemId }) => {
     const draft = await ctx.db.query("draft_content_cache")
-        .filter(q => q.eq(q.field("original_content_id"), itemId)).first();
+        .withIndex("by_content", q => q.eq("original_content_id", itemId)).first();
     const live = await ctx.db.query("note_contents")
         .withIndex("by_item", q => q.eq("itemId", itemId)).first();
     const item = await ctx.db.get(itemId);
@@ -118,15 +118,15 @@ export const checkDbDiagnostic = query({
   handler: async (ctx) => {
     const courses = await ctx.db.query("courses").collect();
     const judgmentCourses = courses.filter(c => c.name.toLowerCase().includes("judgment"));
-    
+
     const results = [];
     for (const course of judgmentCourses) {
       const subjects = await ctx.db.query("subjects")
         .withIndex("by_course", q => q.eq("courseId", course._id)).collect();
-      
+
       const items = await ctx.db.query("structure_items")
         .withIndex("by_course", q => q.eq("courseId", course._id)).collect();
-        
+
       results.push({
         course: course.name,
         courseId: course._id,
@@ -138,7 +138,53 @@ export const checkDbDiagnostic = query({
 
     const allItems = await ctx.db.query("structure_items").collect();
     const allItemsWithPdf = allItems.filter(i => !!i.pdf_url).map(i => ({ title: i.title, pdf_url: i.pdf_url, courseId: i.courseId }));
-    
+
     return { judgmentCoursesResults: results, totalItemsWithPdf: allItemsWithPdf.length, samplePdfItems: allItemsWithPdf.slice(0, 5) };
+  }
+});
+
+export const adminHealthCheck = query({
+  args: {},
+  handler: async (ctx) => {
+    // Import requireAdmin at the top level would be better, but for this endpoint we check manually
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return { status: 'error', message: 'Unauthenticated', authenticated: false, admin: false, dbConnected: false };
+    }
+
+    const userRecord = await ctx.db.query("users")
+      .withIndex("by_token", q => q.eq("tokenIdentifier", identity.tokenIdentifier))
+      .unique();
+
+    if (!userRecord) {
+      return { status: 'error', message: 'User not found', authenticated: true, admin: false, dbConnected: true };
+    }
+
+    if (!userRecord.is_admin) {
+      return { status: 'error', message: 'Admin access required', authenticated: true, admin: false, dbConnected: true };
+    }
+
+    // DB connectivity check - perform a simple query
+    try {
+      const courseCount = await ctx.db.query("courses").collect().then(c => c.length);
+      return {
+        status: 'ok',
+        message: 'System healthy',
+        authenticated: true,
+        admin: true,
+        dbConnected: true,
+        timestamp: new Date().toISOString(),
+        stats: { courseCount }
+      };
+    } catch (error) {
+      return {
+        status: 'error',
+        message: 'Database query failed',
+        authenticated: true,
+        admin: true,
+        dbConnected: false,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
   }
 });
