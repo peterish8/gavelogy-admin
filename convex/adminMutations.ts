@@ -18,6 +18,7 @@ const TABLE_ALLOWED_FIELDS: Record<string, string[]> = {
   courses: ['name', 'description', 'price', 'is_active', 'is_free', 'icon'],
   subjects: ['name', 'description', 'courseId', 'order_index'],
   structure_items: ['courseId', 'parentId', 'title', 'description', 'item_type', 'order_index', 'icon', 'is_active', 'pdf_url'],
+  daily_news: ['date', 'title', 'content_custom', 'content_html', 'summary', 'keywords', 'category', 'source_paper', 'status', 'display_order', 'subject', 'topic', 'court', 'priority', 'exam_probability', 'capsule', 'facts', 'provisions', 'holdings', 'doctrine', 'mcqs', 'source_url', 'read_seconds', 'exam_rank'],
 };
 
 function pickAllowedFields(data: Record<string, unknown>, table: string): Record<string, unknown> {
@@ -293,6 +294,39 @@ export const importCourseStructure = mutation({
   handler: async (ctx, { courseName, courseDescription, items }) => {
     await requireAdmin(ctx);
 
+    // Validate: all parentTempIds must reference valid tempIds
+    const validTempIds = new Set(items.map(i => i.tempId));
+    for (const item of items) {
+      if (item.parentTempId && !validTempIds.has(item.parentTempId)) {
+        throw new Error(`Invalid parentTempId "${item.parentTempId}" for item "${item.tempId}": parent does not exist in items`);
+      }
+    }
+
+    // Validate: detect cycles by checking if any item is its own ancestor
+    const buildParentMap = () => {
+      const map = new Map<string, string | null>();
+      for (const item of items) {
+        map.set(item.tempId, item.parentTempId || null);
+      }
+      return map;
+    };
+    const parentMap = buildParentMap();
+    for (const item of items) {
+      let current = item.parentTempId;
+      const visited = new Set<string>();
+      while (current) {
+        if (current === item.tempId) {
+          throw new Error(`Cycle detected: item "${item.tempId}" is its own ancestor`);
+        }
+        if (visited.has(current)) {
+          throw new Error(`Cycle detected in hierarchy involving item "${item.tempId}"`);
+        }
+        visited.add(current);
+        const parent = parentMap.get(current);
+        current = parent ?? undefined;
+      }
+    }
+
     // 1. Create the course
     const courseId = await ctx.db.insert("courses", {
       name: courseName,
@@ -306,48 +340,45 @@ export const importCourseStructure = mutation({
     //    Build a tempId → real Convex ID map as we go.
     const idMap = new Map<string, string>();
 
-    // Separate root items (no parent) and child items
-    const rootItems = items.filter(i => !i.parentTempId);
-    const childItems = items.filter(i => !!i.parentTempId);
+    // Build adjacency list for efficient topological sort
+    const childrenByParent = new Map<string | null, typeof items>();
+    for (const item of items) {
+      const parentKey = item.parentTempId || null;
+      if (!childrenByParent.has(parentKey)) {
+        childrenByParent.set(parentKey, []);
+      }
+      childrenByParent.get(parentKey)!.push(item);
+    }
 
-    // Process roots first
-    for (const item of rootItems) {
+    // Single-pass topological sort using queue
+    const queue: typeof items = childrenByParent.get(null) || [];
+    let processedCount = 0;
+
+    while (queue.length > 0) {
+      const item = queue.shift()!;
+      const parentId = item.parentTempId ? idMap.get(item.parentTempId) : undefined;
+
       const realId = await ctx.db.insert("structure_items", {
         courseId,
+        parentId: parentId as any,
         item_type: item.item_type,
         title: item.title,
         order_index: item.order_index,
         is_active: true,
       });
       idMap.set(item.tempId, realId as string);
+      processedCount++;
+
+      // Enqueue children whose parent is now available
+      const children = childrenByParent.get(item.tempId);
+      if (children) {
+        queue.push(...children);
+      }
     }
 
-    // BFS for children: keep processing until all items are resolved
-    let remaining = [...childItems];
-    let maxPasses = items.length + 1; // guard against cycles
-
-    while (remaining.length > 0 && maxPasses-- > 0) {
-      const nextRemaining: typeof remaining = [];
-
-      for (const item of remaining) {
-        const parentRealId = item.parentTempId ? idMap.get(item.parentTempId) : undefined;
-        if (!parentRealId) {
-          // Parent not inserted yet — defer to next pass
-          nextRemaining.push(item);
-          continue;
-        }
-        const realId = await ctx.db.insert("structure_items", {
-          courseId,
-          parentId: parentRealId as any,
-          item_type: item.item_type,
-          title: item.title,
-          order_index: item.order_index,
-          is_active: true,
-        });
-        idMap.set(item.tempId, realId as string);
-      }
-
-      remaining = nextRemaining;
+    // Verify all items were processed (cycle detection)
+    if (processedCount !== items.length) {
+      throw new Error(`Cycle detected: only ${processedCount}/${items.length} items were processed`);
     }
 
     return courseId;
