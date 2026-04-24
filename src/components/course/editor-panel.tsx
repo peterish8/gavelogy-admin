@@ -16,6 +16,8 @@ import Highlight from '@tiptap/extension-highlight'
 import { TextStyle } from '@tiptap/extension-text-style'
 import BubbleMenuExtension from '@tiptap/extension-bubble-menu'
 import { Node, Mark, mergeAttributes } from '@tiptap/core'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import TextAlign from '@tiptap/extension-text-align'
 import { htmlToCustom, customToHtml, fixAiMistakes } from '@/lib/content-converter'
 import { fetchLinksForItem, insertLink, deleteLink } from '@/actions/judgment/links'
@@ -39,10 +41,11 @@ import {
     Bold, Italic, Underline as UnderlineIcon,
     List, ListOrdered, Save, X, RotateCcw, CheckCircle, AlertTriangle,
     Maximize2, Minimize2, ChevronRight, StickyNote, FileText,
-    Highlighter, Braces, Sun, Moon,
+    Highlighter, Braces,
     GripVertical, ChevronLeft, Loader2, MessageSquare, Minus, Link2, Unlink2, Wand2,
     Table as TableIcon, Check, CreditCard, Edit2,
     AlignLeft, AlignCenter, AlignRight,
+    Download, ArrowLeft,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
@@ -68,6 +71,10 @@ import { QuizPreview } from './quiz-preview'
 import { FullscreenQuizView } from './fullscreen-quiz-view'
 import { parseQuizText, serializeQuiz } from '@/lib/quiz-parser'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { NotesReaderBar, type NotesReaderBarRef } from './notes-reader-bar'
+import type { TTSSnapshot, TTSToken } from '@/lib/tts-processor'
+import { buildTTSSnapshotFromDoc } from '@/lib/tts-processor'
+import { getActiveSource, stopTTS } from '@/lib/tts-manager'
 
 // --- Extensions ---
 
@@ -247,6 +254,41 @@ const LinkedText = Mark.create({
   },
 })
 
+// TTSHighlight extension — highlights the current word being spoken
+const TTSHighlight = Extension.create({
+  name: 'ttsHighlight',
+  addStorage() {
+    return {
+      range: null as { start: number, end: number } | null,
+    }
+  },
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('ttsHighlight'),
+        props: {
+          decorations: (state) => {
+            const range = this.storage.range
+            if (!range || range.start >= range.end) return DecorationSet.empty
+            
+            const start = Math.max(0, Math.min(range.start, state.doc.content.size))
+            const end = Math.max(0, Math.min(range.end, state.doc.content.size))
+            
+            if (start >= end) return DecorationSet.empty
+
+            return DecorationSet.create(state.doc, [
+              Decoration.inline(start, end, {
+                class: 'tts-highlight-word',
+                style: 'background-color: rgba(250, 204, 21, 0.4); border-bottom: 2px solid #eab308; border-radius: 2px; transition: all 0.1s ease-in-out;',
+              }),
+            ])
+          },
+        },
+      }),
+    ]
+  },
+})
+
 
 // Define extensions outside component to prevent re-creation on render (fixes duplicate extension warnings)
 const EDITOR_EXTENSIONS = [
@@ -262,6 +304,7 @@ const EDITOR_EXTENSIONS = [
   BubbleMenuExtension,
   NoteBox as any,
   LinkedText,
+  TTSHighlight,
   TextAlign.configure({
     types: ['heading', 'paragraph'],
   }),
@@ -301,7 +344,10 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   const [mobileSheetLink, setMobileSheetLink] = useState<NotePdfLink | null>(null)
   const [mobileSheetText, setMobileSheetText] = useState<string>('')
   const [mobileSheetLoading, setMobileSheetLoading] = useState(false)
+  const [ttsSnapshot, setTtsSnapshot] = useState<TTSSnapshot | null>(null)
   const cachedPdfDoc = useRef<any>(null)
+  const ttsReaderRef = useRef<NotesReaderBarRef | null>(null)
+  const shouldAutoScrollTtsRef = useRef(false)
 
   const { changes } = useDraftStore()
   const convex = useConvex()
@@ -309,6 +355,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   const saveQuizMutation = useMutation(api.adminMutations.saveQuiz as any)
   const publishMutation = useMutation(api.adminMutations.publishNoteContent as any)
   const discardDraftMutation = useMutation(api.adminMutations.discardDraft as any)
+  const saveScriptMutation = useMutation((api as any).content.updateNoteScript)
 
   // Active highlight color for "paint bucket" mode — shows tick on selection
   const [selectedHighlightColor, setSelectedHighlightColor] = useState<string | null>(null)
@@ -527,7 +574,6 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   
   // UI State
   const [internalIsExpanded, setInternalIsExpanded] = useState(false)
-  const [forceLightMode, setForceLightMode] = useState(false)
   const isExpanded = isExpandedControlled ?? internalIsExpanded
 
   const handleToggleExpand = () => {
@@ -988,9 +1034,12 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   const [flashcardEditFront, setFlashcardEditFront] = useState('')
   const [flashcardEditBack, setFlashcardEditBack] = useState('')
   const [flashcardSaving, setFlashcardSaving] = useState(false)
+  const [scriptContent, setScriptContent] = useState('')
+  const [originalScriptContent, setOriginalScriptContent] = useState('')
+  const [saveScriptLoading, setSaveScriptLoading] = useState(false)
 
   // Right panel tab — controls what's shown in the right panel
-  const [jRightTab, setJRightTab] = useState<'judgment' | 'quiz' | 'flashcards'>('judgment')
+  const [jRightTab, setJRightTab] = useState<'judgment' | 'quiz' | 'flashcards' | 'script'>('judgment')
 
   // Title Editing State (for inline rename)
   const [isEditingTitle, setIsEditingTitle] = useState(false)
@@ -1083,6 +1132,8 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
     setFlashcards([])
     setFlashcardIdx(0)
     setFlashcardFlipped(false)
+    setScriptContent('')
+    setOriginalScriptContent('')
   }, [itemId])
 
   // Auto-hide connection viz after 5 seconds with a 0.5s fade
@@ -1254,27 +1305,39 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   function handleJLinkedTextClick(e: React.MouseEvent) {
     if (jConnectMode) return
     const span = (e.target as HTMLElement).closest('[data-link-id]') as HTMLElement | null
-    if (!span) return
-    const linkId = span.getAttribute('data-link-id')
-    if (!linkId) return
-    e.preventDefault()
-    e.stopPropagation()
 
-    // Mobile Bottom Sheet
-    if (window.innerWidth < 1024) {
-      const link = jLinks.find(l => l.link_id === linkId)
-      if (link) {
-        setMobileSheetLink(link)
-        extractTextForLink(link)
+    if (span) {
+      const linkId = span.getAttribute('data-link-id')
+      if (!linkId) return
+      e.preventDefault()
+      e.stopPropagation()
+
+      // Mobile Bottom Sheet
+      if (window.innerWidth < 1024) {
+        const link = jLinks.find(l => l.link_id === linkId)
+        if (link) {
+          setMobileSheetLink(link)
+          extractTextForLink(link)
+        }
+        return
       }
+
+      setJNavigateToLinkId(linkId)
+      setJHighlightedLinkId(linkId)
+      setJRightTab('judgment')
+      flashNoteSpan(linkId)
+      setTimeout(() => setJHighlightedLinkId(null), 2000)
       return
     }
 
-    setJNavigateToLinkId(linkId)
-    setJHighlightedLinkId(linkId)
-    setJRightTab('judgment')
-    flashNoteSpan(linkId)
-    setTimeout(() => setJHighlightedLinkId(null), 2000)
+    if (jNoteMode !== 'preview' || !editor || !ttsSnapshot) return
+
+    const posInfo = editor.view.posAtCoords({ left: e.clientX, top: e.clientY })
+    if (!posInfo) return
+    const pmPos = Math.max(1, Math.min(posInfo.pos, editor.state.doc.content.size))
+
+    ttsReaderRef.current?.playFromPmPosition(pmPos)
+    handleClickPosition(pmPos, { fromScrub: true })
   }
 
   function switchJNoteMode(mode: 'edit' | 'preview') {
@@ -1422,6 +1485,13 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
       }
     },
     onUpdate: ({ editor }) => {
+        const nextSnapshot = buildTTSSnapshotFromDoc(editor.state.doc)
+        setTtsSnapshot(nextSnapshot)
+
+        if (getActiveSource() === 'notes') {
+          stopTTS('notes')
+        }
+
         // LOCAL AUTOSAVE: Debounced save to local storage
         if (!itemId) return
         const html = editor.getHTML()
@@ -1484,7 +1554,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isExpanded, onExpandChange])
 
-  const [quizSplit, setQuizSplit] = useState(50) // Percentage width of left panel
+  const [quizSplit, setQuizSplit] = useState(50)
   const [isDragging, setIsDragging] = useState(false)
   const [previewFullscreen, setPreviewFullscreen] = useState(false)
 
@@ -1623,6 +1693,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
 
                 // Flashcard Data (from node_contents.flashcards_json)
                 flashcardsJson: liveRes.data?.flashcards_json || null,
+                scriptText: liveRes.data?.script_text || '',
             })
             console.log('EditorPanel: [Fetch] Complete - setFetchedData called for', itemId)
             
@@ -1689,6 +1760,8 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
         setPublishedContent('')
         setQuizContent('')
         setOriginalQuizContent('')
+        setScriptContent('')
+        setOriginalScriptContent('')
         return
     }
 
@@ -1755,7 +1828,10 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
         } catch { /* malformed JSON — ignore */ }
     }
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    const nextScriptText = typeof fetchedData.scriptText === 'string' ? fetchedData.scriptText : ''
+    setScriptContent(nextScriptText)
+    setOriginalScriptContent(nextScriptText)
+
   }, [editor, fetchedData, itemId, flashcards.length])
 
   // Save to Draft (Cache) - NOTE Only
@@ -1830,6 +1906,24 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
         setSaveQuizLoading(false)
     }
   }
+
+  const handleSaveScript = async () => {
+    if (!itemId) return
+    setSaveScriptLoading(true)
+    try {
+      await saveScriptMutation({
+        itemId,
+        script_text: scriptContent,
+      })
+      setOriginalScriptContent(scriptContent)
+      toast.success('Script saved')
+    } catch (e: any) {
+      toast.error(`Failed to save script: ${e?.message || 'Unknown error'}`)
+    } finally {
+      setSaveScriptLoading(false)
+    }
+  }
+
   // Clipboard Handler for Custom Keywords
   useEffect(() => {
       if (!editor) return
@@ -1838,7 +1932,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
           if (!editor.isFocused) return
 
           e.preventDefault()
-          
+
           const selection: Selection | null = window.getSelection()
           if (!selection || selection.rangeCount === 0) return
 
@@ -1856,14 +1950,111 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
               }
           }
       }
-      
+
       const viewDom = editor.view.dom
       viewDom.addEventListener('copy', handleCopy)
-      
+
       return () => {
           viewDom.removeEventListener('copy', handleCopy)
       }
   }, [editor])
+
+  useEffect(() => {
+    if (!editor) return
+    setTtsSnapshot(buildTTSSnapshotFromDoc(editor.state.doc))
+  }, [editor])
+
+  useEffect(() => {
+    if (!editor) return
+    editor.setEditable(jNoteMode === 'edit')
+  }, [editor, jNoteMode])
+
+  useEffect(() => {
+    return () => {
+      stopTTS('notes')
+    }
+  }, [])
+
+  useEffect(() => {
+    stopTTS('notes')
+  }, [itemId])
+
+  const scrollPmPosIntoView = useCallback((pmPos: number) => {
+    if (!editor) return
+
+    const findScrollContainer = () => {
+      const editorDom = editor.view.dom as HTMLElement
+      const notesScroll = editorDom.closest('.notes-editor-scroll') as HTMLElement | null
+      if (notesScroll) return notesScroll
+
+      let el: HTMLElement | null = editorDom.parentElement
+      while (el) {
+        const style = window.getComputedStyle(el)
+        const canScrollY = style.overflowY === 'auto' || style.overflowY === 'scroll'
+        if (canScrollY && el.scrollHeight > el.clientHeight) return el
+        el = el.parentElement
+      }
+      return null
+    }
+
+    const scrollEl = findScrollContainer()
+    if (!scrollEl) return
+
+    const rect = editor.view.coordsAtPos(pmPos)
+    const containerRect = scrollEl.getBoundingClientRect()
+    if (rect.top < containerRect.top || rect.bottom > containerRect.bottom) {
+      scrollEl.scrollTo({
+        top: scrollEl.scrollTop + (rect.top - containerRect.top) - containerRect.height / 2,
+        behavior: 'smooth',
+      })
+    }
+  }, [editor])
+
+  // TTS Handlers
+  const handleActiveTokenChange = useCallback((token: TTSToken | null) => {
+    if (!editor) return
+    const ttsStorage = editor.storage as unknown as { ttsHighlight: { range: { start: number, end: number } | null } }
+
+    if (token) {
+      const safeEnd = Math.max(token.pmFrom + 1, token.pmTo)
+      ttsStorage.ttsHighlight.range = { start: token.pmFrom, end: safeEnd }
+      editor.view.dispatch(editor.state.tr)
+
+      if (shouldAutoScrollTtsRef.current) {
+        scrollPmPosIntoView(token.pmFrom)
+        shouldAutoScrollTtsRef.current = false
+      }
+      return
+    }
+
+    ttsStorage.ttsHighlight.range = null
+    editor.view.dispatch(editor.state.tr)
+  }, [editor, scrollPmPosIntoView])
+
+  const handleClickPosition = useCallback((pmPos: number, meta?: { fromScrub?: boolean }) => {
+    if (!editor) return
+
+    const safePos = Math.max(0, Math.min(pmPos, editor.state.doc.content.size))
+    shouldAutoScrollTtsRef.current = !!meta?.fromScrub
+    editor.commands.setTextSelection(safePos)
+    editor.view.focus()
+
+    if (meta?.fromScrub) {
+      window.requestAnimationFrame(() => {
+        scrollPmPosIntoView(safePos)
+      })
+    }
+  }, [editor, scrollPmPosIntoView])
+
+  useEffect(() => {
+    return () => {
+      handleActiveTokenChange(null)
+    }
+  }, [handleActiveTokenChange])
+
+  useEffect(() => {
+    handleActiveTokenChange(null)
+  }, [handleActiveTokenChange, itemId])
 
 
   // Publish (Commit Cache to Live)
@@ -1959,208 +2150,198 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
         )}
     >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-card z-10 relative">
-            <Button
-                variant="ghost"
-                size="sm"
-                onClick={isExpanded ? () => onExpandChange?.(false) : onClose}
-                className={cn("mr-2", isExpanded && "ml-12")}
-            >
-                <ChevronLeft className="w-4 h-4 mr-1" />
-                Back
-            </Button>
+        <div className="border-b border-border bg-card/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/85 md:px-6">
+            <div className="flex flex-wrap items-center justify-between gap-2 xl:flex-nowrap">
+                <div className="flex min-w-0 items-center gap-2 overflow-hidden">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={isExpanded ? () => onExpandChange?.(false) : onClose}
+                        className={cn("h-9 rounded-lg px-3", isExpanded && "ml-12")}
+                    >
+                        <ChevronLeft className="mr-1 h-4 w-4" />
+                        Back
+                    </Button>
 
-            {/* Tag Case Notes mode toggle */}
-            <button
-                onClick={() => {
-                    if (hasPdfAttached) return;
-                    const next = !isTagCaseMode
-                    setIsTagCaseMode(next)
-                    if (next) setActiveTab('note')
-                    if (!next) setJudgmentMode(false)
-                }}
-                disabled={hasPdfAttached}
-                className={cn(
-                    "flex items-center gap-1.5 h-7 px-3 rounded-full text-xs font-semibold border transition-all mr-3",
-                    isTagCaseMode
-                        ? "bg-amber-100 dark:bg-amber-900/40 border-amber-400 dark:border-amber-600 text-amber-700 dark:text-amber-300"
-                        : "bg-muted border-border text-muted-foreground hover:text-foreground hover:border-amber-300",
-                    hasPdfAttached && "opacity-60 cursor-not-allowed"
-                )}
-                title={hasPdfAttached ? "Judgment PDF is attached, so Tag Case Notes mode is locked." : (isTagCaseMode ? "Switch back to full notes mode (show all tabs)" : "Switch to Tag Case Notes mode (Note + Judgment only)")}
-            >
-                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M8 2L10 6H14L11 9L12 13L8 11L4 13L5 9L2 6H6L8 2Z" strokeLinejoin="round" />
-                </svg>
-                {isTagCaseMode ? 'Tag Case Notes' : 'Note Mode'}
-            </button>
+                    <button
+                        onClick={() => {
+                            if (hasPdfAttached) return
+                            const next = !isTagCaseMode
+                            setIsTagCaseMode(next)
+                            if (next) setActiveTab('note')
+                            if (!next) setJudgmentMode(false)
+                        }}
+                        disabled={hasPdfAttached}
+                        className={cn(
+                            "inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-all",
+                            isTagCaseMode
+                                ? "border-amber-300 bg-amber-100 text-amber-700 dark:border-amber-600 dark:bg-amber-900/40 dark:text-amber-300"
+                                : "border-border bg-muted text-muted-foreground hover:border-amber-300 hover:text-foreground",
+                            hasPdfAttached && "cursor-not-allowed opacity-60"
+                        )}
+                        title={hasPdfAttached ? "Judgment PDF is attached, so Tag Case Notes mode is locked." : (isTagCaseMode ? "Switch back to full notes mode (show all tabs)" : "Switch to Tag Case Notes mode (Note + Judgment only)")}
+                    >
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <path d="M8 2L10 6H14L11 9L12 13L8 11L4 13L5 9L2 6H6L8 2Z" strokeLinejoin="round" />
+                        </svg>
+                        {isTagCaseMode ? 'Tag Case Notes' : 'Enable Tag Mode'}
+                    </button>
 
-            <div className="flex items-center gap-4">
-                <div>
-                     <div className="flex items-center gap-2 mb-1">
-                        <FileText className="w-5 h-5 text-blue-500" />
-                        {isEditingTitle ? (
-                            <input
-                                type="text"
-                                value={editedTitle}
-                                onChange={(e) => setEditedTitle(e.target.value)}
-                                onBlur={() => {
-                                    if (editedTitle.trim() && editedTitle !== title && onTitleChange) {
-                                        onTitleChange(editedTitle.trim())
-                                    }
-                                    setIsEditingTitle(false)
-                                }}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
+                    <div className="mx-1 hidden h-6 w-px bg-border md:block" />
+
+                    <div className="min-w-0">
+                        <div className="flex min-w-0 items-center gap-2">
+                            <FileText className="h-5 w-5 shrink-0 text-blue-500" />
+                            {isEditingTitle ? (
+                                <input
+                                    type="text"
+                                    value={editedTitle}
+                                    onChange={(e) => setEditedTitle(e.target.value)}
+                                    onBlur={() => {
                                         if (editedTitle.trim() && editedTitle !== title && onTitleChange) {
                                             onTitleChange(editedTitle.trim())
                                         }
                                         setIsEditingTitle(false)
-                                    } else if (e.key === 'Escape') {
+                                    }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            if (editedTitle.trim() && editedTitle !== title && onTitleChange) {
+                                                onTitleChange(editedTitle.trim())
+                                            }
+                                            setIsEditingTitle(false)
+                                        } else if (e.key === 'Escape') {
+                                            setEditedTitle(title)
+                                            setIsEditingTitle(false)
+                                        }
+                                    }}
+                                    className="min-w-[120px] border-b-2 border-blue-500 bg-transparent px-1 text-lg font-bold outline-none"
+                                    autoFocus
+                                />
+                            ) : (
+                                <h3
+                                    className="max-w-[min(34vw,460px)] truncate text-lg font-bold text-foreground transition-colors hover:text-blue-600"
+                                    onDoubleClick={() => {
                                         setEditedTitle(title)
-                                        setIsEditingTitle(false)
-                                    }
-                                }}
-                                className="font-bold text-lg bg-transparent border-b-2 border-blue-500 outline-none px-1 min-w-[100px]"
-                                autoFocus
-                            />
-                        ) : (
-                            <h3 
-                                className="font-bold text-lg cursor-pointer hover:text-blue-600 transition-colors"
-                                onDoubleClick={() => {
-                                    setEditedTitle(title)
-                                    setIsEditingTitle(true)
-                                }}
-                                title="Double-click to rename"
-                            >
-                                {title}
-                            </h3>
-                        )}
-                        {activeTab === 'note' && hasDraft && (
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium flex items-center gap-1 border border-amber-200">
-                                <AlertTriangle className="w-3 h-3" />
-                                Draft
-                            </span>
-                        )}
-                        {activeTab === 'quiz' && quizContent !== originalQuizContent && (
-                             <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium flex items-center gap-1 border border-purple-200">
-                                Unsaved Quiz
-                            </span>
-                        )}
+                                        setIsEditingTitle(true)
+                                    }}
+                                    title="Double-click to rename"
+                                >
+                                    {title}
+                                </h3>
+                            )}
+                            {activeTab === 'note' && hasDraft && (
+                                <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                                    <AlertTriangle className="h-3 w-3" />
+                                    Draft
+                                </span>
+                            )}
+                            {activeTab === 'quiz' && quizContent !== originalQuizContent && (
+                                <span className="inline-flex items-center gap-1 rounded-full border border-purple-200 bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">
+                                    Unsaved Quiz
+                                </span>
+                            )}
+                        </div>
                     </div>
                 </div>
 
-            
-            <div className="flex items-center gap-2">
-                {/* Light Mode Override Toggle */}
-                <Button
-                     size="sm"
-                     variant="ghost"
-                     onClick={() => setForceLightMode(!forceLightMode)}
-                     className={cn("text-muted-foreground mr-1", forceLightMode && "text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400")}
-                     title={forceLightMode ? "Disable Light Mode Override" : "Force Light Mode for Editor"}
-                >
-                    {forceLightMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-                </Button>
-
-                {/* Fullscreen Toggle */}
-                <Button
-                     size="sm"
-                     variant="ghost"
-                     onClick={handleToggleExpand}
-                     className="text-muted-foreground mr-2"
-                     title={isExpanded ? "Exit Full Screen" : "Fill Screen"}
-                >
-                    {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-                </Button>
-
-                {activeTab === 'note' ? (
-                    <>
-                        {/* Judgment Mode Toggle */}
-                        {itemId && isTagCaseMode && (
-                            <button
-                                onClick={() => setJudgmentMode(v => !v)}
-                                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors mr-1"
-                                style={judgmentMode ? {
-                                    background: 'rgba(201,146,42,0.18)',
-                                    border: '1px solid #c9922a',
-                                    color: '#c9922a',
-                                } : {
-                                    background: 'rgba(201,146,42,0.07)',
-                                    border: '1px solid rgba(201,146,42,0.3)',
-                                    color: '#c9922a',
-                                }}
-                                title={judgmentMode ? 'Exit judgment split view' : 'Open Notes + Judgment split view'}
-                            >
-                                {judgmentMode ? (
-                                    <Unlink2 className="w-4 h-4" />
-                                ) : (
-                                    <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                                        <rect x="1" y="2" width="6" height="12" rx="1" />
-                                        <rect x="9" y="2" width="6" height="12" rx="1" />
-                                    </svg>
-                                )}
-                                {judgmentMode ? 'Exit Judgment' : 'Judgment View'}
-                            </button>
-                        )}
-
-                        {/* Discard - Reverts to published content */}
+                <div className="flex shrink-0 items-center justify-end gap-1.5 overflow-x-auto whitespace-nowrap">
+                    <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">
                         <Button
-                            size="sm" 
-                            variant="ghost" 
-                            onClick={handleDiscardDraft}
-                            disabled={isStructureDraft || loading || (!hasDraft && editor?.getHTML() === initialContent)}
-                            className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                            title="Discard all changes and revert to published version"
+                            size="sm"
+                            variant="ghost"
+                            onClick={handleToggleExpand}
+                            className="h-8 w-8 p-0 text-muted-foreground"
+                            title={isExpanded ? "Exit Full Screen" : "Fill Screen"}
                         >
-                            <RotateCcw className="w-4 h-4 mr-2" />
-                            Discard
+                            {isExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
                         </Button>
-                        
-                        {/* Update Draft - Saves to cache table */}
-                        <Button 
-                            size="sm" 
-                            onClick={() => handleSaveDraft(false)} 
-                            disabled={!editor || saveLoading || isStructureDraft || (!hasDraft && editor?.getHTML() === initialContent)}
-                            variant="secondary"
-                            className="bg-amber-100 text-amber-900 hover:bg-amber-200 border border-amber-200"
-                            title="Save changes as draft (not visible to users)"
+                    </div>
+
+                    {activeTab === 'note' ? (
+                        <>
+                            {itemId && isTagCaseMode && (
+                                <button
+                                    onClick={() => setJudgmentMode((v) => !v)}
+                                    className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold transition-colors"
+                                    style={judgmentMode ? {
+                                        background: 'rgba(201,146,42,0.18)',
+                                        border: '1px solid #c9922a',
+                                        color: '#c9922a',
+                                    } : {
+                                        background: 'rgba(201,146,42,0.07)',
+                                        border: '1px solid rgba(201,146,42,0.3)',
+                                        color: '#c9922a',
+                                    }}
+                                    title={judgmentMode ? 'Exit judgment split view' : 'Open Notes + Judgment split view'}
+                                >
+                                    {judgmentMode ? (
+                                        <Unlink2 className="h-4 w-4" />
+                                    ) : (
+                                        <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                            <rect x="1" y="2" width="6" height="12" rx="1" />
+                                            <rect x="9" y="2" width="6" height="12" rx="1" />
+                                        </svg>
+                                    )}
+                                    {judgmentMode ? 'Exit Judgment' : 'Judgment View'}
+                                </button>
+                            )}
+
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={handleDiscardDraft}
+                                disabled={isStructureDraft || loading || (!hasDraft && editor?.getHTML() === initialContent)}
+                                className="h-9 rounded-lg px-3 text-red-500 hover:bg-red-50 hover:text-red-700"
+                                title="Discard all changes and revert to published version"
+                            >
+                                <RotateCcw className="mr-2 h-4 w-4" />
+                                Discard
+                            </Button>
+
+                            <Button
+                                size="sm"
+                                onClick={() => handleSaveDraft(false)}
+                                disabled={!editor || saveLoading || isStructureDraft || (!hasDraft && editor?.getHTML() === initialContent)}
+                                variant="secondary"
+                                className="h-9 rounded-lg border border-amber-200 bg-amber-100 px-3 text-amber-900 hover:bg-amber-200"
+                                title="Save changes as draft (not visible to users)"
+                            >
+                                {saveLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                                Save Draft
+                            </Button>
+
+                            <Button
+                                size="sm"
+                                onClick={handlePublish}
+                                disabled={publishLoading || isStructureDraft || !hasDraft || (initialContent === publishedContent)}
+                                className={cn(
+                                    "h-9 rounded-lg px-3",
+                                    !hasDraft || (initialContent === publishedContent)
+                                        ? "cursor-not-allowed bg-muted text-muted-foreground"
+                                        : "bg-green-600 text-white hover:bg-green-700"
+                                )}
+                                title={!hasDraft
+                                    ? "Save to draft first before publishing"
+                                    : (initialContent === publishedContent)
+                                        ? "Draft is same as published content"
+                                        : "Publish content (visible to users)"}
+                            >
+                                {publishLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
+                                Publish
+                            </Button>
+                        </>
+                    ) : (
+                        <Button
+                            size="sm"
+                            onClick={handleSaveQuiz}
+                            disabled={saveQuizLoading || quizContent === originalQuizContent}
+                            className="h-9 rounded-lg bg-purple-600 px-3 text-white hover:bg-purple-700"
                         >
-                            {saveLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-                            Save Draft
+                            {saveQuizLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                            Save Quiz
                         </Button>
-                        
-                        {/* Publish - Only enabled when there's a saved draft different from published */}
-                        <Button 
-                            size="sm" 
-                            onClick={handlePublish} 
-                            disabled={publishLoading || isStructureDraft || !hasDraft || (initialContent === publishedContent)}
-                            className={!hasDraft || (initialContent === publishedContent) 
-                                ? "bg-muted text-muted-foreground cursor-not-allowed" 
-                                : "bg-green-600 hover:bg-green-700 text-white"}
-                            title={!hasDraft 
-                                ? "Save to draft first before publishing" 
-                                : (initialContent === publishedContent) 
-                                    ? "Draft is same as published content" 
-                                    : "Publish content (visible to users)"}
-                        >
-                            {publishLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-2" />}
-                            Publish
-                        </Button>
-                    </>
-                ) : (
-                    // Quiz Actions
-                    <Button
-                        size="sm"
-                        onClick={handleSaveQuiz}
-                        disabled={saveQuizLoading || quizContent === originalQuizContent}
-                        className="bg-purple-600 hover:bg-purple-700 text-white"
-                    >
-                        {saveQuizLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-                         Save Quiz
-                    </Button>
-                )}
-            </div>
+                    )}
+                </div>
             </div>
         </div>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
@@ -2278,56 +2459,93 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                             )}
                             style={{ '--split-pct': `${jSplitPct}%` } as any}
                         >
-                            {/* Row 1: Edit mode toolbar | Preview mode = simple Notes header */}
-                            {jNoteMode === 'preview' ? (
-                                /* ── Preview header bar — Notes is always left, always visible ── */
-                                <div className="flex items-center border-b border-border bg-card shrink-0 px-3 py-1.5 gap-2">
-                                    <StickyNote className="w-3.5 h-3.5 text-primary" />
-                                    <span className="text-xs font-bold text-foreground">Notes</span>
-                                    <div className="flex-1" />
-                                    <button
-                                        onClick={() => { switchJNoteMode('edit') }}
-                                        className="px-2 py-1 rounded text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-                                    >Edit</button>
-                                </div>
-                            ) : (
-                                /* ── Edit mode: Connect + zoom + Edit/Preview toggle ── */
-                                <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-card shrink-0">
-                                    <Button
-                                        size="sm"
-                                        variant={jConnectMode ? 'default' : 'outline'}
-                                        onClick={jConnectMode ? () => exitJConnect() : startJConnect}
-                                        className={cn(
-                                            'h-7 text-xs shrink-0',
-                                            jConnectMode
-                                                ? 'bg-amber-500 hover:bg-amber-600 border-0 text-white'
-                                                : 'border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30'
+                            {/* Row 1: Toolbar - shown in both edit and preview modes */}
+                            <div className="sticky top-0 z-50 px-4 py-3 mb-4 border-b bg-card transition-all duration-300">
+                                <div className="flex items-center justify-between w-full">
+                                    {/* Left side */}
+                                    <div className="flex items-center gap-2">
+                                        {jNoteMode === 'preview' ? (
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => switchJNoteMode('edit')}
+                                                className="rounded-full h-8 px-3 text-xs transition-all duration-300"
+                                            >
+                                                <ArrowLeft className="w-3.5 h-3.5 mr-1" />
+                                                <span className="hidden sm:inline">Edit</span>
+                                            </Button>
+                                        ) : (
+                                            <Button
+                                                size="sm"
+                                                variant={jConnectMode ? 'default' : 'outline'}
+                                                onClick={jConnectMode ? () => exitJConnect() : startJConnect}
+                                                className={cn(
+                                                    'h-7 text-xs shrink-0',
+                                                    jConnectMode
+                                                        ? 'bg-amber-500 hover:bg-amber-600 border-0 text-white'
+                                                        : 'border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30'
+                                                )}
+                                            >
+                                                <Link2 className="w-3.5 h-3.5 mr-1" />
+                                                {jConnectMode ? 'Cancel' : 'Connect'}
+                                            </Button>
                                         )}
-                                    >
-                                        <Link2 className="w-3.5 h-3.5 mr-1" />
-                                        {jConnectMode ? 'Cancel' : 'Connect'}
-                                    </Button>
-                                    {jConnectMode && jConnectStep === 'note' && (
-                                        <span className="text-xs text-amber-700 dark:text-amber-400 truncate">Select text then release</span>
-                                    )}
-                                    <div className="flex-1" />
-                                    <div className="flex items-center gap-px bg-muted/60 p-0.5 rounded-md border border-border mr-2 shrink-0">
-                                        <button onClick={() => setJNoteZoom(p => Math.max(0.5, p - 0.1))} className="w-6 h-6 flex items-center justify-center text-xs hover:bg-background rounded-sm text-muted-foreground hover:text-foreground" title="Zoom Out">-</button>
-                                        <button onClick={() => setJNoteZoom(1.0)} className="px-2 h-6 flex items-center justify-center text-[10px] hover:bg-background rounded-sm font-mono text-muted-foreground hover:text-foreground" title="Reset Zoom">{Math.round(jNoteZoom * 100)}%</button>
-                                        <button onClick={() => setJNoteZoom(p => Math.min(3.0, p + 0.1))} className="w-6 h-6 flex items-center justify-center text-xs hover:bg-background rounded-sm text-muted-foreground hover:text-foreground" title="Zoom In">+</button>
+
+                                        <div className="w-px h-5 bg-border" />
+
+                                        <span className="text-sm font-medium max-w-[300px] truncate px-2">
+                                            Notes
+                                        </span>
                                     </div>
-                                    <div className="flex gap-px p-0.5 rounded-md bg-muted shrink-0">
-                                        <button
-                                            onClick={() => switchJNoteMode('edit')}
-                                            className="px-2 py-0.5 rounded text-xs font-medium transition-all bg-background text-foreground shadow-sm"
-                                        >Edit</button>
-                                        <button
-                                            onClick={() => switchJNoteMode('preview')}
-                                            className="px-2 py-0.5 rounded text-xs font-medium transition-all text-muted-foreground hover:text-foreground"
-                                        >Preview</button>
+
+                                    {/* Right side */}
+                                    <div className="flex items-center gap-2">
+                                        {/* Zoom Controls */}
+                                        <div className="flex items-center gap-px bg-muted/60 p-0.5 rounded-md border border-border">
+                                            <button onClick={() => setJNoteZoom(p => Math.max(0.5, p - 0.1))} className="w-6 h-6 flex items-center justify-center text-xs hover:bg-background rounded-sm text-muted-foreground hover:text-foreground" title="Zoom Out">-</button>
+                                            <button onClick={() => setJNoteZoom(1.0)} className="px-2 h-6 flex items-center justify-center text-[10px] hover:bg-background rounded-sm font-mono text-muted-foreground hover:text-foreground" title="Reset Zoom">{Math.round(jNoteZoom * 100)}%</button>
+                                            <button onClick={() => setJNoteZoom(p => Math.min(3.0, p + 0.1))} className="w-6 h-6 flex items-center justify-center text-xs hover:bg-background rounded-sm text-muted-foreground hover:text-foreground" title="Zoom In">+</button>
+                                        </div>
+
+                                        {/* Edit/Preview Toggle */}
+                                        <div className="flex gap-px p-0.5 rounded-md bg-muted shrink-0">
+                                            <button
+                                                onClick={() => switchJNoteMode('edit')}
+                                                className={cn(
+                                                    "px-2 py-0.5 rounded text-xs font-medium transition-all",
+                                                    jNoteMode === 'edit' ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                                                )}
+                                            >Edit</button>
+                                            <button
+                                                onClick={() => switchJNoteMode('preview')}
+                                                className={cn(
+                                                    "px-2 py-0.5 rounded text-xs font-medium transition-all",
+                                                    jNoteMode === 'preview' ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                                                )}
+                                            >Preview</button>
+                                        </div>
+
+                                        {/* Download Button */}
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="rounded-full h-8 px-3 text-xs transition-all duration-300"
+                                        >
+                                            <Download className="w-3.5 h-3.5" />
+                                        </Button>
+
+                                        {/* Focus Button */}
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => setPreviewFullscreen(!previewFullscreen)}
+                                            className="rounded-full h-8 px-3 text-xs transition-all duration-300"
+                                        >
+                                            {previewFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                                        </Button>
                                     </div>
                                 </div>
-                            )}
+                            </div>
 
                             {/* Row 2: Full formatting toolbar (same as normal notes) */}
                             {jNoteMode === 'edit' && editor && (
@@ -2344,39 +2562,26 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                     </div>
                                 )}
 
-                                {/* Editor (always mounted, hidden in preview) */}
+                                {/* Notes surface (editable in Edit, read-only in Preview) */}
                                 <div
                                     className="judgment-note-editor notes-editor-scroll flex-1 overflow-y-auto"
-                                    style={{ display: jNoteMode === 'edit' ? undefined : 'none' }}
-                                    onMouseUp={handleJNoteMouseUp}
+                                    onMouseUp={jNoteMode === 'edit' ? handleJNoteMouseUp : undefined}
                                     onClick={handleJLinkedTextClick}
                                     onScroll={() => {
                                         if (jConnectionViz) setJRedrawTick(t => t + 1)
                                         recalcBadgePositions()
                                     }}
                                 >
-                                    <div className={cn("relative", forceLightMode && "force-light")} style={{ zoom: jNoteZoom }}>
+                                    <div
+                                        className={cn(
+                                            "relative",
+                                            jNoteMode === 'preview' && "note-prose-render prose prose-lg max-w-none"
+                                        )}
+                                        style={{ zoom: jNoteZoom }}
+                                    >
                                         <EditorContent editor={editor} />
                                     </div>
                                 </div>
-
-                                {/* Preview — notes always visible in left panel */}
-                                {jNoteMode === 'preview' && (
-                                    <div
-                                        className="notes-editor-scroll flex-1 overflow-y-auto"
-                                        onScroll={() => {
-                                            if (jConnectionViz) setJRedrawTick(t => t + 1)
-                                            recalcBadgePositions()
-                                        }}
-                                    >
-                                        <div
-                                            className="note-prose-render prose prose-lg max-w-none"
-                                            style={{ zoom: jNoteZoom }}
-                                            onClick={handleJLinkedTextClick}
-                                            dangerouslySetInnerHTML={{ __html: jPreviewHtml }}
-                                        />
-                                    </div>
-                                )}
 
                                 {/* Citation badge overlay — rendered as React elements, completely outside TipTap DOM */}
                                 {judgmentMode && badgePositions.length > 0 && (
@@ -2398,7 +2603,16 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                         ))}
                                     </div>
                                 )}
-                            </div>
+
+                                {/* TTS Reader Bar — at bottom of notes editor */}
+                                {editor && (
+                                    <NotesReaderBar
+                                        ref={ttsReaderRef}
+                                        snapshot={ttsSnapshot}
+                                        onActiveTokenChange={handleActiveTokenChange}
+                                        onSeekPmPosition={handleClickPosition}
+                                    />
+                                )}                            </div>
                         </div>
 
                         {/* Divider */}
@@ -2423,6 +2637,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                     { id: 'judgment'   as const, icon: FileText,      label: 'Judgment' },
                                     { id: 'quiz'       as const, icon: MessageSquare, label: 'Quiz' },
                                     { id: 'flashcards' as const, icon: CreditCard,    label: 'Flashcards' },
+                                    { id: 'script'     as const, icon: Edit2,         label: 'Script' },
                                 ]).map(({ id, icon: Icon, label }) => (
                                     <button
                                         key={id}
@@ -2438,6 +2653,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                         {label}
                                         {id === 'quiz' && quizContent && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
                                         {id === 'flashcards' && flashcards.length > 0 && <span className="text-[10px] opacity-70">{flashcards.length}</span>}
+                                        {id === 'script' && scriptContent !== originalScriptContent && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
                                     </button>
                                 ))}
                             </div>
@@ -2733,6 +2949,33 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                     )}
                                 </div>
                             )}
+
+                            {jRightTab === 'script' && (
+                                <div className="flex-1 overflow-hidden flex flex-col bg-background">
+                                    <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
+                                        <div>
+                                            <p className="text-sm font-semibold text-foreground">Video Script (Admin)</p>
+                                            <p className="text-xs text-muted-foreground">Internal script notes only. Not shown on user site.</p>
+                                        </div>
+                                        <button
+                                            onClick={handleSaveScript}
+                                            disabled={saveScriptLoading || scriptContent === originalScriptContent}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                        >
+                                            {saveScriptLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                                            {saveScriptLoading ? 'Saving...' : 'Save Script'}
+                                        </button>
+                                    </div>
+                                    <div className="flex-1 p-4 overflow-auto">
+                                        <Textarea
+                                            value={scriptContent}
+                                            onChange={(e) => setScriptContent(e.target.value)}
+                                            placeholder="Write admin-only video script here..."
+                                            className="h-full min-h-[320px] resize-none text-sm leading-6"
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* SVG connection curve overlay */}
@@ -2794,6 +3037,59 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                             <Loader2 className="w-8 h-8 animate-spin text-primary" />
                         </div>
                     )}
+
+                    {/* Notes Top Toolbar (visible in notes-only mode) */}
+                    <div className="sticky top-0 z-50 px-4 py-3 border-b bg-card transition-all duration-300">
+                        <div className="flex items-center justify-between w-full">
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium max-w-[300px] truncate px-2">
+                                    Notes
+                                </span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-px bg-muted/60 p-0.5 rounded-md border border-border">
+                                    <button onClick={() => setJNoteZoom(p => Math.max(0.5, p - 0.1))} className="w-6 h-6 flex items-center justify-center text-xs hover:bg-background rounded-sm text-muted-foreground hover:text-foreground" title="Zoom Out">-</button>
+                                    <button onClick={() => setJNoteZoom(1.0)} className="px-2 h-6 flex items-center justify-center text-[10px] hover:bg-background rounded-sm font-mono text-muted-foreground hover:text-foreground" title="Reset Zoom">{Math.round(jNoteZoom * 100)}%</button>
+                                    <button onClick={() => setJNoteZoom(p => Math.min(3.0, p + 0.1))} className="w-6 h-6 flex items-center justify-center text-xs hover:bg-background rounded-sm text-muted-foreground hover:text-foreground" title="Zoom In">+</button>
+                                </div>
+
+                                <div className="flex gap-px p-0.5 rounded-md bg-muted shrink-0">
+                                    <button
+                                        onClick={() => switchJNoteMode('edit')}
+                                        className={cn(
+                                            "px-2 py-0.5 rounded text-xs font-medium transition-all",
+                                            jNoteMode === 'edit' ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                                        )}
+                                    >Edit</button>
+                                    <button
+                                        onClick={() => switchJNoteMode('preview')}
+                                        className={cn(
+                                            "px-2 py-0.5 rounded text-xs font-medium transition-all",
+                                            jNoteMode === 'preview' ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                                        )}
+                                    >Preview</button>
+                                </div>
+
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="rounded-full h-8 px-3 text-xs transition-all duration-300"
+                                >
+                                    <Download className="w-3.5 h-3.5" />
+                                </Button>
+
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setPreviewFullscreen(!previewFullscreen)}
+                                    className="rounded-full h-8 px-3 text-xs transition-all duration-300"
+                                >
+                                    {previewFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
                     
                     {/* Fixed Toolbar */}
                     {editor && (
@@ -3048,8 +3344,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                             className={cn(
                                 // WRAPPER: Transparent, just layout positioning. No borders/backgrounds here.
                                 "transition-all duration-300 h-fit shrink-0 w-full flex justify-center relative",
-                                isExpanded ? "min-h-[900px] my-8" : "min-h-[600px]",
-                                forceLightMode && "force-light"
+                                isExpanded ? "min-h-[900px] my-8" : "min-h-[600px]"
                             )}
                         >
                                 <div className="relative mx-auto w-full max-w-3xl bg-card shadow-md rounded-sm border border-border/40 min-h-[600px]">
@@ -3065,8 +3360,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                 {/* Quiz Editor (Left) */}
                 <div 
                     className={cn(
-                        "border-r bg-muted flex flex-col shrink-0",
-                        forceLightMode && "force-light"
+                        "border-r bg-muted flex flex-col shrink-0"
                     )}
                     style={{ width: `${quizSplit}%` }}
                 >
@@ -3114,8 +3408,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                 
                 {/* Quiz Preview (Right) */}
                 <div className={cn(
-                    "flex flex-col bg-card flex-1 overflow-hidden",
-                    forceLightMode && "force-light"
+                    "flex flex-col bg-card flex-1 overflow-hidden"
                 )}>
                      <div className="px-4 py-3 border-b bg-card text-xs font-medium text-muted-foreground uppercase tracking-widest flex items-center justify-between">
                         <span>Live Preview</span>

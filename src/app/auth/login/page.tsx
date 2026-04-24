@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2, ShieldAlert, Lock, Mail, Eye, EyeOff } from 'lucide-react'
+import { Loader2, ShieldAlert, Lock, Mail, Eye, EyeOff, FlaskConical } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
 export default function LoginPage() {
@@ -10,6 +10,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [devModeLoading, setDevModeLoading] = useState(false)
+  const [showDevMode, setShowDevMode] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
   const { signIn, isAuthenticated, isLoading } = useAuth()
@@ -19,6 +21,16 @@ export default function LoginPage() {
       router.replace('/admin/dashboard')
     }
   }, [isAuthenticated, isLoading, router])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const host = window.location.hostname
+    setShowDevMode(
+      process.env.NODE_ENV === 'development' &&
+      (host === 'localhost' || host === '127.0.0.1' || host === '::1')
+    )
+  }, [])
 
   // While auth state resolves, show a blank loading screen
   if (isLoading) {
@@ -63,6 +75,35 @@ export default function LoginPage() {
       setError(err.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleDevModeLogin = async () => {
+    setDevModeLoading(true)
+    setError(null)
+
+    const devEmail = process.env.NEXT_PUBLIC_DEV_ADMIN_EMAIL?.trim() || 'dev-admin@gavelogy.local'
+    const devPassword = process.env.NEXT_PUBLIC_DEV_ADMIN_PASSWORD?.trim() || 'gavelogy-dev-admin'
+
+    try {
+      const result = await signIn(devEmail, devPassword)
+      if (!result.success) {
+        throw new Error(result.error || 'Dev mode sign-in failed.')
+      }
+
+      const promoteRes = await fetch('/api/auth/dev-admin', { method: 'POST' })
+      const payload = await promoteRes.json().catch(() => null)
+
+      if (!promoteRes.ok) {
+        throw new Error(payload?.error || 'Failed to enable local dev admin access.')
+      }
+
+      router.replace('/admin/dashboard')
+      router.refresh()
+    } catch (err: any) {
+      setError(err.message || 'Dev mode login failed.')
+    } finally {
+      setDevModeLoading(false)
     }
   }
 
@@ -164,6 +205,39 @@ export default function LoginPage() {
               <br />
               Regular users will be denied access.
             </p>
+
+            {showDevMode && (
+              <div className="mt-5 rounded-xl border border-amber-500/20 bg-amber-500/8 p-4">
+                <div className="flex items-start gap-3">
+                  <FlaskConical className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-amber-100">Local Dev Mode</p>
+                    <p className="mt-1 text-xs leading-5 text-amber-200/80">
+                      Creates or signs in a localhost-only dev user and grants admin access automatically for testing.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleDevModeLogin}
+                  disabled={devModeLoading || loading}
+                  className="mt-4 w-full rounded-lg border border-amber-400/30 bg-amber-400/12 px-4 py-3 text-sm font-semibold text-amber-50 transition-all hover:bg-amber-400/18 disabled:cursor-not-allowed disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {devModeLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Entering Dev Mode...
+                    </>
+                  ) : (
+                    <>
+                      <FlaskConical className="w-4 h-4" />
+                      Enter Dev Mode
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

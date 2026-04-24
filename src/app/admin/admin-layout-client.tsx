@@ -17,7 +17,8 @@ import {
   Settings,
   Newspaper,
   ClipboardList,
-  Users
+  Users,
+  UserCircle
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { RealtimeProvider } from '@/lib/realtime/realtime-provider'
@@ -80,6 +81,11 @@ const sidebarItems = [
     title: 'Users',
     href: '/admin/users',
     icon: Users
+  },
+  {
+    title: 'Revenue',
+    href: '/admin/creators',
+    icon: UserCircle
   },
 ]
 

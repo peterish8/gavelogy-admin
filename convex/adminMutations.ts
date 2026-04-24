@@ -15,7 +15,7 @@ function getTableName(entityType: string): "courses" | "subjects" | "structure_i
 
 // Whitelisted fields per table — prevents extra fields from causing schema errors
 const TABLE_ALLOWED_FIELDS: Record<string, string[]> = {
-  courses: ['name', 'description', 'price', 'is_active', 'is_free', 'icon'],
+  courses: ['name', 'description', 'price', 'is_active', 'is_free', 'icon', 'created_by', 'created_at', 'updated_at'],
   subjects: ['name', 'description', 'courseId', 'order_index'],
   structure_items: ['courseId', 'parentId', 'title', 'description', 'item_type', 'order_index', 'icon', 'is_active', 'pdf_url'],
   daily_news: ['date', 'title', 'content_custom', 'content_html', 'summary', 'keywords', 'category', 'source_paper', 'status', 'display_order', 'subject', 'topic', 'court', 'priority', 'exam_probability', 'capsule', 'facts', 'provisions', 'holdings', 'doctrine', 'mcqs', 'source_url', 'read_seconds', 'exam_rank'],
@@ -36,14 +36,14 @@ export const createEntity = mutation({
   },
   handler: async (ctx, { entityType, data }) => {
     await requireAdmin(ctx);
-    
+
     const table = getTableName(entityType);
-    
-    // In Convex, _id is auto-generated. Usually we omit id on create unless needed. 
-    // If the frontend passed an 'id' property, we should remove it before inserting, 
+
+    // In Convex, _id is auto-generated. Usually we omit id on create unless needed.
+    // If the frontend passed an 'id' property, we should remove it before inserting,
     // unless there's a reason to keep it (which we can't for _id).
     const { id, ...insertData } = data;
-    
+
     // Normalize relational IDs to prevent validation errors
     if (insertData.courseId && typeof insertData.courseId === 'string') {
       const normalized = ctx.db.normalizeId("courses", insertData.courseId);
@@ -81,7 +81,23 @@ export const createEntity = mutation({
       if (!normalized) throw new Error(`Invalid quiz_id: ${insertData.quiz_id} for entity type ${entityType}`);
       insertData.quiz_id = normalized;
     }
-    
+
+    // Capture creator and timestamps for courses
+    if (entityType === 'course' && table === 'courses') {
+      const identity = await ctx.auth.getUserIdentity();
+      if (identity) {
+        const user = await ctx.db.query("users")
+          .withIndex("by_token", q => q.eq("tokenIdentifier", identity.tokenIdentifier))
+          .unique();
+        if (user) {
+          insertData.created_by = user._id;
+        }
+      }
+      const now = new Date().toISOString();
+      insertData.created_at = now;
+      insertData.updated_at = now;
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return await ctx.db.insert(table, pickAllowedFields(insertData, table) as any);
   },
@@ -95,20 +111,25 @@ export const updateEntity = mutation({
   },
   handler: async (ctx, { entityType, id, data }) => {
     await requireAdmin(ctx);
-    
+
     const table = getTableName(entityType);
-    
+
     // Remove id from patch data if it exists
     const { id: _, ...patchData } = data;
-    
+
     // Normalize id as Id type
     const convexId = ctx.db.normalizeId(table, id);
     if (!convexId) throw new Error(`Failed to update ${entityType}: Invalid ID "${id}" for table "${table}"`);
-    
+
     // Validate that the entity exists
     const existing = await ctx.db.get(convexId);
     if (!existing) throw new Error(`Failed to update ${entityType}: Entity not found with ID "${id}"`);
-    
+
+    // Set updated_at for courses
+    if (entityType === 'course' && table === 'courses') {
+      patchData.updated_at = new Date().toISOString();
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await ctx.db.patch(convexId, pickAllowedFields(patchData, table) as any);
   },
@@ -328,12 +349,27 @@ export const importCourseStructure = mutation({
     }
 
     // 1. Create the course
+    const identity = await ctx.auth.getUserIdentity();
+    let createdBy: any = undefined;
+    if (identity) {
+      const user = await ctx.db.query("users")
+        .withIndex("by_token", q => q.eq("tokenIdentifier", identity.tokenIdentifier))
+        .unique();
+      if (user) {
+        createdBy = user._id;
+      }
+    }
+    const now = new Date().toISOString();
+
     const courseId = await ctx.db.insert("courses", {
       name: courseName,
       description: courseDescription || '',
       is_active: false,
       is_free: false,
       price: 0,
+      created_by: createdBy,
+      created_at: now,
+      updated_at: now,
     });
 
     // 2. Process items in topological order (BFS: parents before children).
@@ -406,12 +442,28 @@ export const createCrashCourse = mutation({
     if (validSourceCourses.length === 0) {
       throw new Error("At least one valid source course is required");
     }
-    
+
+    // Capture creator
+    const identity = await ctx.auth.getUserIdentity();
+    let createdBy: any = undefined;
+    if (identity) {
+      const user = await ctx.db.query("users")
+        .withIndex("by_token", q => q.eq("tokenIdentifier", identity.tokenIdentifier))
+        .unique();
+      if (user) {
+        createdBy = user._id;
+      }
+    }
+    const now = new Date().toISOString();
+
     const newCourseId = await ctx.db.insert("courses", {
       name,
       description,
       is_active: false,
-      price: 0
+      price: 0,
+      created_by: createdBy,
+      created_at: now,
+      updated_at: now,
     });
 
     // We fetch structures for all selected courses
