@@ -2013,7 +2013,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   // TTS Handlers
   const handleActiveTokenChange = useCallback((token: TTSToken | null) => {
     if (!editor) return
-    const ttsStorage = editor.storage as { ttsHighlight: { range: { start: number, end: number } | null } }
+    const ttsStorage = editor.storage as unknown as { ttsHighlight: { range: { start: number, end: number } | null } }
 
     if (token) {
       const safeEnd = Math.max(token.pmFrom + 1, token.pmTo)
