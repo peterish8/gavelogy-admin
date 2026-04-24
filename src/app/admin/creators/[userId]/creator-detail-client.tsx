@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useHeaderStore } from '@/lib/stores/header-store'
-import { useQuery } from '@convex/_generated/react'
+import { useQuery } from 'convex/react'
 import { api } from '@convex/_generated/api'
 
 interface Creator {
@@ -68,7 +68,7 @@ export default function CreatorDetailClient({ initialData, initialRevenue }: Cre
           startDate: startDate || undefined,
           endDate: endDate || undefined,
         }
-      : undefined
+      : 'skip'
   )
 
   const currentRevenueData = filteredRevenue || initialRevenue
@@ -203,7 +203,7 @@ export default function CreatorDetailClient({ initialData, initialRevenue }: Cre
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
-                                {currentRevenueData.revenueByMonth.map((item) => (
+                                {currentRevenueData.revenueByMonth.map((item: { month: string; amount: number }) => (
                                   <TableRow key={item.month}>
                                     <TableCell>{item.month}</TableCell>
                                     <TableCell className="text-right font-semibold text-green-600">
@@ -233,8 +233,8 @@ export default function CreatorDetailClient({ initialData, initialRevenue }: Cre
                               </TableHeader>
                               <TableBody>
                                 {currentRevenueData.revenueByCourse
-                                  .sort((a, b) => b.amount - a.amount)
-                                  .map((item) => (
+                                  .sort((a: { amount: number }, b: { amount: number }) => b.amount - a.amount)
+                                  .map((item: { courseId: string; courseName: string; amount: number }) => (
                                     <TableRow key={item.courseId}>
                                       <TableCell>{item.courseName}</TableCell>
                                       <TableCell className="text-right font-semibold text-green-600">
