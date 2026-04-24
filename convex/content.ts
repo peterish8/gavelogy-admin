@@ -115,6 +115,7 @@ export const getJudgmentReaderData = query({
       pdf_url: item.pdf_url ?? null,
       content_html: note?.content_html ?? "",
       flashcards_json: note?.flashcards_json ?? null,
+      script_text: note?.script_text ?? "",
       links,
       quizzes: quizzesWithQuestions,
     };
@@ -138,6 +139,27 @@ export const updateNoteContent = mutation({
       await ctx.db.patch(existing._id, { content_html });
     } else {
       await ctx.db.insert("note_contents", { itemId, content_html });
+    }
+  },
+});
+
+export const updateNoteScript = mutation({
+  args: { itemId: v.id("structure_items"), script_text: v.string() },
+  handler: async (ctx, { itemId, script_text }) => {
+    await requireAdmin(ctx);
+
+    const item = await ctx.db.get(itemId);
+    if (!item) throw new Error(`Structure item not found: ${itemId}`);
+
+    const existing = await ctx.db
+      .query("note_contents")
+      .withIndex("by_item", (q) => q.eq("itemId", itemId))
+      .first();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, { script_text });
+    } else {
+      await ctx.db.insert("note_contents", { itemId, script_text });
     }
   },
 });

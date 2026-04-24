@@ -447,7 +447,7 @@
   .note-black  { background: rgba(0, 0, 0, 0.88);      border-color: #374151; color: #ffffff; }
   .note-cyan   { background: #EBF8F8;  border-color: #2A9EA8; color: #1A2C2D; }
   .note-pink   { background: #FBF0F6;  border-color: #C45B8E; color: #2D1A24; }
-  .note-yellow { background: #FDF5E4;  border-color: #C9922A; color: #2D1B0E; }
+  .note-yellow { background: #FFF7CC;  border-color: #E6C96A; color: #3A3016; }
 
   /* Light Theme: Explicitly set bold text to dark inside note boxes (defeats prose overrides) */
   .note-box strong, .note-box b,
@@ -534,7 +534,7 @@
   .dark .note-blue   { background: rgba(59, 130, 246, 0.12);  border-color: #3B82F6; }
   .dark .note-green  { background: rgba(34, 197, 94, 0.12);   border-color: #22C55E; }
   .dark .note-red    { background: rgba(239, 68, 68, 0.12);   border-color: #EF4444; }
-  .dark .note-amber  { background: rgba(245, 158, 11, 0.12);  border-color: #F59E0B; }
+  .dark .note-amber  { background: rgba(255, 244, 179, 0.35); border-color: #EBCB67; color: #1F2937 !important; }
   .dark .note-purple { background: rgba(168, 85, 247, 0.12);  border-color: #A855F7; }
   .dark .note-violet { background: rgba(124, 58, 237, 0.12);  border-color: #7C3AED; }
   .dark .note-slate  { background: rgba(51, 65, 85, 0.35);    border-color: #475569; color: #FFFFFF !important; }
@@ -542,7 +542,13 @@
   .dark .note-black  { background: rgba(24, 24, 24, 0.7);     border-color: #333333; color: #FFFFFF !important; }
   .dark .note-cyan   { background: rgba(6, 182, 212, 0.12);   border-color: #06B6D4; }
   .dark .note-pink   { background: rgba(236, 72, 153, 0.12);  border-color: #EC4899; }
-  .dark .note-yellow { background: rgba(245, 158, 11, 0.12);  border-color: #F59E0B; }
+  .dark .note-yellow { background: rgba(71, 85, 105, 0.30); border-color: #64748B; color: #F8FAFC !important; }
+
+  .dark .note-amber strong,
+  .dark .note-amber b,
+  .dark .prose .note-amber strong {
+    color: #111827 !important;
+  }
 
   /* Force Light Note Overrides (prevent html.dark from overriding force-light) */
   :root .force-light .note-box,
@@ -568,7 +574,7 @@
   :root .force-light .note-black  { background: rgba(0, 0, 0, 0.88) !important;      border-color: #374151 !important; color: #ffffff !important; }
   :root .force-light .note-cyan   { background: #EBF8F8 !important;  border-color: #2A9EA8 !important; color: #1A2C2D !important; }
   :root .force-light .note-pink   { background: #FBF0F6 !important;  border-color: #C45B8E !important; color: #2D1A24 !important; }
-  :root .force-light .note-yellow { background: #FDF5E4 !important;  border-color: #C9922A !important; color: #2D1B0E !important; }
+  :root .force-light .note-yellow { background: #FFF7CC !important;  border-color: #E6C96A !important; color: #3A3016 !important; }
 
   /* Force Light: Override dark mode bold text back to dark */
   :root .force-light .note-box strong,
@@ -683,7 +689,7 @@
   }
 
   .dark .notes-editor-scroll {
-    background: #0F172A;
+    background: #1f1f1f;
   }
 
   /* ── EDIT (ProseMirror) + PREVIEW (note-prose-render): identical student-site typography ── */
@@ -813,7 +819,7 @@
   /* Dark mode — switch to light text */
   .dark .notes-editor-scroll .ProseMirror,
   .dark .notes-editor-scroll .note-prose-render {
-    color: #e2e8f0 !important;
+    color: #f5f5f5 !important;
   }
 
   .dark .notes-editor-scroll .ProseMirror p,
@@ -829,6 +835,60 @@
   .dark .notes-editor-scroll .note-prose-render h3,
   .dark .notes-editor-scroll .note-prose-render strong {
     color: inherit !important;
+  }
+
+  /* Notes dark mode: keep palette strictly neutral (gray + white) */
+  .dark .notes-editor-scroll .ProseMirror ul li::before,
+  .dark .notes-editor-scroll .note-prose-render ul li::before {
+    background: #f3f4f6 !important;
+  }
+
+  .dark .notes-editor-scroll .note-box { background: rgba(120, 120, 120, 0.14) !important; border-color: #5b5b5b !important; color: #f8fafc !important; }
+  .dark .notes-editor-scroll .note-blue { background: rgba(59, 130, 246, 0.14) !important; border-color: #3b82f6 !important; color: #f8fafc !important; }
+  .dark .notes-editor-scroll .note-green { background: rgba(34, 197, 94, 0.14) !important; border-color: #22c55e !important; color: #f8fafc !important; }
+  .dark .notes-editor-scroll .note-red { background: rgba(239, 68, 68, 0.14) !important; border-color: #ef4444 !important; color: #f8fafc !important; }
+  .dark .notes-editor-scroll .note-amber { background: rgba(255, 244, 179, 0.34) !important; border-color: #ebcb67 !important; color: #111827 !important; }
+  .dark .notes-editor-scroll .note-purple { background: rgba(168, 85, 247, 0.14) !important; border-color: #a855f7 !important; color: #f8fafc !important; }
+  .dark .notes-editor-scroll .note-violet { background: rgba(124, 58, 237, 0.14) !important; border-color: #7c3aed !important; color: #f8fafc !important; }
+  .dark .notes-editor-scroll .note-cyan { background: rgba(6, 182, 212, 0.14) !important; border-color: #06b6d4 !important; color: #f8fafc !important; }
+  .dark .notes-editor-scroll .note-pink { background: rgba(236, 72, 153, 0.14) !important; border-color: #ec4899 !important; color: #f8fafc !important; }
+  .dark .notes-editor-scroll .note-yellow { background: rgba(71, 85, 105, 0.30) !important; border-color: #64748b !important; color: #f8fafc !important; }
+  .dark .notes-editor-scroll .note-slate { background: rgba(71, 85, 105, 0.30) !important; border-color: #64748b !important; color: #f8fafc !important; }
+  .dark .notes-editor-scroll .note-dark { background: rgba(55, 55, 55, 0.55) !important; border-color: #4a4a4a !important; color: #ffffff !important; }
+  .dark .notes-editor-scroll .note-black { background: rgba(24, 24, 24, 0.78) !important; border-color: #4a4a4a !important; color: #ffffff !important; }
+
+  .dark .notes-editor-scroll .note-box strong,
+  .dark .notes-editor-scroll .note-box b,
+  .dark .notes-editor-scroll .note-blue strong,
+  .dark .notes-editor-scroll .note-blue b,
+  .dark .notes-editor-scroll .note-green strong,
+  .dark .notes-editor-scroll .note-green b,
+  .dark .notes-editor-scroll .note-red strong,
+  .dark .notes-editor-scroll .note-red b,
+  .dark .notes-editor-scroll .note-amber strong,
+  .dark .notes-editor-scroll .note-amber b,
+  .dark .notes-editor-scroll .note-purple strong,
+  .dark .notes-editor-scroll .note-purple b,
+  .dark .notes-editor-scroll .note-violet strong,
+  .dark .notes-editor-scroll .note-violet b,
+  .dark .notes-editor-scroll .note-cyan strong,
+  .dark .notes-editor-scroll .note-cyan b,
+  .dark .notes-editor-scroll .note-pink strong,
+  .dark .notes-editor-scroll .note-pink b,
+  .dark .notes-editor-scroll .note-yellow strong,
+  .dark .notes-editor-scroll .note-yellow b,
+  .dark .notes-editor-scroll .note-slate strong,
+  .dark .notes-editor-scroll .note-slate b,
+  .dark .notes-editor-scroll .note-dark strong,
+  .dark .notes-editor-scroll .note-dark b,
+  .dark .notes-editor-scroll .note-black strong,
+  .dark .notes-editor-scroll .note-black b {
+    color: #ffffff !important;
+  }
+
+  .dark .notes-editor-scroll .note-amber strong,
+  .dark .notes-editor-scroll .note-amber b {
+    color: #111827 !important;
   }
 
   /* Horizontal Rule Styling */

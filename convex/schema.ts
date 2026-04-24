@@ -72,7 +72,11 @@ export default defineSchema({
     is_active: v.optional(v.boolean()),
     is_free: v.optional(v.boolean()),
     icon: v.optional(v.string()),
-  }),
+    created_by: v.optional(v.id("users")),
+    created_at: v.optional(v.string()),
+    updated_at: v.optional(v.string()),
+  })
+    .index("by_creator", ["created_by"]),
 
   subjects: defineTable({
     name: v.string(),
@@ -123,6 +127,7 @@ export default defineSchema({
     itemId: v.optional(v.id("structure_items")),
     content_html: v.optional(v.string()),
     flashcards_json: v.optional(v.string()),
+    script_text: v.optional(v.string()),
   })
     .index("by_item", ["itemId"])
     .searchIndex("search_content", { searchField: "content_html" }),

@@ -1,14 +1,15 @@
 import Link from 'next/link'
-import { FileText, Folder, BookOpen, Sparkles, Plus, ArrowRight } from 'lucide-react'
+import { FileText, Folder, BookOpen, Sparkles, Plus, ArrowRight, IndianRupee, Receipt } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { fetchQuery } from 'convex/nextjs'
 import { api } from '@convex/_generated/api'
 
 // Dashboard server page that fetches high-level content counts and recent courses for the admin home screen.
 export default async function DashboardPage() {
-  const [counts, recentCourses] = await Promise.all([
+  const [counts, recentCourses, revenue] = await Promise.all([
     fetchQuery(api.admin.getDashboardCounts, {}),
     fetchQuery(api.admin.getRecentCourses, { limit: 5 }),
+    fetchQuery(api.adminQueries.getRevenueDashboard, {}),
   ])
 
   // Normalizes the stat cards so the grid can be rendered from one data structure.
@@ -44,6 +45,38 @@ export default async function DashboardPage() {
       href: '/admin/studio',
       color: 'text-purple-500',
       bgColor: 'bg-purple-500/10'
+    },
+    {
+      label: 'Total Revenue',
+      value: `₹${(revenue.totalRevenue || 0).toLocaleString('en-IN')}`,
+      icon: IndianRupee,
+      href: '/admin/creators',
+      color: 'text-green-600',
+      bgColor: 'bg-green-500/10'
+    },
+    {
+      label: 'This Month Revenue',
+      value: `₹${(revenue.currentMonthRevenue || 0).toLocaleString('en-IN')}`,
+      icon: Sparkles,
+      href: '/admin/creators',
+      color: 'text-amber-600',
+      bgColor: 'bg-amber-500/10'
+    },
+    {
+      label: 'Successful Orders',
+      value: revenue.totalOrders || 0,
+      icon: Receipt,
+      href: '/admin/creators',
+      color: 'text-cyan-600',
+      bgColor: 'bg-cyan-500/10'
+    },
+    {
+      label: 'Avg Order Value',
+      value: `₹${Math.round(revenue.averageOrderValue || 0).toLocaleString('en-IN')}`,
+      icon: ArrowRight,
+      href: '/admin/creators',
+      color: 'text-rose-600',
+      bgColor: 'bg-rose-500/10'
     },
   ]
 

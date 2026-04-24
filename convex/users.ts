@@ -86,3 +86,21 @@ export const updateProfile = mutation({
     await ctx.db.patch(user._id, patch);
   },
 });
+
+export const enableDevAdmin = mutation({
+  args: {},
+  handler: async (ctx) => {
+    if (process.env.NODE_ENV !== "development") {
+      throw new Error("Dev admin mode is only available in development.");
+    }
+
+    const user = await requireAuth(ctx);
+
+    if (user.is_admin) {
+      return { success: true, alreadyAdmin: true };
+    }
+
+    await ctx.db.patch(user._id, { is_admin: true });
+    return { success: true, alreadyAdmin: false };
+  },
+});

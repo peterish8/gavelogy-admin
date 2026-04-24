@@ -84,6 +84,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
 
   // Fullscreen State (Lifted for URL persistence)
   const [fullscreen, setFullscreen] = useState<boolean>(() => searchParams.get('fullscreen') === 'true')
+  const [showSidebarStatsExpanded, setShowSidebarStatsExpanded] = useState(false)
   
   // Resizable Sidebar State
   const [sidebarWidth, setSidebarWidth] = useState(320)
@@ -709,46 +710,89 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
             >
             <div className="p-4 border-b border-border bg-muted/50 flex flex-col gap-4 shrink-0 transition-all">
                
-                {/* Cute Stats Dashboard */}
-                <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-card border border-blue-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
-                        <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
-                             <Folder className="w-4 h-4" />
-                        </div>
-                        <div className="flex flex-col">
-                            <span className="text-sm font-bold text-foreground/90">{stats.folders}</span>
-                            <span className="text-[10px] uppercase font-bold text-muted-foreground/70 tracking-wider">Modules</span>
-                        </div>
-                    </div>
-                    
-                    <div className="bg-card border border-purple-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
-                        <div className="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center text-purple-600">
-                             <FileText className="w-4 h-4" />
-                        </div>
-                        <div className="flex flex-col">
-                            <span className="text-sm font-bold text-foreground/90">{stats.files}</span>
-                            <span className="text-[10px] uppercase font-bold text-muted-foreground/70 tracking-wider">Files</span>
-                        </div>
-                    </div>
+                {/* Compact stats row (expandable to detailed cards) */}
+                <div className="space-y-2">
+                    <div className="bg-card border border-border rounded-xl px-2.5 py-2 shadow-sm overflow-hidden">
+                        {!showSidebarStatsExpanded ? (
+                            <div className="flex items-center gap-2 text-[11px] font-bold text-muted-foreground/85">
+                                <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-1 rounded-lg bg-blue-50/70 text-blue-700" title={`${stats.folders} Modules`}>
+                                    <Folder className="h-3.5 w-3.5 shrink-0" />
+                                    <span className="tabular-nums">{stats.folders}</span>
+                                </span>
+                                <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-1 rounded-lg bg-purple-50/70 text-purple-700" title={`${stats.files} Files`}>
+                                    <FileText className="h-3.5 w-3.5 shrink-0" />
+                                    <span className="tabular-nums">{stats.files}</span>
+                                </span>
+                                <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-1 rounded-lg bg-amber-50/70 text-amber-700" title={`${stats.notes} Content`}>
+                                    <StickyNote className="h-3.5 w-3.5 shrink-0" />
+                                    <span className="tabular-nums">{stats.notes}</span>
+                                </span>
+                                <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-1 rounded-lg bg-rose-50/70 text-rose-700" title={`${stats.quizzes} Quizzes`}>
+                                    <HelpCircle className="h-3.5 w-3.5 shrink-0" />
+                                    <span className="tabular-nums">{stats.quizzes}</span>
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowSidebarStatsExpanded(true)}
+                                    className="ml-auto inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                    title="Expand stats"
+                                >
+                                    <ChevronRight className="w-4 h-4" />
+                                </button>
+                            </div>
+                        ) : (
+                        <div className="grid grid-cols-2 gap-2">
+                            <div className="bg-card border border-blue-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
+                                <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
+                                     <Folder className="w-4 h-4" />
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-sm font-bold text-foreground/90">{stats.folders}</span>
+                                    <span className="text-[10px] uppercase font-bold text-muted-foreground/70 tracking-wider">Modules</span>
+                                </div>
+                            </div>
+                            
+                            <div className="bg-card border border-purple-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
+                                <div className="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center text-purple-600">
+                                     <FileText className="w-4 h-4" />
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-sm font-bold text-foreground/90">{stats.files}</span>
+                                    <span className="text-[10px] uppercase font-bold text-muted-foreground/70 tracking-wider">Files</span>
+                                </div>
+                            </div>
 
-                    <div className="bg-card border border-amber-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
-                        <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600">
-                             <StickyNote className="w-4 h-4" />
-                        </div>
-                        <div className="flex flex-col">
-                            <span className="text-sm font-bold text-foreground/90">{stats.notes}</span>
-                            <span className="text-[10px] uppercase font-bold text-muted-foreground/70 tracking-wider">Content</span>
-                        </div>
-                    </div>
+                            <div className="bg-card border border-amber-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
+                                <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600">
+                                     <StickyNote className="w-4 h-4" />
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-sm font-bold text-foreground/90">{stats.notes}</span>
+                                    <span className="text-[10px] uppercase font-bold text-muted-foreground/70 tracking-wider">Content</span>
+                                </div>
+                            </div>
 
-                    <div className="bg-card border border-rose-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
-                        <div className="w-8 h-8 rounded-lg bg-rose-50 flex items-center justify-center text-rose-600">
-                             <HelpCircle className="w-4 h-4" />
+                            <div className="bg-card border border-rose-100 p-2.5 rounded-xl flex items-center gap-3 shadow-sm">
+                                <div className="w-8 h-8 rounded-lg bg-rose-50 flex items-center justify-center text-rose-600">
+                                     <HelpCircle className="w-4 h-4" />
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-sm font-bold text-foreground/90">{stats.quizzes}</span>
+                                    <span className="text-[10px] uppercase font-bold text-muted-foreground/70 tracking-wider">Quizzes</span>
+                                </div>
+                            </div>
+                            <div className="col-span-2 flex justify-end">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowSidebarStatsExpanded(false)}
+                                    className="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                    title="Collapse stats"
+                                >
+                                    <ChevronRight className="w-4 h-4 -rotate-90" />
+                                </button>
+                            </div>
                         </div>
-                        <div className="flex flex-col">
-                            <span className="text-sm font-bold text-foreground/90">{stats.quizzes}</span>
-                            <span className="text-[10px] uppercase font-bold text-muted-foreground/70 tracking-wider">Quizzes</span>
-                        </div>
+                        )}
                     </div>
                 </div>
                 

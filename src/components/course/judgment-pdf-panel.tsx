@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
   Upload, Loader2, FileText, Trash2, Trash, Link2, Unlink, ChevronDown, Sparkles, Copy,
-  Search, X, ChevronUp,
+  Search, X, ChevronUp, RotateCcw, Moon,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -138,6 +138,15 @@ export function JudgmentPdfPanel({
 
   const [aiSummarizing, setAiSummarizing] = useState(false)
   const [zoomLevel, setZoomLevel] = useState(1.0)
+  
+  // Pinch-to-zoom state
+  const initialPinchDistance = useRef<number>(0)
+  const initialZoomLevel = useRef<number>(1.0)
+  
+  // Drag-to-zoom state
+  const dragZoomStartY = useRef<number>(0)
+  const dragZoomStartLevel = useRef<number>(1.0)
+  const isDragZooming = useRef<boolean>(false)
 
   const [dragState, setDragState] = useState<{
     pageNum: number
@@ -152,6 +161,8 @@ export function JudgmentPdfPanel({
   const [colorPickerOpenId, setColorPickerOpenId] = useState<string | null>(null)
   const [readingProgress, setReadingProgress] = useState(0)
   const [showConnections, setShowConnections] = useState(true)
+  const autoFitAppliedRef = useRef(false)
+  const [pdfDarkMode, setPdfDarkMode] = useState(false)
 
   // ── Search state ───────────────────────────────────────────────────
   const [searchOpen, setSearchOpen] = useState(false)
@@ -190,6 +201,7 @@ export function JudgmentPdfPanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [redrawTick])
 
+
   // ── Ctrl+Scroll Zoom Handler ──
   useEffect(() => {
     const el = pdfScrollRef.current
@@ -198,12 +210,99 @@ export function JudgmentPdfPanel({
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault()
         const zoomDelta = -(e.deltaY * 0.002) // Smooth scaling based on wheel delta magnitude
-        setZoomLevel(prev => Math.min(Math.max(0.5, prev + zoomDelta), 3.0))
+        setZoomLevel(prev => Math.min(Math.max(0.25, prev + zoomDelta), 3.0))
       }
     }
     el.addEventListener('wheel', handleWheel, { passive: false })
     return () => el.removeEventListener('wheel', handleWheel)
   }, [])
+
+  // ── Pinch-to-Zoom Handler (Touch & Trackpad) ──
+  useEffect(() => {
+    const el = pdfScrollRef.current
+    if (!el) return
+
+    const getDistance = (touches: TouchList): number => {
+      if (touches.length < 2) return 0
+      const dx = touches[0].clientX - touches[1].clientX
+      const dy = touches[0].clientY - touches[1].clientY
+      return Math.sqrt(dx * dx + dy * dy)
+    }
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        initialPinchDistance.current = getDistance(e.touches)
+        initialZoomLevel.current = zoomLevel
+      }
+    }
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && initialPinchDistance.current > 0) {
+        e.preventDefault()
+        const currentDistance = getDistance(e.touches)
+        const scaleRatio = currentDistance / initialPinchDistance.current
+        const newZoom = Math.min(Math.max(0.25, initialZoomLevel.current * scaleRatio), 3.0)
+        setZoomLevel(newZoom)
+      }
+    }
+
+    const handleTouchEnd = () => {
+      initialPinchDistance.current = 0
+    }
+
+    el.addEventListener('touchstart', handleTouchStart, { passive: true })
+    el.addEventListener('touchmove', handleTouchMove, { passive: false })
+    el.addEventListener('touchend', handleTouchEnd, { passive: true })
+
+    return () => {
+      el.removeEventListener('touchstart', handleTouchStart)
+      el.removeEventListener('touchmove', handleTouchMove)
+      el.removeEventListener('touchend', handleTouchEnd)
+    }
+  }, [zoomLevel])
+
+  // ── Drag-to-Zoom Handler (Alt+drag vertically) ──
+  useEffect(() => {
+    const el = pdfScrollRef.current
+    if (!el) return
+
+    const handleMouseDown = (e: MouseEvent) => {
+      // Only enable drag-to-zoom when not in tagging mode
+      if (allowTagging) return
+      // Require Alt key to avoid conflict with scrolling
+      if (e.button === 0 && e.altKey) {
+        e.preventDefault()
+        dragZoomStartY.current = e.clientY
+        dragZoomStartLevel.current = zoomLevel
+        isDragZooming.current = true
+        el.style.cursor = 'ns-resize'
+      }
+    }
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragZooming.current) return
+      e.preventDefault()
+      const deltaY = dragZoomStartY.current - e.clientY
+      const zoomFactor = 1 + (deltaY / 150) // 150px drag = 2x zoom
+      const newZoom = Math.min(Math.max(0.25, dragZoomStartLevel.current * zoomFactor), 3.0)
+      setZoomLevel(newZoom)
+    }
+
+    const handleMouseUp = () => {
+      isDragZooming.current = false
+      el.style.cursor = ''
+    }
+
+    el.addEventListener('mousedown', handleMouseDown)
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      el.removeEventListener('mousedown', handleMouseDown)
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [allowTagging, zoomLevel])
 
   // ── Load PDF URL on mount ──────────────────────────────────────────
   useEffect(() => {
@@ -212,6 +311,20 @@ export function JudgmentPdfPanel({
     }
     loadPdfUrl()
   }, [itemId])
+
+  const applyInitialFitToWidth = useCallback(() => {
+    if (autoFitAppliedRef.current) return
+    const container = pdfScrollRef.current
+    if (!container || numPages === 0) return
+
+    const firstPageWidth = pageStates[1]?.width ?? (612 * SCALE)
+    const availableWidth = Math.max(0, container.clientWidth - 32)
+    if (firstPageWidth <= 0 || availableWidth <= 0) return
+
+    const fitZoom = Math.min(1, Math.max(0.25, availableWidth / firstPageWidth))
+    setZoomLevel(fitZoom)
+    autoFitAppliedRef.current = true
+  }, [numPages, pageStates, SCALE])
 
   // ── Connection viz computation ─────────────────────────────────────
   // Calculates the viewport coordinates of both the note span and the PDF region overlay so a line can be drawn between them.
@@ -291,50 +404,31 @@ export function JudgmentPdfPanel({
       // Destination resolution error - non-critical
     }
 
-    if (pageIndex === -1) {
-      return
-    }
+    if (pageIndex === -1) return
 
     const targetPage = pageIndex + 1
 
-    // Ensure the target page is rendered before scrolling
+    // Force render the target page if not already rendered
     if (!pageStates[targetPage]?.rendered) {
+      await renderPage(targetPage)
+    }
+
+    // Wait a bit for the render to complete, then scroll
+    setTimeout(() => {
       const pageEl = pageContainerRefs.current.get(targetPage)
-      if (!pageEl) {
-        return
+      if (!pageEl) return
+
+      try {
+        if (pdfScrollRef.current) {
+          const containerRect = pdfScrollRef.current.getBoundingClientRect()
+          const pageRect = pageEl.getBoundingClientRect()
+          const targetTop = pdfScrollRef.current.scrollTop + (pageRect.top - containerRect.top)
+          pdfScrollRef.current.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' })
+        }
+      } catch (e) {
+        // Navigation error - non-critical
       }
-      // Trigger render by accessing the element
-      const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting) {
-            setTimeout(() => {
-              const pageEl = pageContainerRefs.current.get(targetPage)
-              if (pageEl) {
-                pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' })
-              }
-            }, 100)
-            observer.disconnect()
-          }
-        })
-      })
-      observer.observe(pageEl)
-      return
-    }
-
-    const pageEl = pageContainerRefs.current.get(targetPage)
-    if (!pageEl) {
-      return
-    }
-
-    const offsetTop = pageEl.offsetTop
-
-    try {
-      if (pdfScrollRef.current) {
-        pdfScrollRef.current.scrollTo({ top: offsetTop, behavior: 'smooth' })
-      }
-    } catch (e) {
-      // Navigation error - non-critical
-    }
+    }, 200)
   }
 
   // Triggers a rAF-deferred recomputation of the active connection line coordinates.
@@ -561,6 +655,18 @@ export function JudgmentPdfPanel({
   }, [signedUrl])
 
   useEffect(() => {
+    autoFitAppliedRef.current = false
+  }, [signedUrl])
+
+  useEffect(() => {
+    if (!signedUrl || pdfLoading || pdfError) return
+    const frame = window.requestAnimationFrame(() => {
+      applyInitialFitToWidth()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [signedUrl, pdfLoading, pdfError, numPages, pageStates, applyInitialFitToWidth])
+
+  useEffect(() => {
     if (numPages === 0) return
     const observer = new IntersectionObserver(
       entries => entries.forEach(entry => {
@@ -569,7 +675,7 @@ export function JudgmentPdfPanel({
           if (n > 0) renderPage(n)
         }
       }),
-      { rootMargin: '200px' }
+      { rootMargin: '1000px' }
     )
     for (let i = 1; i <= numPages; i++) {
       const el = pageContainerRefs.current.get(i)
@@ -1119,10 +1225,22 @@ export function JudgmentPdfPanel({
 
           {signedUrl && (
             <div className="flex items-center gap-px bg-muted/60 p-0.5 rounded-md border border-border">
-              <button onClick={() => setZoomLevel(p => Math.max(0.5, p - 0.1))} className="w-6 h-6 flex items-center justify-center text-xs hover:bg-background rounded-sm text-muted-foreground hover:text-foreground" title="Zoom Out">-</button>
+              <button onClick={() => setZoomLevel(p => Math.max(0.25, p - 0.1))} className="w-6 h-6 flex items-center justify-center text-xs hover:bg-background rounded-sm text-muted-foreground hover:text-foreground" title="Zoom Out">-</button>
               <button onClick={() => setZoomLevel(1.0)} className="px-2 h-6 flex items-center justify-center text-[10px] hover:bg-background rounded-sm font-mono text-muted-foreground hover:text-foreground" title="Reset Zoom">{Math.round(zoomLevel * 100)}%</button>
               <button onClick={() => setZoomLevel(p => Math.min(3.0, p + 0.1))} className="w-6 h-6 flex items-center justify-center text-xs hover:bg-background rounded-sm text-muted-foreground hover:text-foreground" title="Zoom In">+</button>
             </div>
+          )}
+          {signedUrl && (
+            <Button
+              size="sm"
+              variant={pdfDarkMode ? "secondary" : "ghost"}
+              onClick={() => setPdfDarkMode(v => !v)}
+              className="h-7 px-2 text-xs"
+              title={pdfDarkMode ? "Disable PDF dark mode" : "Enable PDF dark mode"}
+            >
+              <Moon className="w-3.5 h-3.5 mr-1" />
+              PDF Dark
+            </Button>
           )}
           {signedUrl && (
             <Button
@@ -1208,7 +1326,8 @@ export function JudgmentPdfPanel({
           requestAnimationFrame(() => redrawConnection())
         }}
       >
-        {!signedUrl ? (
+
+          {!signedUrl ? (
           <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-6">
             <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
               <FileText className="w-8 h-8 text-muted-foreground/40" />
@@ -1224,8 +1343,8 @@ export function JudgmentPdfPanel({
           </div>
         ) : pdfLoading ? (
           <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-primary" />
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
               <p className="text-sm text-muted-foreground">Loading PDF…</p>
             </div>
           </div>
@@ -1257,19 +1376,24 @@ export function JudgmentPdfPanel({
                       ref={el => { if (el) pageContainerRefs.current.set(pageNum, el) }}
                       data-page-num={pageNum}
                       className="relative rounded-sm overflow-hidden border border-border shadow-sm bg-white"
-                      style={{ width: canvasW, height: canvasH }}
+                      style={{ width: canvasW, height: canvasH, background: pdfDarkMode ? '#3a3a3a' : '#ffffff' }}
                     >
-                      <canvas
-                        ref={el => { if (el) canvasRefs.current.set(pageNum, el) }}
-                        style={{ display: 'block' }}
-                      />
-
-                      {/* Text layer for connect mode selection */}
                       <div
-                        ref={el => { if (el) textLayerContainerRefs.current.set(pageNum, el) }}
-                        className={cn('pdfTextLayer', inPdfSelectStep && !connectPdfCapture && 'selectable')}
-                        onMouseUp={e => handlePdfTextMouseUp(e, pageNum)}
-                      />
+                        className="absolute inset-0"
+                        style={pdfDarkMode ? { filter: 'invert(1) hue-rotate(180deg) contrast(0.78) brightness(1.06)' } : undefined}
+                      >
+                        <canvas
+                          ref={el => { if (el) canvasRefs.current.set(pageNum, el) }}
+                          style={{ display: 'block' }}
+                        />
+
+                        {/* Text layer for connect mode selection */}
+                        <div
+                          ref={el => { if (el) textLayerContainerRefs.current.set(pageNum, el) }}
+                          className={cn('pdfTextLayer', inPdfSelectStep && !connectPdfCapture && 'selectable')}
+                          onMouseUp={e => handlePdfTextMouseUp(e, pageNum)}
+                        />
+                      </div>
 
                       {/* Existing link overlays */}
                       {ps?.rendered && pageLinks.map(link => {
@@ -1329,12 +1453,13 @@ export function JudgmentPdfPanel({
                           className="absolute group"
                           style={{
                             left: ann.left, top: ann.top,
-                            width: Math.max(ann.width, 8), height: Math.max(ann.height, 8),
-                            zIndex: 6,
+                            width: Math.max(ann.width, 20), height: Math.max(ann.height, 20),
+                            zIndex: 15,
                             cursor: connectMode ? 'default' : 'pointer',
                             pointerEvents: connectMode ? 'none' : 'all',
                           }}
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation()
                             if (connectMode) return
                             if (ann.url) window.open(ann.url, '_blank', 'noopener,noreferrer')
                             else if (ann.dest) navigateToDest(ann.dest)
@@ -1523,10 +1648,10 @@ function SimpleTagModal({
   onSave,
   onClose,
 }: {
-  region: Region
-  existingLinkIds: string[]
-  onSave: (linkId: string, label: string, color: string) => Promise<void>
-  onClose: () => void
+  region: Region | null;
+  existingLinkIds: string[];
+  onSave: (linkId: string, label: string, color: string) => Promise<void>;
+  onClose: () => void;
 }) {
   const [linkId, setLinkId] = useState('')
   const [label, setLabel] = useState('')
@@ -1548,11 +1673,13 @@ function SimpleTagModal({
     }
   }
 
+  if (!region) return null
+
   return (
     <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/40" onClick={onClose}>
       <div className="bg-card border border-border rounded-xl shadow-xl p-6 w-80 max-w-[90vw]" onClick={e => e.stopPropagation()}>
         <h3 className="font-bold text-sm mb-1">Tag PDF Region</h3>
-        <p className="text-xs text-muted-foreground mb-4">Page {region.page}</p>
+        <p className="text-xs text-muted-foreground mb-4">Page {region?.page}</p>
         <div className="space-y-3">
           <div>
             <label className="text-xs font-medium block mb-1">Link ID</label>
