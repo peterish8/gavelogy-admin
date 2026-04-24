@@ -10,7 +10,7 @@ export default async function CreatorDetailPage({ params }: { params: { userId: 
     if (!creatorData.creator) {
       notFound()
     }
-    return <CreatorDetailClient initialData={creatorData} initialRevenue={revenueData} />
+    return <CreatorDetailClient initialData={creatorData as any} initialRevenue={revenueData} />
   } catch (error) {
     notFound()
   }
