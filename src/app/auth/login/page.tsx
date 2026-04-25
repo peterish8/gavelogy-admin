@@ -14,13 +14,21 @@ export default function LoginPage() {
   const [showDevMode, setShowDevMode] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
-  const { signIn, isAuthenticated, isLoading } = useAuth()
+  const { signIn, signOut, isAuthenticated, isLoading, isAdmin } = useAuth()
 
   useEffect(() => {
-    if (!isLoading && isAuthenticated) {
+    if (isLoading) return
+
+    if (isAuthenticated && isAdmin === true) {
       router.replace('/admin/dashboard')
+      return
     }
-  }, [isAuthenticated, isLoading, router])
+
+    if (isAuthenticated && isAdmin === false) {
+      setError('Access denied. This account does not have admin privileges.')
+      void signOut()
+    }
+  }, [isAuthenticated, isAdmin, isLoading, router, signOut])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -41,8 +49,8 @@ export default function LoginPage() {
     )
   }
 
-  // Already authenticated, don't flash login UI
-  if (isAuthenticated) return null
+  // Already authenticated as admin, don't flash login UI
+  if (isAuthenticated && isAdmin === true) return null
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -55,7 +63,6 @@ export default function LoginPage() {
         throw new Error(result.error || 'Login failed. Please try again.')
       }
 
-      router.replace('/admin/dashboard')
       router.refresh()
     } catch (err: any) {
       setError(err.message)
