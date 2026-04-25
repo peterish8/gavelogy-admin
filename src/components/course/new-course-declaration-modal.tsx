@@ -318,9 +318,14 @@ Example Output Format:
 Here are the topics to convert into this JSON structure:
 [PASTE YOUR TOPICS HERE]`
                   navigator.clipboard.writeText(prompt)
-                  toast.success('Prompt copied to clipboard!')
-                  setCopied(true)
-                  setTimeout(() => setCopied(false), 2000)
+                    .then(() => {
+                      toast.success('Prompt copied to clipboard!')
+                      setCopied(true)
+                      setTimeout(() => setCopied(false), 2000)
+                    })
+                    .catch(() => {
+                      toast.error('Clipboard permission denied. Copy manually.')
+                    })
                 }}
               >
                 {copied ? (

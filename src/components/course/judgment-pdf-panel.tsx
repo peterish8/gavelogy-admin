@@ -1,24 +1,29 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { insertLink, deleteLink, updateLinkLabel, clearItemPdfUrl } from '@/actions/judgment/links'
+import { insertLink, deleteLink, updateLinkLabel, updateLinkRegion, clearItemPdfUrl, fetchLinksForItem } from '@/actions/judgment/links'
 import type { NotePdfLink } from '@/actions/judgment/links'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
   Upload, Loader2, FileText, Trash2, Trash, Link2, Unlink, ChevronDown, Sparkles, Copy,
-  Search, X, ChevronUp, RotateCcw, Moon,
+  Search, X, ChevronUp, Moon, RefreshCw, Square,
 } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { toast } from 'sonner'
 import { findTextInPageData } from '@/lib/pdf-search'
-import { JUDGMENT_SYSTEM_PROMPT } from '@/lib/prompts'
 import { 
   LINK_COLORS, 
   DEFAULT_LINK_COLOR, 
@@ -33,6 +38,8 @@ const getScale = (quality: 'low' | 'medium' | 'high' = 'high') => {
   const baseScale = quality === 'low' ? 1.0 : quality === 'medium' ? 1.5 : 2.0
   return Math.min(baseScale * dpr, 3.0) // Cap at 3.0 to prevent excessive memory usage
 }
+
+const CONNECTION_HIGHLIGHT_MS = 3000
 
 interface Region {
   page: number
@@ -61,6 +68,14 @@ interface ConnectPdfCapture {
   text: string
 }
 
+interface LinkRegion {
+  pdf_page: number
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 interface JudgmentPdfPanelProps {
   itemId: string
   links: NotePdfLink[]
@@ -85,7 +100,47 @@ interface JudgmentPdfPanelProps {
   isPreview?: boolean
   onScrollNotes?: (linkId: string) => void
   quality?: 'low' | 'medium' | 'high'
+  getCurrentNotesText?: () => string
 }
+
+const CONNECTION_JSON_SYSTEM_PROMPT = `You are an expert legal connection mapper.
+
+Task:
+You will receive a judgment PDF and case notes. Return only a JSON array of note-to-PDF connections.
+
+Scope you are allowed to connect:
+- Notes titles and subtitles only (headings like h1/h2/h3 style text)
+- Bold text only (including bold case names in tables)
+- Table entries only when they are bold case law references
+
+Scope you must NOT connect:
+- Normal paragraph sentences
+- Non-bold table content
+- Any inferred or guessed text
+
+Connection quality rules:
+- Every connection must map to the exact source paragraph in the judgment PDF
+- Paragraph mapping must be accurate and stable
+- Do not create duplicate or overlapping connections for the same anchor
+- Keep link labels short and clear
+
+Output format:
+- Output only JSON array (no markdown, no code block, no explanation)
+- Each object must include:
+  - linkId (string, unique, lowercase with hyphens)
+  - noteAnchor (exact heading/bold text from notes)
+  - pdfPage (number)
+  - pdfSearchText (first 8-12 words from start of target paragraph, verbatim)
+  - pdfSearchTextEnd (last 6-10 words from end of same paragraph, verbatim)
+  - label (1-3 words)
+  - color (hex color)
+
+Validation before final output:
+- Ensure noteAnchor exists exactly in notes
+- Ensure pdfSearchText and pdfSearchTextEnd both exist on the same PDF page and same paragraph
+- Ensure all connections are from allowed scope only
+- If a candidate is uncertain, drop it (do not guess)
+`
 
 // PDF panel for the course editor: renders a lazy-loaded pdfjs PDF with drag-to-tag, link overlays, AI notes generation, and connection-line visualization.
 export function JudgmentPdfPanel({
@@ -112,9 +167,11 @@ export function JudgmentPdfPanel({
   isPreview = false,
   onScrollNotes,
   quality = 'high',
+  getCurrentNotesText,
 }: JudgmentPdfPanelProps) {
 
   const allowTagging = connectMode && connectStep === null
+  const allowManualConnectCapture = connectMode && connectStep === 'pdf'
   const SCALE = getScale(quality)
 
   // ── PDF state ──────────────────────────────────────────────────────
@@ -137,6 +194,7 @@ export function JudgmentPdfPanel({
   const pdfScrollRef = useRef<HTMLDivElement>(null)
 
   const [aiSummarizing, setAiSummarizing] = useState(false)
+  const aiSummarizeAbortRef = useRef<AbortController | null>(null)
   const [zoomLevel, setZoomLevel] = useState(1.0)
   
   // Pinch-to-zoom state
@@ -158,11 +216,19 @@ export function JudgmentPdfPanel({
   } | null>(null)
   const [pendingRegion, setPendingRegion] = useState<Region | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [reconnectTargetId, setReconnectTargetId] = useState<string | null>(null)
+  const [reconnectCapture, setReconnectCapture] = useState<ConnectPdfCapture | null>(null)
+  const [reconnectSaving, setReconnectSaving] = useState(false)
   const [colorPickerOpenId, setColorPickerOpenId] = useState<string | null>(null)
   const [readingProgress, setReadingProgress] = useState(0)
   const [showConnections, setShowConnections] = useState(true)
+  const [isDropzoneActive, setIsDropzoneActive] = useState(false)
   const autoFitAppliedRef = useRef(false)
   const [pdfDarkMode, setPdfDarkMode] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+
+  const reconnectTargetLink = reconnectTargetId ? links.find(l => l.id === reconnectTargetId) ?? null : null
+  const reconnectMode = !!reconnectTargetLink
 
   // ── Search state ───────────────────────────────────────────────────
   const [searchOpen, setSearchOpen] = useState(false)
@@ -200,6 +266,13 @@ export function JudgmentPdfPanel({
     requestAnimationFrame(() => onConnectionVizChange(computeConnection(connectionViz.linkId)))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [redrawTick])
+
+  // Reset reconnect state when item changes or a fresh connect workflow starts.
+  useEffect(() => {
+    setReconnectTargetId(null)
+    setReconnectCapture(null)
+    setReconnectSaving(false)
+  }, [itemId, connectMode])
 
 
   // ── Ctrl+Scroll Zoom Handler ──
@@ -339,11 +412,15 @@ export function JudgmentPdfPanel({
     const pageRect = pageEl.getBoundingClientRect()
     const canvasH = pageStates[link.pdf_page]?.height ?? 792 * SCALE
     const unzoomedCanvasH = canvasH / SCALE
-    // Use rendered height (same formula as the overlay) so the arrow tip lands in the middle of the visible box
-    const renderedH = Math.max(link.height * SCALE, 40) * zoomLevel
-    const storedH   = link.height * SCALE * zoomLevel
-    const topPad    = Math.max(0, renderedH - storedH) / 2
-    const regionTop = pageRect.top + (unzoomedCanvasH - (link.y + link.height)) * SCALE * zoomLevel - topPad
+    const renderedW = Math.max(link.width * SCALE, 8) * zoomLevel
+    const renderedH = Math.max(link.height * SCALE, 8) * zoomLevel
+    const storedW = link.width * SCALE * zoomLevel
+    const storedH = link.height * SCALE * zoomLevel
+    const padX = Math.max(0, renderedW - storedW) / 2
+    const padY = Math.max(0, renderedH - storedH) / 2
+    const regionLeft = pageRect.left + link.x * SCALE * zoomLevel - padX
+    const regionTop = pageRect.top + (unzoomedCanvasH - (link.y + link.height)) * SCALE * zoomLevel - padY
+    const toX = regionLeft + renderedW / 2
     const toY = regionTop + renderedH / 2
 
     const fromY = spanRect.top + spanRect.height / 2
@@ -365,7 +442,7 @@ export function JudgmentPdfPanel({
     return {
       fromX: spanRect.right,
       fromY,
-      toX: pageRect.left + link.x * SCALE * zoomLevel,
+      toX,
       toY,
       linkId,
       color: meta.color,
@@ -388,6 +465,42 @@ export function JudgmentPdfPanel({
     pdfContainer.scrollTo({ top: target, behavior: 'smooth' })
   }
 
+  function scrollToPage(pageNum: number) {
+    const pdfContainer = pdfScrollRef.current
+    const pageEl = pageContainerRefs.current.get(pageNum)
+    if (!pageEl || !pdfContainer) return
+
+    const containerRect = pdfContainer.getBoundingClientRect()
+    const pageRect = pageEl.getBoundingClientRect()
+    const pageTopInContainer = pageRect.top - containerRect.top + pdfContainer.scrollTop
+    const target = Math.max(0, pageTopInContainer - 12)
+
+    setCurrentPage(pageNum)
+    pdfContainer.scrollTo({ top: target, behavior: 'smooth' })
+  }
+
+  const updateCurrentPageFromScroll = useCallback(() => {
+    const pdfContainer = pdfScrollRef.current
+    if (!pdfContainer || numPages === 0) return
+
+    const containerRect = pdfContainer.getBoundingClientRect()
+    let closestPage = 1
+    let closestDistance = Number.POSITIVE_INFINITY
+
+    for (let i = 1; i <= numPages; i++) {
+      const pageEl = pageContainerRefs.current.get(i)
+      if (!pageEl) continue
+      const pageRect = pageEl.getBoundingClientRect()
+      const distance = Math.abs(pageRect.top - containerRect.top - 18)
+      if (distance < closestDistance) {
+        closestDistance = distance
+        closestPage = i
+      }
+    }
+
+    setCurrentPage(prev => (prev === closestPage ? prev : closestPage))
+  }, [numPages])
+
   const navigateToDest = async (dest: any) => {
     if (!pdfDocRef.current) return
 
@@ -400,7 +513,7 @@ export function JudgmentPdfPanel({
       if (Array.isArray(destArray) && destArray.length > 0) {
         pageIndex = await pdfDocRef.current.getPageIndex(destArray[0])
       }
-    } catch (e) {
+    } catch {
       // Destination resolution error - non-critical
     }
 
@@ -425,7 +538,7 @@ export function JudgmentPdfPanel({
           const targetTop = pdfScrollRef.current.scrollTop + (pageRect.top - containerRect.top)
           pdfScrollRef.current.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' })
         }
-      } catch (e) {
+      } catch {
         // Navigation error - non-critical
       }
     }, 200)
@@ -471,12 +584,11 @@ export function JudgmentPdfPanel({
 
       // Extract PDF annotations (internal/external links) once per page
       if (!pageAnnotationsRef.current[pageNum]) {
-        pageAnnotationsRef.current[pageNum] = true
         try {
           const annotations = await page.getAnnotations()
           const linkAnns = await Promise.all(
             annotations
-              .filter((a: any) => a.subtype === 'Link' && (a.dest || a.url || a.action?.URI))
+              .filter((a: any) => a.subtype === 'Link' && (a.dest || a.url || a.unsafeUrl || a.action?.URI))
               .map(async (a: any) => {
                 const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle(a.rect)
                 const dest = a.dest
@@ -502,16 +614,18 @@ export function JudgmentPdfPanel({
                   width: Math.abs(vx2 - vx1),
                   height: Math.abs(vy2 - vy1),
                   dest,
-                  url: a.url || a.action?.URI,
+                  url: a.url || a.unsafeUrl || a.action?.URI,
                   targetPage,
                 }
               })
           )
+          pageAnnotationsRef.current[pageNum] = true
           if (linkAnns.length > 0) {
             setPageAnnotations(prev => ({ ...prev, [pageNum]: linkAnns }))
           }
         } catch {
-          // annotations are non-critical — ignore errors
+          // annotations are non-critical; allow retry on next render attempt
+          pageAnnotationsRef.current[pageNum] = false
         }
       }
 
@@ -522,7 +636,7 @@ export function JudgmentPdfPanel({
     } catch (err) {
       console.error(`Page ${pageNum} render error:`, err)
     }
-  }, [])
+  }, [SCALE])
 
   // ── PDF search helpers ────────────────────────────────────────────
   function clearSearchHighlights() {
@@ -629,12 +743,15 @@ export function JudgmentPdfPanel({
         setTimeout(() => searchInputRef.current?.focus(), 50)
       }
     }
+    window.addEventListener('keydown', handler)
     let cancelled = false
     async function load() {
       setPdfLoading(true)
       setPdfError(null)
       renderedPages.current.clear()
       setPageStates({})
+      setPageAnnotations({})
+      pageAnnotationsRef.current = {}
       setNumPages(0)
       try {
         const pdfjsLib = await import('pdfjs-dist')
@@ -651,7 +768,10 @@ export function JudgmentPdfPanel({
       }
     }
     load()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      window.removeEventListener('keydown', handler)
+    }
   }, [signedUrl])
 
   useEffect(() => {
@@ -684,6 +804,14 @@ export function JudgmentPdfPanel({
     return () => observer.disconnect()
   }, [numPages, renderPage])
 
+  useEffect(() => {
+    if (!signedUrl || numPages === 0) {
+      setCurrentPage(1)
+      return
+    }
+    updateCurrentPageFromScroll()
+  }, [signedUrl, numPages, updateCurrentPageFromScroll])
+
   // Uploads a PDF file to the judgment upload API and updates the proxy URL to trigger a re-render of the PDF.
   async function handlePdfUpload(file: File) {
     setUploadingPdf(true)
@@ -715,6 +843,8 @@ export function JudgmentPdfPanel({
       setSignedUrl(null)
       setNumPages(0)
       setPageStates({})
+      setPageAnnotations({})
+      pageAnnotationsRef.current = {}
       renderedPages.current.clear()
       pdfDocRef.current = null
       toast.success('PDF removed')
@@ -727,7 +857,9 @@ export function JudgmentPdfPanel({
 
   // Starts a drag selection in normal (non-connect) mode, recording start coords adjusted for zoom level.
   function handleMouseDown(e: React.MouseEvent<HTMLDivElement>, pageNum: number) {
-    if (!allowTagging) return
+    if (!allowTagging && !allowManualConnectCapture && !reconnectMode) return
+    if (allowManualConnectCapture && connectPdfCapture) return
+    if (reconnectMode && reconnectCapture) return
     e.preventDefault()
     const rect = e.currentTarget.getBoundingClientRect()
     setDragState({
@@ -760,38 +892,112 @@ export function JudgmentPdfPanel({
     if (mouseW > 8 / zoomLevel && mouseH > 8 / zoomLevel) {
       const canvas = canvasRefs.current.get(dragState.pageNum)
       if (canvas) {
-        const pageHeightPdf = canvas.height / SCALE
-        handleRegionSelected({
+        // Use display/CSS height (not device-pixel backing height) so stored PDF coords
+        // match the user's drawn box on HiDPI screens.
+        const displayCanvasH = canvas.clientHeight || pageStates[dragState.pageNum]?.height || 792 * SCALE
+        const pageHeightPdf = displayCanvasH / SCALE
+        const region = {
           page: dragState.pageNum,
           x: mouseX / SCALE,
           y: pageHeightPdf - mouseY / SCALE - mouseH / SCALE,
           width: mouseW / SCALE,
           height: mouseH / SCALE,
-        })
+        }
+        if (allowManualConnectCapture) {
+          onConnectPdfCapture({
+            ...region,
+            text: `Manual region on page ${region.page}`,
+          })
+        } else if (reconnectMode) {
+          setReconnectCapture({
+            ...region,
+            text: `Manual region on page ${region.page}`,
+          })
+        } else {
+          handleRegionSelected(region)
+        }
       }
     }
     setDragState(null)
   }
 
   // ── Connect mode: PDF text selection ──────────────────────────────
-  function handlePdfTextMouseUp(e: React.MouseEvent, pageNum: number) {
+  function buildRangeNeedles(text: string): { start: string; end?: string } {
+    const words = text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
+    if (words.length === 0) return { start: '' }
+    if (words.length < 8) return { start: words.join(' ') }
+    return {
+      start: words.slice(0, 8).join(' '),
+      end: words.slice(-8).join(' '),
+    }
+  }
+
+  function isPdfFile(file: File): boolean {
+    return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+  }
+
+  async function handlePdfFileSelected(file: File) {
+    if (!isPdfFile(file)) {
+      toast.error('Please upload a PDF file')
+      return
+    }
+    await handlePdfUpload(file)
+  }
+
+  async function handlePdfTextMouseUp(e: React.MouseEvent, pageNum: number) {
     if (!connectMode || connectStep !== 'pdf' || connectPdfCapture) return
     const sel = window.getSelection()
-    if (!sel || sel.isCollapsed || !sel.toString().trim()) return
+    let selectedText = sel?.toString().trim() ?? ''
+    if (!selectedText) {
+      const clickedWord = (e.target as HTMLElement).closest('.pdfTextLayer span') as HTMLElement | null
+      selectedText = clickedWord?.textContent?.trim() ?? ''
+    }
+    if (!selectedText) return
+
+    if (pdfDocRef.current) {
+      try {
+        const page = await pdfDocRef.current.getPage(pageNum)
+        const content = await page.getTextContent()
+        const { start, end } = buildRangeNeedles(selectedText)
+        const precise = findTextInPageData(
+          [{ pageNum, items: content.items as any[] }],
+          start,
+          pageNum,
+          end,
+        )
+
+        if (precise) {
+          onConnectPdfCapture({
+            page: pageNum,
+            x: precise.x,
+            y: precise.y,
+            width: precise.width,
+            height: precise.height,
+            text: selectedText,
+          })
+          return
+        }
+      } catch (err) {
+        console.warn('Precise PDF match failed, falling back to selection bounds:', err)
+      }
+    }
+
+    if (!sel || sel.rangeCount === 0) return
     const range = sel.getRangeAt(0)
     const rect = range.getBoundingClientRect()
     const pageEl = pageContainerRefs.current.get(pageNum)
     if (!pageEl) return
     const pageRect = pageEl.getBoundingClientRect()
     const canvas = canvasRefs.current.get(pageNum)
-    const canvasH = canvas?.height || 792 * SCALE
+    // Same HiDPI fix as drag capture: rely on display height, not backing bitmap size.
+    const displayCanvasH = canvas?.clientHeight || pageStates[pageNum]?.height || 792 * SCALE
     onConnectPdfCapture({
       page: pageNum,
       x: (rect.left - pageRect.left) / (SCALE * zoomLevel),
-      y: (canvasH / SCALE) - ((rect.top - pageRect.top) / (SCALE * zoomLevel)) - (rect.height / (SCALE * zoomLevel)),
+      y: (displayCanvasH / SCALE) - ((rect.top - pageRect.top) / (SCALE * zoomLevel)) - (rect.height / (SCALE * zoomLevel)),
       width: Math.max(rect.width / (SCALE * zoomLevel), 10),
       height: Math.max(rect.height / (SCALE * zoomLevel), 8),
-      text: sel.toString().trim(),
+      text: selectedText,
     })
   }
 
@@ -821,6 +1027,114 @@ export function JudgmentPdfPanel({
     }
   }
 
+  function beginReconnect(link: NotePdfLink) {
+    if (connectMode) {
+      toast.info('Finish current connect flow first')
+      return
+    }
+    setReconnectTargetId(link.id)
+    setReconnectCapture(null)
+    setColorPickerOpenId(null)
+    onHighlightedLinkIdChange(link.link_id)
+    onScrollNotes?.(link.link_id)
+    scrollToLink(link)
+    setTimeout(() => onConnectionVizChange(computeConnection(link.link_id)), 300)
+    toast.info('Reconnect mode: drag on PDF to set the new box')
+  }
+
+  function cancelReconnect() {
+    setReconnectTargetId(null)
+    setReconnectCapture(null)
+    setReconnectSaving(false)
+    onHighlightedLinkIdChange(null)
+  }
+
+  async function saveReconnect() {
+    if (!reconnectTargetLink || !reconnectCapture) return
+    const nextRegion: LinkRegion = {
+      pdf_page: reconnectCapture.page,
+      x: reconnectCapture.x,
+      y: reconnectCapture.y,
+      width: reconnectCapture.width,
+      height: reconnectCapture.height,
+    }
+
+    const sameRegion = (a: LinkRegion, b: LinkRegion) => (
+      a.pdf_page === b.pdf_page &&
+      Math.abs(a.x - b.x) < 0.001 &&
+      Math.abs(a.y - b.y) < 0.001 &&
+      Math.abs(a.width - b.width) < 0.001 &&
+      Math.abs(a.height - b.height) < 0.001
+    )
+
+    const fetchPersistedLinks = async () => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const fresh = await fetchLinksForItem(itemId)
+        const target = fresh.find(l => l.id === reconnectTargetLink.id)
+        if (target && sameRegion(nextRegion, {
+          pdf_page: target.pdf_page,
+          x: target.x,
+          y: target.y,
+          width: target.width,
+          height: target.height,
+        })) {
+          return fresh
+        }
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+      return null
+    }
+
+    setReconnectSaving(true)
+
+    try {
+      let persistedLinks: NotePdfLink[] | null = null
+
+      try {
+        await updateLinkRegion({
+          id: reconnectTargetLink.id,
+          ...nextRegion,
+        })
+        persistedLinks = await fetchPersistedLinks()
+      } catch {
+        // Fallback path: replace old link with a newly inserted link at the new region.
+        const replacement = await insertLink({
+          item_id: reconnectTargetLink.item_id,
+          link_id: reconnectTargetLink.link_id,
+          pdf_page: nextRegion.pdf_page,
+          x: nextRegion.x,
+          y: nextRegion.y,
+          width: nextRegion.width,
+          height: nextRegion.height,
+          label: reconnectTargetLink.label ?? undefined,
+        })
+        await deleteLink(reconnectTargetLink.id)
+        persistedLinks = await fetchLinksForItem(itemId)
+
+        // Safety net in case fetch still races; ensure local list contains the replacement.
+        if (!persistedLinks.some(l => l.id === replacement.id)) {
+          persistedLinks = null
+        }
+      }
+
+      if (!persistedLinks) {
+        throw new Error('Reconnect was not persisted. Please try once more.')
+      }
+
+      onLinksChange(() => persistedLinks)
+      toast.success(`Reconnected "${reconnectTargetLink.link_id}" to page ${nextRegion.pdf_page}`)
+      onHighlightedLinkIdChange(reconnectTargetLink.link_id)
+      setTimeout(() => onConnectionVizChange(computeConnection(reconnectTargetLink.link_id)), 100)
+      setTimeout(() => onHighlightedLinkIdChange(null), CONNECTION_HIGHLIGHT_MS)
+      setReconnectTargetId(null)
+      setReconnectCapture(null)
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to reconnect')
+    } finally {
+      setReconnectSaving(false)
+    }
+  }
+
   // ── Delete handler ─────────────────────────────────────────────────
   async function handleDelete(linkDbId: string) {
     setDeletingId(linkDbId)
@@ -831,27 +1145,16 @@ export function JudgmentPdfPanel({
         onHighlightedLinkIdChange(null)
         onConnectionVizChange(null)
       }
+      if (reconnectTargetId === linkToDelete?.id) {
+        setReconnectTargetId(null)
+        setReconnectCapture(null)
+      }
     } finally {
       setDeletingId(null)
     }
   }
 
   // ── AI helpers ────────────────────────────────────────────────────
-
-
-  /** Extract plain text from all PDF pages. */
-  async function extractPdfText(): Promise<string> {
-    if (!pdfDocRef.current) return ''
-    const parts: string[] = []
-    const total = pdfDocRef.current.numPages
-    for (let i = 1; i <= total; i++) {
-        const page = await pdfDocRef.current.getPage(i)
-        const content = await page.getTextContent()
-        const pageText = (content.items as any[]).map((item: any) => item.str).join(' ')
-        parts.push(`[Page ${i}]\n${pageText}`)
-    }
-    return parts.join('\n\n')
-  }
 
   /** Copy text to clipboard with a toast. */
   async function copyToClipboard(text: string, description: string) {
@@ -863,25 +1166,21 @@ export function JudgmentPdfPanel({
     }
   }
 
-  /** Copies the base system instructions. */
+  /** Copies the base connection-mapping system instructions. */
   function handleCopySystemPrompt() {
-    copyToClipboard(JUDGMENT_SYSTEM_PROMPT, 'System prompt')
+    copyToClipboard(CONNECTION_JSON_SYSTEM_PROMPT, 'System prompt')
   }
 
-  /** Extracts PDF text and copies the combined instructions + judgment prompt. */
-  async function handleCopyFullPrompt() {
-    const toastId = toast.loading('📄 Extracting text for prompt…')
-    try {
-        const pdfText = await extractPdfText()
-        if (!pdfText) throw new Error('No text found in PDF')
-        
-        const fullPrompt = `${JUDGMENT_SYSTEM_PROMPT}\n\nGenerate a complete GAVELOGY case law note from the following judgment text:\n\n${pdfText}`
-        await copyToClipboard(fullPrompt, 'Full prompt')
-    } catch (err: any) {
-        toast.error(err.message || 'Prompt generation failed')
-    } finally {
-        toast.dismiss(toastId)
+  /** Copies system prompt + currently written notes text. */
+  async function handleCopySystemPromptWithNotes() {
+    const notesText = getCurrentNotesText?.().trim() ?? ''
+    if (!notesText) {
+      toast.error('No notes found to include. Write notes first.')
+      return
     }
+
+    const fullPrompt = `${CONNECTION_JSON_SYSTEM_PROMPT}\n\nNOTES (use these exact anchors):\n${notesText}`
+    await copyToClipboard(fullPrompt, 'System prompt + notes')
   }
 
   /** Programmatic fallback connections.
@@ -954,12 +1253,18 @@ export function JudgmentPdfPanel({
 
   // ── AI: Extract text from all PDF pages and generate case notes ───
   async function handleAiSummarize() {
+    if (aiSummarizing) {
+      aiSummarizeAbortRef.current?.abort()
+      return
+    }
     if (!pdfDocRef.current) {
       toast.error('No PDF loaded — upload a judgment PDF first')
       return
     }
     if (!onAiNotesGenerated) return
     setAiSummarizing(true)
+    const abortController = new AbortController()
+    aiSummarizeAbortRef.current = abortController
     const toastId = toast.loading('📄 Extracting text from PDF…')
     try {
       // Extract text from every page — keep items with positions for auto-linking
@@ -967,6 +1272,7 @@ export function JudgmentPdfPanel({
       const parts: string[] = []
       const total: number = pdfDocRef.current.numPages
       for (let i = 1; i <= total; i++) {
+        if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError')
         const page = await pdfDocRef.current.getPage(i)
         const content = await page.getTextContent()
         const items = content.items as any[]
@@ -981,6 +1287,7 @@ export function JudgmentPdfPanel({
       const res = await fetch('/api/ai-summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
         body: JSON.stringify({ pdfText }),
       })
       const data = await res.json()
@@ -1069,8 +1376,14 @@ export function JudgmentPdfPanel({
 
       onAiNotesGenerated(formattedWithLinks, data.provider || '')
     } catch (e: any) {
+      if (e?.name === 'AbortError') {
+        toast.dismiss(toastId)
+        toast.message('AI notes generation stopped')
+        return
+      }
       toast.error(e.message || 'AI summarization failed', { id: toastId })
     } finally {
+      aiSummarizeAbortRef.current = null
       setAiSummarizing(false)
     }
   }
@@ -1104,13 +1417,13 @@ export function JudgmentPdfPanel({
       <style>{flashStyles}</style>
 
       {/* Header */}
-      <div className="relative flex items-center justify-between px-4 py-2.5 border-b border-border bg-card shrink-0">
-        <div className="flex items-center gap-2">
+      <div className="relative flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 shrink-0">
+        <div className="flex items-center gap-1.5 min-w-0 shrink-0">
           <span className="font-semibold text-sm text-foreground">Judgment PDF</span>
           {links.length > 0 && (
-            <span className="flex items-center gap-1.5 text-xs font-mono px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              {links.length} linked
+            <span className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+              <Link2 className="w-3 h-3" />
+              <span className="tabular-nums">{links.length}</span>
             </span>
           )}
         </div>
@@ -1122,7 +1435,7 @@ export function JudgmentPdfPanel({
             />
           </div>
         )}
-        <div className="flex items-center gap-2">
+        <div className="w-full flex items-center justify-center gap-2 flex-wrap">
           <input
             ref={fileInputRef}
             type="file"
@@ -1130,58 +1443,74 @@ export function JudgmentPdfPanel({
             className="hidden"
             onChange={e => {
               const f = e.target.files?.[0]
-              if (f) handlePdfUpload(f)
+              if (f) handlePdfFileSelected(f)
               e.target.value = ''
             }}
           />
-          {/* ✨ AI Notes button — only visible when PDF is loaded */}
+          {/* AI Notes button — only visible when PDF is loaded */}
           {signedUrl && onAiNotesGenerated && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  disabled={aiSummarizing || pdfLoading}
-                  className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-semibold transition-all bg-linear-to-r from-violet-500 to-purple-600 text-white hover:from-violet-600 hover:to-purple-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed group"
-                >
-                  {aiSummarizing
-                    ? <Loader2 className="w-3 h-3 animate-spin" />
-                    : <Sparkles className="w-3 h-3" />
-                  }
-                  {aiSummarizing ? 'Generating…' : 'AI Notes'}
-                  <ChevronDown className="w-3 h-3 opacity-50 group-hover:opacity-100 transition-opacity" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem 
-                  onClick={handleAiSummarize}
-                  disabled={aiSummarizing}
-                  className="gap-2"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-purple-500" />
-                  <span>Generate AI Notes</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem 
-                  onClick={handleCopySystemPrompt}
-                  className="gap-2"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copy System Prompt</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem 
-                  onClick={handleCopyFullPrompt}
-                  className="gap-2"
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>Copy Full Prompt (+PDF)</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={handleAiSummarize}
+                disabled={pdfLoading}
+                className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold transition-all bg-linear-to-r from-violet-500 to-purple-600 text-white hover:from-violet-600 hover:to-purple-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                title={aiSummarizing ? 'Stop generating AI notes' : 'Generate AI notes'}
+              >
+                {aiSummarizing
+                  ? <Square className="w-3 h-3 fill-current" />
+                  : <Sparkles className="w-3 h-3" />
+                }
+                Notes
+              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold transition-all border border-border bg-background hover:bg-muted text-foreground group"
+                  >
+                    <Link2 className="w-3.5 h-3.5" />
+                    Copy
+                    <ChevronDown className="w-3 h-3 opacity-60 group-hover:opacity-100 transition-opacity" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  <div className="px-2 py-1.5 text-[11px] font-semibold text-muted-foreground">
+                    Connection JSON Prompt
+                  </div>
+                  <DropdownMenuItem
+                    onClick={handleCopySystemPrompt}
+                    className="gap-2"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Only System Prompt</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={handleCopySystemPromptWithNotes}
+                    className="gap-2"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>System Prompt + Current Notes</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           )}
+
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadingPdf || deletingPdf}
+            className="h-8 px-3 rounded-lg text-xs"
+          >
+            {uploadingPdf ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Upload className="w-3.5 h-3.5 mr-1" />}
+            {uploadingPdf ? 'Uploading…' : signedUrl ? 'Replace' : 'Upload PDF'}
+          </Button>
+
           {/* Search bar */}
           {signedUrl && (
             <div className="flex items-center gap-1">
               {searchOpen && (
-                <div className="flex items-center gap-1 bg-muted/80 rounded-md border border-border px-2 h-7">
+                <div className="flex items-center gap-1 bg-muted/80 rounded-lg border border-border px-2 h-8">
                   <input
                     ref={searchInputRef}
                     type="text"
@@ -1215,7 +1544,7 @@ export function JudgmentPdfPanel({
                 size="sm"
                 variant="ghost"
                 onClick={() => { setSearchOpen(v => !v); if (!searchOpen) setTimeout(() => searchInputRef.current?.focus(), 50) }}
-                className={cn('h-7 w-7 p-0', searchOpen && 'bg-muted')}
+                className={cn('h-8 w-8 p-0 rounded-lg', searchOpen && 'bg-muted')}
                 title="Search in PDF (Ctrl+F)"
               >
                 <Search className="w-3.5 h-3.5" />
@@ -1223,11 +1552,55 @@ export function JudgmentPdfPanel({
             </div>
           )}
 
+          {signedUrl && numPages > 0 && (
+            <Select
+              value={String(currentPage)}
+              onValueChange={value => {
+                const pageNum = Number.parseInt(value, 10)
+                if (!Number.isNaN(pageNum)) {
+                  scrollToPage(pageNum)
+                }
+              }}
+            >
+              <SelectTrigger
+                className={cn(
+                  "h-8 w-[92px] min-w-0 px-2 rounded-lg text-xs font-semibold shadow-sm",
+                  pdfDarkMode
+                    ? "border-slate-700/90 bg-slate-900 text-slate-100 hover:bg-slate-800/90 focus-visible:ring-slate-500/40"
+                    : "border-border bg-background/90 text-foreground hover:bg-background"
+                )}
+                title="Jump to page"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent
+                align="end"
+                className={cn(
+                  "max-h-72",
+                  pdfDarkMode && "border-slate-700 bg-slate-900 text-slate-100"
+                )}
+              >
+                {Array.from({ length: numPages }, (_, i) => i + 1).map(pageNum => (
+                  <SelectItem
+                    key={pageNum}
+                    value={String(pageNum)}
+                    className={cn(
+                      "text-xs",
+                      pdfDarkMode && "focus:bg-slate-800 focus:text-slate-100"
+                    )}
+                  >
+                    Page {pageNum}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
           {signedUrl && (
-            <div className="flex items-center gap-px bg-muted/60 p-0.5 rounded-md border border-border">
-              <button onClick={() => setZoomLevel(p => Math.max(0.25, p - 0.1))} className="w-6 h-6 flex items-center justify-center text-xs hover:bg-background rounded-sm text-muted-foreground hover:text-foreground" title="Zoom Out">-</button>
-              <button onClick={() => setZoomLevel(1.0)} className="px-2 h-6 flex items-center justify-center text-[10px] hover:bg-background rounded-sm font-mono text-muted-foreground hover:text-foreground" title="Reset Zoom">{Math.round(zoomLevel * 100)}%</button>
-              <button onClick={() => setZoomLevel(p => Math.min(3.0, p + 0.1))} className="w-6 h-6 flex items-center justify-center text-xs hover:bg-background rounded-sm text-muted-foreground hover:text-foreground" title="Zoom In">+</button>
+            <div className="flex items-center gap-px bg-muted/60 p-0.5 rounded-lg border border-border h-8">
+              <button onClick={() => setZoomLevel(p => Math.max(0.25, p - 0.1))} className="w-7 h-7 flex items-center justify-center text-xs hover:bg-background rounded-md text-muted-foreground hover:text-foreground" title="Zoom Out">-</button>
+              <button onClick={() => setZoomLevel(1.0)} className="px-2 h-7 flex items-center justify-center text-[11px] hover:bg-background rounded-md font-mono text-muted-foreground hover:text-foreground" title="Reset Zoom">{Math.round(zoomLevel * 100)}%</button>
+              <button onClick={() => setZoomLevel(p => Math.min(3.0, p + 0.1))} className="w-7 h-7 flex items-center justify-center text-xs hover:bg-background rounded-md text-muted-foreground hover:text-foreground" title="Zoom In">+</button>
             </div>
           )}
           {signedUrl && (
@@ -1235,7 +1608,7 @@ export function JudgmentPdfPanel({
               size="sm"
               variant={pdfDarkMode ? "secondary" : "ghost"}
               onClick={() => setPdfDarkMode(v => !v)}
-              className="h-7 px-2 text-xs"
+              className="h-8 px-2.5 rounded-lg text-xs"
               title={pdfDarkMode ? "Disable PDF dark mode" : "Enable PDF dark mode"}
             >
               <Moon className="w-3.5 h-3.5 mr-1" />
@@ -1248,22 +1621,12 @@ export function JudgmentPdfPanel({
               variant="ghost"
               onClick={handleDeletePdf}
               disabled={deletingPdf}
-              className="text-destructive hover:text-destructive hover:bg-destructive/10 h-7 w-7 p-0"
+              className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 w-8 p-0 rounded-lg"
               title="Remove PDF"
             >
               {deletingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash className="w-3.5 h-3.5" />}
             </Button>
           )}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploadingPdf || deletingPdf}
-            className="h-7 text-xs"
-          >
-            {uploadingPdf ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Upload className="w-3.5 h-3.5 mr-1" />}
-            {uploadingPdf ? 'Uploading…' : signedUrl ? 'Replace' : 'Upload PDF'}
-          </Button>
         </div>
       </div>
 
@@ -1287,8 +1650,8 @@ export function JudgmentPdfPanel({
               : 'text-blue-800 dark:text-blue-300'
             )}>
               {connectPdfCapture
-                ? `PDF text: "${connectPdfCapture.text.slice(0, 35)}${connectPdfCapture.text.length > 35 ? '…' : ''}"`
-                : 'Select matching text in the judgment PDF below'
+                ? `PDF region captured: page ${connectPdfCapture.page}`
+                : 'Drag on the PDF to draw the exact connection box'
               }
             </span>
           </div>
@@ -1315,6 +1678,55 @@ export function JudgmentPdfPanel({
         </div>
       )}
 
+      {reconnectMode && reconnectTargetLink && (
+        <div className={cn(
+          'px-4 py-2 border-b shrink-0 flex items-center justify-between gap-2',
+          reconnectCapture
+            ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/30'
+            : 'bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/30'
+        )}>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className={cn(
+              'text-xs font-semibold px-1.5 py-0.5 rounded shrink-0',
+              reconnectCapture
+                ? 'bg-emerald-200 dark:bg-emerald-800 text-emerald-800 dark:text-emerald-200'
+                : 'bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200'
+            )}>
+              Reconnect
+            </span>
+            <span className={cn(
+              'text-xs truncate',
+              reconnectCapture ? 'text-emerald-800 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-300',
+            )}>
+              {reconnectCapture
+                ? `"${reconnectTargetLink.link_id}" → page ${reconnectCapture.page} ready to save`
+                : `Draw a new PDF box for "${reconnectTargetLink.link_id}"`
+              }
+            </span>
+          </div>
+          <div className="flex gap-1.5 shrink-0">
+            {reconnectCapture && (
+              <Button
+                size="sm"
+                className="h-6 text-xs bg-emerald-600 hover:bg-emerald-700 text-white border-0 px-2"
+                onClick={saveReconnect}
+                disabled={reconnectSaving}
+              >
+                {reconnectSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Save'}
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 text-xs px-2"
+              onClick={reconnectCapture ? () => setReconnectCapture(null) : cancelReconnect}
+            >
+              {reconnectCapture ? 'Re-select' : 'Cancel'}
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* PDF body */}
       <div
         ref={pdfScrollRef}
@@ -1323,23 +1735,52 @@ export function JudgmentPdfPanel({
           const el = e.currentTarget
           const pct = (el.scrollTop / (el.scrollHeight - el.clientHeight)) * 100
           setReadingProgress(Math.min(100, pct || 0))
-          requestAnimationFrame(() => redrawConnection())
+          requestAnimationFrame(() => {
+            redrawConnection()
+            updateCurrentPageFromScroll()
+          })
         }}
       >
 
           {!signedUrl ? (
-          <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-6">
-            <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
-              <FileText className="w-8 h-8 text-muted-foreground/40" />
+          <div className="flex items-center justify-center h-full p-6">
+            <div
+              className={cn(
+                'w-full max-w-xl rounded-2xl border-2 border-dashed p-8 text-center transition-colors',
+                isDropzoneActive ? 'border-primary bg-primary/5' : 'border-border bg-card',
+                (uploadingPdf || deletingPdf) && 'opacity-70 pointer-events-none',
+              )}
+              onDragEnter={e => {
+                e.preventDefault()
+                if (!uploadingPdf && !deletingPdf) setIsDropzoneActive(true)
+              }}
+              onDragOver={e => {
+                e.preventDefault()
+                if (!uploadingPdf && !deletingPdf) setIsDropzoneActive(true)
+              }}
+              onDragLeave={e => {
+                e.preventDefault()
+                const related = e.relatedTarget as Node | null
+                if (!related || !e.currentTarget.contains(related)) setIsDropzoneActive(false)
+              }}
+              onDrop={e => {
+                e.preventDefault()
+                setIsDropzoneActive(false)
+                if (uploadingPdf || deletingPdf) return
+                const f = e.dataTransfer.files?.[0]
+                if (f) void handlePdfFileSelected(f)
+              }}
+            >
+              <div className="mx-auto mb-3 w-14 h-14 rounded-2xl bg-muted flex items-center justify-center">
+                <FileText className="w-7 h-7 text-muted-foreground/60" />
+              </div>
+              <p className="text-sm font-semibold text-foreground">Drag and drop judgment PDF here</p>
+              <p className="text-xs text-muted-foreground mt-1">or click below to upload/replace PDF</p>
+              <Button onClick={() => fileInputRef.current?.click()} size="sm" className="mt-4">
+                <Upload className="w-4 h-4 mr-2" />
+                {uploadingPdf ? 'Uploading…' : 'Upload PDF'}
+              </Button>
             </div>
-            <div>
-              <p className="text-sm font-medium text-foreground">No judgment PDF yet</p>
-              <p className="text-xs text-muted-foreground mt-1">Upload a PDF to start tagging passages</p>
-            </div>
-            <Button onClick={() => fileInputRef.current?.click()} size="sm">
-              <Upload className="w-4 h-4 mr-2" />
-              Upload PDF
-            </Button>
           </div>
         ) : pdfLoading ? (
           <div className="flex items-center justify-center h-full">
@@ -1387,20 +1828,23 @@ export function JudgmentPdfPanel({
                           style={{ display: 'block' }}
                         />
 
-                        {/* Text layer for connect mode selection */}
+                        {/* Text layer for search/selection */}
                         <div
                           ref={el => { if (el) textLayerContainerRefs.current.set(pageNum, el) }}
-                          className={cn('pdfTextLayer', inPdfSelectStep && !connectPdfCapture && 'selectable')}
-                          onMouseUp={e => handlePdfTextMouseUp(e, pageNum)}
+                          className={cn('pdfTextLayer')}
+                          onMouseUp={(allowManualConnectCapture || reconnectMode) ? undefined : (e => handlePdfTextMouseUp(e, pageNum))}
                         />
                       </div>
 
                       {/* Existing link overlays */}
                       {ps?.rendered && pageLinks.map(link => {
-                        const sh = Math.max(link.height * SCALE, 40)
-                        // sy: top of box in canvas px (PDF y origin is bottom-left)
-                        // Centre the padded height on the stored region
-                        const sy = canvasH - (link.y + link.height) * SCALE - Math.max(0, sh - link.height * SCALE) / 2
+                        const sw = Math.max(link.width * SCALE, 8)
+                        const sh = Math.max(link.height * SCALE, 8)
+                        const padX = Math.max(0, sw - link.width * SCALE) / 2
+                        const padY = Math.max(0, sh - link.height * SCALE) / 2
+                        // PDF y-origin is bottom-left, convert to top-left canvas coords.
+                        const sx = link.x * SCALE - padX
+                        const sy = canvasH - (link.y + link.height) * SCALE - padY
                         const isHighlighted = highlightedLinkId === link.link_id
                         const isConnected = connectionViz?.linkId === link.link_id
                         const { text: linkLabel, color: linkColor } = parseLinkMeta(link.label)
@@ -1411,20 +1855,17 @@ export function JudgmentPdfPanel({
                             title={`${link.link_id}${linkLabel ? ` — ${linkLabel}` : ''}`}
                             className={cn('absolute group', isHighlighted && `lf_${link.link_id.replace(/[^a-zA-Z0-9]/g, '_')}`)}
                             style={{
-                              left: 0, right: 0, top: sy, height: sh,
+                              left: sx, top: sy, width: sw, height: sh,
                               background: isHighlighted
                                 ? `${linkColor}30`
                                 : isConnected
                                 ? `${linkColor}22`
                                 : `${linkColor}12`,
-                              borderLeft: `4px solid ${linkColor}`,
-                              borderTop: 'none',
-                              borderRight: 'none',
-                              borderBottom: 'none',
-                              borderRadius: 0,
+                              border: `${isHighlighted || isConnected ? '2' : '1.5'}px solid ${isHighlighted || isConnected ? linkColor : `${linkColor}99`}`,
+                              borderRadius: 3,
                               zIndex: isConnected ? 7 : 5,
                               pointerEvents: inPdfSelectStep ? 'none' : 'all',
-                              transition: 'background 0.15s',
+                              transition: 'background 0.15s, border-color 0.15s',
                             }}
                           >
                             {!inPdfSelectStep && (
@@ -1475,8 +1916,8 @@ export function JudgmentPdfPanel({
                         </div>
                       ))}
 
-                      {/* Drag overlay — only when tagging is enabled */}
-                      {allowTagging && (
+                      {/* Drag overlay — used for tag creation and manual connect capture */}
+                      {(allowTagging || (allowManualConnectCapture && !connectPdfCapture) || (reconnectMode && !reconnectCapture)) && (
                         <div
                           className="absolute inset-0"
                           style={{ cursor: 'crosshair', zIndex: 10 }}
@@ -1543,6 +1984,7 @@ export function JudgmentPdfPanel({
               links.map(link => {
                 const noteText = getNoteText(link.link_id)
                 const isActive = connectionViz?.linkId === link.link_id || highlightedLinkId === link.link_id
+                const isReconnectTarget = reconnectTargetId === link.id
                 const { text: linkLabel, color: linkColor } = parseLinkMeta(link.label)
                 const isColorOpen = colorPickerOpenId === link.id
                 return (
@@ -1554,11 +1996,11 @@ export function JudgmentPdfPanel({
                         onScrollNotes?.(link.link_id)
                         onHighlightedLinkIdChange(link.link_id)
                         setTimeout(() => onConnectionVizChange(computeConnection(link.link_id)), 700)
-                        setTimeout(() => onHighlightedLinkIdChange(null), 5000)
+                        setTimeout(() => onHighlightedLinkIdChange(null), CONNECTION_HIGHLIGHT_MS)
                       }}
                       className={cn(
                         'flex items-center gap-3 px-4 py-2.5 cursor-pointer group transition-colors',
-                        isActive ? 'bg-muted/60' : 'hover:bg-muted/50'
+                        isReconnectTarget ? 'bg-amber-100/60 dark:bg-amber-950/30' : isActive ? 'bg-muted/60' : 'hover:bg-muted/50'
                       )}
                     >
                       {/* Color dot — click to open color picker */}
@@ -1580,6 +2022,17 @@ export function JudgmentPdfPanel({
                           <div className="text-[10px] text-muted-foreground/60 truncate mt-0.5">{linkLabel}</div>
                         )}
                       </div>
+                      <button
+                        onClick={e => { e.stopPropagation(); beginReconnect(link) }}
+                        disabled={deletingId === link.id || reconnectSaving}
+                        className={cn(
+                          'transition-opacity p-1 rounded hover:bg-amber-500/15 text-muted-foreground hover:text-amber-600 disabled:opacity-30 shrink-0',
+                          isReconnectTarget ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                        )}
+                        title="Reconnect PDF position"
+                      >
+                        <RefreshCw className={cn("w-3.5 h-3.5", isReconnectTarget && "text-amber-600")} />
+                      </button>
                       <button
                         onClick={e => { e.stopPropagation(); handleDelete(link.id) }}
                         disabled={deletingId === link.id}
@@ -1732,3 +2185,4 @@ function SimpleTagModal({
     </div>
   )
 }
+

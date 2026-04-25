@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useConvex, useMutation } from 'convex/react'
 import { api } from '@convex/_generated/api'
 import { useDraftStore } from '@/lib/stores/draft-store'
@@ -20,6 +20,7 @@ import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import TextAlign from '@tiptap/extension-text-align'
 import { htmlToCustom, customToHtml, fixAiMistakes } from '@/lib/content-converter'
+import { hasConnectionsJsonMarker, splitConnectionsPayload, parseConnectionsJsonPart } from '@/lib/connections-json'
 import { fetchLinksForItem, insertLink, deleteLink } from '@/actions/judgment/links'
 import type { NotePdfLink } from '@/actions/judgment/links'
 import { saveNoteContent, saveFlashcardsJson } from '@/actions/judgment/note-content'
@@ -45,7 +46,7 @@ import {
     GripVertical, ChevronLeft, Loader2, MessageSquare, Minus, Link2, Unlink2, Wand2,
     Table as TableIcon, Check, CreditCard, Edit2,
     AlignLeft, AlignCenter, AlignRight,
-    Download, ArrowLeft,
+    Download, ArrowLeft, Upload,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
@@ -75,6 +76,81 @@ import { NotesReaderBar, type NotesReaderBarRef } from './notes-reader-bar'
 import type { TTSSnapshot, TTSToken } from '@/lib/tts-processor'
 import { buildTTSSnapshotFromDoc } from '@/lib/tts-processor'
 import { getActiveSource, stopTTS } from '@/lib/tts-manager'
+
+const JUMP_HIGHLIGHT_MS = 3000
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
+const formatScriptMarkdownInline = (line: string) => {
+  const escaped = escapeHtml(line)
+  return escaped
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+}
+
+const scriptMarkdownToHtml = (source: string) => {
+  const lines = source.replace(/\r\n/g, '\n').split('\n')
+  let html = ''
+  let inUl = false
+  let inOl = false
+
+  const closeLists = () => {
+    if (inUl) { html += '</ul>'; inUl = false }
+    if (inOl) { html += '</ol>'; inOl = false }
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+
+    if (!line) {
+      closeLists()
+      continue
+    }
+
+    if (line.startsWith('### ')) {
+      closeLists()
+      html += `<h3>${formatScriptMarkdownInline(line.slice(4))}</h3>`
+      continue
+    }
+
+    if (line.startsWith('## ')) {
+      closeLists()
+      html += `<h2>${formatScriptMarkdownInline(line.slice(3))}</h2>`
+      continue
+    }
+
+    if (line.startsWith('# ')) {
+      closeLists()
+      html += `<h1>${formatScriptMarkdownInline(line.slice(2))}</h1>`
+      continue
+    }
+
+    if (/^[-*]\s+/.test(line)) {
+      if (!inUl) { closeLists(); html += '<ul>'; inUl = true }
+      html += `<li>${formatScriptMarkdownInline(line.replace(/^[-*]\s+/, ''))}</li>`
+      continue
+    }
+
+    if (/^\d+\.\s+/.test(line)) {
+      if (!inOl) { closeLists(); html += '<ol>'; inOl = true }
+      html += `<li>${formatScriptMarkdownInline(line.replace(/^\d+\.\s+/, ''))}</li>`
+      continue
+    }
+
+    closeLists()
+    html += `<p>${formatScriptMarkdownInline(line)}</p>`
+  }
+
+  closeLists()
+  return html || '<p></p>'
+}
 
 // --- Extensions ---
 
@@ -448,16 +524,14 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
    */
   const handleMagicPaste = async (text: string) => {
     if (!editor || !itemId) return
-    const [formattedPart, jsonPart] = text.split('---CONNECTIONS_JSON---')
+    const { formatted: formattedPart, jsonPart } = splitConnectionsPayload(text)
+    const connections = parseConnectionsJsonPart(jsonPart)
     if (!jsonPart) return
 
     const toastId = toast.loading('🔗 Connecting AI notes to PDF…')
     try {
         // 1. Parse JSON
-        let connections: any[] = []
-        try {
-            connections = JSON.parse(jsonPart.trim())
-        } catch {
+        if (connections.length === 0) {
             throw new Error('Malformed connections JSON at bottom of text')
         }
 
@@ -1037,6 +1111,8 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
   const [scriptContent, setScriptContent] = useState('')
   const [originalScriptContent, setOriginalScriptContent] = useState('')
   const [saveScriptLoading, setSaveScriptLoading] = useState(false)
+  const scriptMdInputRef = useRef<HTMLInputElement | null>(null)
+  const scriptMarkdownPreviewHtml = useMemo(() => scriptMarkdownToHtml(scriptContent), [scriptContent])
 
   // Right panel tab — controls what's shown in the right panel
   const [jRightTab, setJRightTab] = useState<'judgment' | 'quiz' | 'flashcards' | 'script'>('judgment')
@@ -1136,15 +1212,15 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
     setOriginalScriptContent('')
   }, [itemId])
 
-  // Auto-hide connection viz after 5 seconds with a 0.5s fade
+  // Auto-hide connection viz after 3 seconds with a short fade
   useEffect(() => {
     jVizTimersRef.current.forEach(clearTimeout)
     jVizTimersRef.current = []
     if (!jConnectionViz) { setJVizFading(false); return }
     setJVizFading(false)
     jVizTimersRef.current = [
-      setTimeout(() => setJVizFading(true), 4500),
-      setTimeout(() => { setJConnectionViz(null); setJVizFading(false) }, 5000),
+      setTimeout(() => setJVizFading(true), JUMP_HIGHLIGHT_MS - 300),
+      setTimeout(() => { setJConnectionViz(null); setJVizFading(false) }, JUMP_HIGHLIGHT_MS),
     ]
     return () => { jVizTimersRef.current.forEach(clearTimeout) }
   }, [jConnectionViz])
@@ -1326,7 +1402,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
       setJHighlightedLinkId(linkId)
       setJRightTab('judgment')
       flashNoteSpan(linkId)
-      setTimeout(() => setJHighlightedLinkId(null), 2000)
+      setTimeout(() => setJHighlightedLinkId(null), JUMP_HIGHLIGHT_MS)
       return
     }
 
@@ -1454,7 +1530,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
         if (!text) return false
 
         // 1. MAGIC AI PASTE: Detect AI connections JSON
-        if (text.includes('---CONNECTIONS_JSON---')) {
+        if (hasConnectionsJsonMarker(text)) {
             handleMagicPaste(text)
             return true // Prevent default paste
         }
@@ -1921,6 +1997,16 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
       toast.error(`Failed to save script: ${e?.message || 'Unknown error'}`)
     } finally {
       setSaveScriptLoading(false)
+    }
+  }
+
+  const handleImportScriptMd = async (file: File) => {
+    try {
+      const text = await file.text()
+      setScriptContent(text)
+      toast.success(`Imported ${file.name}`)
+    } catch {
+      toast.error('Failed to read markdown file')
     }
   }
 
@@ -2428,20 +2514,32 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                         className="flex-1 overflow-hidden flex flex-col lg:flex-row relative"
                     >
                         {/* Mobile Tabs Toggle */}
-                        <div className="lg:hidden flex items-center bg-muted/40 border-b border-border p-1 shrink-0 z-20">
-                            <div className="flex w-full bg-card rounded-md border shadow-sm p-0.5 relative">
-                               <button 
-                                   onClick={() => setMobileTagTab('notes')} 
-                                   className={cn("flex-1 py-1.5 text-xs font-semibold rounded-sm z-10 transition-colors", mobileTagTab === 'notes' ? "text-foreground shadow-sm bg-background border border-border/50" : "text-muted-foreground hover:text-foreground")}
-                               >
-                                  Notes
-                               </button>
-                               <button 
-                                   onClick={() => setMobileTagTab('pdf')} 
-                                   className={cn("flex-1 py-1.5 text-xs font-semibold rounded-sm z-10 transition-colors", mobileTagTab === 'pdf' ? "text-foreground shadow-sm bg-background border border-border/50" : "text-muted-foreground hover:text-foreground")}
-                               >
-                                  PDF Viewer
-                               </button>
+                        <div className="lg:hidden flex items-center bg-muted/35 border-b border-border px-2 py-1.5 shrink-0 z-20">
+                            <div className="flex w-full bg-card rounded-xl border border-border/80 shadow-sm p-1 gap-1">
+                                <button
+                                    onClick={() => setMobileTagTab('notes')}
+                                    className={cn(
+                                        "flex-1 h-8 inline-flex items-center justify-center gap-1.5 text-xs font-semibold rounded-lg border transition-all",
+                                        mobileTagTab === 'notes'
+                                            ? "bg-background text-foreground border-border shadow-sm"
+                                            : "text-muted-foreground border-transparent hover:bg-background/70 hover:text-foreground"
+                                    )}
+                                >
+                                    <StickyNote className="w-3.5 h-3.5" />
+                                    Notes
+                                </button>
+                                <button
+                                    onClick={() => setMobileTagTab('pdf')}
+                                    className={cn(
+                                        "flex-1 h-8 inline-flex items-center justify-center gap-1.5 text-xs font-semibold rounded-lg border transition-all",
+                                        mobileTagTab === 'pdf'
+                                            ? "bg-background text-foreground border-border shadow-sm"
+                                            : "text-muted-foreground border-transparent hover:bg-background/70 hover:text-foreground"
+                                    )}
+                                >
+                                    <FileText className="w-3.5 h-3.5" />
+                                    Judgment
+                                </button>
                             </div>
                         </div>
 
@@ -2460,10 +2558,10 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                             style={{ '--split-pct': `${jSplitPct}%` } as any}
                         >
                             {/* Row 1: Toolbar - shown in both edit and preview modes */}
-                            <div className="sticky top-0 z-50 px-4 py-3 mb-4 border-b bg-card transition-all duration-300">
-                                <div className="flex items-center justify-between w-full">
+                            <div className="sticky top-0 z-50 px-3 py-2 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 transition-all duration-300">
+                                <div className="flex items-center justify-between gap-2 w-full">
                                     {/* Left side */}
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-1.5 min-w-0">
                                         {jNoteMode === 'preview' ? (
                                             <Button
                                                 variant="ghost"
@@ -2491,15 +2589,10 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                             </Button>
                                         )}
 
-                                        <div className="w-px h-5 bg-border" />
-
-                                        <span className="text-sm font-medium max-w-[300px] truncate px-2">
-                                            Notes
-                                        </span>
                                     </div>
 
                                     {/* Right side */}
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap max-w-[58%]">
                                         {/* Zoom Controls */}
                                         <div className="flex items-center gap-px bg-muted/60 p-0.5 rounded-md border border-border">
                                             <button onClick={() => setJNoteZoom(p => Math.max(0.5, p - 0.1))} className="w-6 h-6 flex items-center justify-center text-xs hover:bg-background rounded-sm text-muted-foreground hover:text-foreground" title="Zoom Out">-</button>
@@ -2534,22 +2627,13 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                             <Download className="w-3.5 h-3.5" />
                                         </Button>
 
-                                        {/* Focus Button */}
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => setPreviewFullscreen(!previewFullscreen)}
-                                            className="rounded-full h-8 px-3 text-xs transition-all duration-300"
-                                        >
-                                            {previewFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-                                        </Button>
                                     </div>
                                 </div>
                             </div>
 
                             {/* Row 2: Full formatting toolbar (same as normal notes) */}
                             {jNoteMode === 'edit' && editor && (
-                                <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border bg-card shadow-sm z-10 sticky top-0 flex-wrap">
+                                <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border bg-card shadow-sm z-10 sticky top-0 overflow-x-auto whitespace-nowrap [&>*]:shrink-0">
                                     {renderEditorToolbar()}
                                 </div>
                             )}
@@ -2597,7 +2681,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                                     setJHighlightedLinkId(b.linkId)
                                                     setJRightTab('judgment')
                                                     flashNoteSpan(b.linkId)
-                                                    setTimeout(() => setJHighlightedLinkId(null), 2000)
+                                                    setTimeout(() => setJHighlightedLinkId(null), JUMP_HIGHLIGHT_MS)
                                                 }}
                                             >{idx + 1}</button>
                                         ))}
@@ -2632,7 +2716,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                            )}
                         >
                             {/* Right panel tab bar */}
-                            <div className="flex items-center border-b border-border bg-card shrink-0 px-2 py-1 gap-1">
+                            <div className="flex items-center border-b border-border bg-card/95 shrink-0 px-2 py-1.5 gap-1.5 backdrop-blur supports-[backdrop-filter]:bg-card/85 overflow-x-auto whitespace-nowrap [&>*]:shrink-0">
                                 {([
                                     { id: 'judgment'   as const, icon: FileText,      label: 'Judgment' },
                                     { id: 'quiz'       as const, icon: MessageSquare, label: 'Quiz' },
@@ -2643,17 +2727,28 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                         key={id}
                                         onClick={() => setJRightTab(id)}
                                         className={cn(
-                                            'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all',
+                                            'h-8 inline-flex items-center gap-2 px-3 rounded-lg text-xs font-semibold border transition-all',
                                             jRightTab === id
-                                                ? 'bg-primary text-primary-foreground shadow-sm'
-                                                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                                                ? 'bg-primary/10 text-primary border-primary/30 shadow-sm'
+                                                : 'text-muted-foreground border-transparent hover:text-foreground hover:bg-muted/70'
                                         )}
                                     >
-                                        <Icon className="w-3.5 h-3.5" />
-                                        {label}
-                                        {id === 'quiz' && quizContent && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
-                                        {id === 'flashcards' && flashcards.length > 0 && <span className="text-[10px] opacity-70">{flashcards.length}</span>}
-                                        {id === 'script' && scriptContent !== originalScriptContent && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
+                                        <span
+                                            className={cn(
+                                                "inline-flex h-5 w-5 items-center justify-center rounded-md transition-colors",
+                                                jRightTab === id ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"
+                                            )}
+                                        >
+                                            <Icon className="w-3.5 h-3.5" />
+                                        </span>
+                                        <span>{label}</span>
+                                        {id === 'quiz' && quizContent && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                                        {id === 'flashcards' && flashcards.length > 0 && (
+                                            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold tabular-nums bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                                                {flashcards.length}
+                                            </span>
+                                        )}
+                                        {id === 'script' && scriptContent !== originalScriptContent && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
                                     </button>
                                 ))}
                             </div>
@@ -2682,6 +2777,7 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                     onScrollNotes={scrollNotesToLink}
                                     redrawTick={jRedrawTick}
                                     isPreview={jNoteMode === 'preview'}
+                                    getCurrentNotesText={() => editor?.getText() ?? ''}
                                     onAiNotesGenerated={(formatted, provider) => {
                                         if (!editor) return
                                         const html = customToHtml(formatted)
@@ -2955,24 +3051,52 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                                     <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
                                         <div>
                                             <p className="text-sm font-semibold text-foreground">Video Script (Admin)</p>
-                                            <p className="text-xs text-muted-foreground">Internal script notes only. Not shown on user site.</p>
+                                            <p className="text-xs text-muted-foreground">Markdown supported (`**bold**`, `*italic*`, headings, lists). Internal only.</p>
                                         </div>
-                                        <button
-                                            onClick={handleSaveScript}
-                                            disabled={saveScriptLoading || scriptContent === originalScriptContent}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                        >
-                                            {saveScriptLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                                            {saveScriptLoading ? 'Saving...' : 'Save Script'}
-                                        </button>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                ref={scriptMdInputRef}
+                                                type="file"
+                                                accept=".md,text/markdown,.txt"
+                                                className="hidden"
+                                                onChange={e => {
+                                                    const file = e.target.files?.[0]
+                                                    if (file) void handleImportScriptMd(file)
+                                                    e.target.value = ''
+                                                }}
+                                            />
+                                            <button
+                                                onClick={() => scriptMdInputRef.current?.click()}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border border-border hover:bg-muted transition-colors"
+                                            >
+                                                <Upload className="w-3.5 h-3.5" />
+                                                Import .md
+                                            </button>
+                                            <button
+                                                onClick={handleSaveScript}
+                                                disabled={saveScriptLoading || scriptContent === originalScriptContent}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                            >
+                                                {saveScriptLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                                                {saveScriptLoading ? 'Saving...' : 'Save Script'}
+                                            </button>
+                                        </div>
                                     </div>
                                     <div className="flex-1 p-4 overflow-auto">
-                                        <Textarea
-                                            value={scriptContent}
-                                            onChange={(e) => setScriptContent(e.target.value)}
-                                            placeholder="Write admin-only video script here..."
-                                            className="h-full min-h-[320px] resize-none text-sm leading-6"
-                                        />
+                                        <div className="grid h-full gap-4 lg:grid-cols-2">
+                                            <Textarea
+                                                value={scriptContent}
+                                                onChange={(e) => setScriptContent(e.target.value)}
+                                                placeholder="Write or paste markdown script here..."
+                                                className="h-full min-h-[320px] resize-none text-sm leading-6"
+                                            />
+                                            <div className="h-full min-h-[320px] overflow-auto rounded-lg border border-border bg-card p-4">
+                                                <div
+                                                    className="prose prose-sm max-w-none dark:prose-invert text-foreground"
+                                                    dangerouslySetInnerHTML={{ __html: scriptMarkdownPreviewHtml }}
+                                                />
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             )}

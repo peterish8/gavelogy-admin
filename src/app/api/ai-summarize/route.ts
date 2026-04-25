@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { fixNestedHighlights } from '@/lib/content-converter'
+import { splitConnectionsPayload, parseConnectionsJsonPart } from '@/lib/connections-json'
 import { isAdminApiRequest, unauthorizedResponse, checkPayloadSize } from '@/lib/admin-auth'
 import { JUDGMENT_SYSTEM_PROMPT as SYSTEM_PROMPT } from '@/lib/prompts'
 
@@ -68,21 +69,10 @@ async function callOpenRouter(messages: any[], apiKey: string, model: string, ma
 // ── Parse AI raw output into { formatted, connections } ──────────────
 // Splits the model response into formatted note markup and optional PDF-connection metadata JSON.
 function parseAiResponse(raw: string): { formatted: string; connections: any[] } {
-  const SEP = '---CONNECTIONS_JSON---'
-  const sepIdx = raw.indexOf(SEP)
-  if (sepIdx === -1) return { formatted: fixNestedHighlights(raw.trim()), connections: [] }
-
-  const formatted = fixNestedHighlights(raw.slice(0, sepIdx).trim())
-  const jsonPart = raw.slice(sepIdx + SEP.length).trim()
-
-  let connections: any[] = []
-  try {
-    // Strip any accidental markdown fences the model may add
-    // Strips accidental Markdown code fences before attempting to parse the JSON payload.
-    const cleaned = jsonPart.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim()
-    connections = JSON.parse(cleaned)
-    if (!Array.isArray(connections)) connections = []
-  } catch {
+  const { formatted: rawFormatted, jsonPart } = splitConnectionsPayload(raw)
+  const formatted = fixNestedHighlights(rawFormatted)
+  const connections = parseConnectionsJsonPart(jsonPart)
+  if (jsonPart && connections.length === 0) {
     // Non-fatal: notes are still returned without auto-links
     console.warn('[ai-summarize] Failed to parse connections JSON:', jsonPart.slice(0, 200))
   }

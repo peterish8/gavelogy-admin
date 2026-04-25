@@ -6,10 +6,10 @@ import { api } from '@convex/_generated/api'
 import type { Id } from '@convex/_generated/dataModel'
 import {
   Search, Users, BookOpen, Coins, Flame, Shield, X,
-  ChevronRight, Calendar, CheckCircle2, XCircle, Loader2, IndianRupee, TrendingUp
+  ChevronRight, Calendar, CheckCircle2, XCircle, Loader2, IndianRupee
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -259,7 +259,7 @@ function UserCoursesModal({
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
-export default function UsersClient() {
+function UsersClientAdmin() {
   const users = useQuery(api.admin.getAllUsersWithPurchases, {})
 
   const [search, setSearch] = useState('')
@@ -271,10 +271,7 @@ export default function UsersClient() {
   const [revenueModalUserName, setRevenueModalUserName] = useState('')
 
   // Fetch revenue for all users to show in table
-  const usersWithRevenue = useQuery(
-    api.adminQueries.getAllUsersWithRevenue,
-    {}
-  )
+  const usersWithRevenue = useQuery(api.adminQueries.getAllUsersWithRevenue, {})
 
   const filtered = useMemo(() => {
     if (!users) return []
@@ -582,4 +579,30 @@ export default function UsersClient() {
       />
     </>
   )
+}
+
+export default function UsersClient() {
+  const isAdmin = useQuery(api.admin.isAdmin, {})
+
+  if (isAdmin === undefined) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (isAdmin === false) {
+    return (
+      <div className="bg-card border border-border rounded-xl p-8 text-center">
+        <Shield className="w-10 h-10 mx-auto text-muted-foreground/50 mb-3" />
+        <h2 className="text-lg font-semibold text-foreground">Admin Access Required</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          You don&apos;t have permission to view the users dashboard.
+        </p>
+      </div>
+    )
+  }
+
+  return <UsersClientAdmin />
 }

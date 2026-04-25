@@ -122,15 +122,23 @@ export default function PYQEditPage() {
   }, [testDoc, passageDocs, questionDocs, initialized])
 
   const copyPrompt = async () => {
-    await navigator.clipboard.writeText(PYQ_AI_SYSTEM_PROMPT)
-    setPromptCopied(true)
-    setTimeout(() => setPromptCopied(false), 3000)
+    try {
+      await navigator.clipboard.writeText(PYQ_AI_SYSTEM_PROMPT)
+      setPromptCopied(true)
+      setTimeout(() => setPromptCopied(false), 3000)
+    } catch {
+      setPasteError('Clipboard permission denied. Copy manually.')
+    }
   }
 
   const copyReview = async () => {
-    await navigator.clipboard.writeText(buildPyqReviewText(bundle))
-    setQaCopied(true)
-    setTimeout(() => setQaCopied(false), 3000)
+    try {
+      await navigator.clipboard.writeText(buildPyqReviewText(bundle))
+      setQaCopied(true)
+      setTimeout(() => setQaCopied(false), 3000)
+    } catch {
+      setPasteError('Clipboard permission denied. Copy manually.')
+    }
   }
 
   const updatePassage = (index: number, field: keyof PyqPassageDraft, value: string | boolean) => {

@@ -159,15 +159,23 @@ export default function NewPYQTestPage() {
   }
 
   const copyPrompt = async () => {
-    await navigator.clipboard.writeText(PYQ_AI_SYSTEM_PROMPT)
-    setPromptCopied(true)
-    setTimeout(() => setPromptCopied(false), 3000)
+    try {
+      await navigator.clipboard.writeText(PYQ_AI_SYSTEM_PROMPT)
+      setPromptCopied(true)
+      setTimeout(() => setPromptCopied(false), 3000)
+    } catch {
+      setUploadError('Clipboard permission denied. Copy manually.')
+    }
   }
 
   const copyReview = async () => {
-    await navigator.clipboard.writeText(buildPyqReviewText(bundle))
-    setQaCopied(true)
-    setTimeout(() => setQaCopied(false), 3000)
+    try {
+      await navigator.clipboard.writeText(buildPyqReviewText(bundle))
+      setQaCopied(true)
+      setTimeout(() => setQaCopied(false), 3000)
+    } catch {
+      setUploadError('Clipboard permission denied. Copy manually.')
+    }
   }
 
   const addPassage = () => {

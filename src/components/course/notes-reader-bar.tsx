@@ -5,6 +5,13 @@ import { Play, Pause, Square, Timer, Gauge } from 'lucide-react'
 import { startTTS, stopTTS, pauseTTS, resumeTTS, subscribeTTS } from '@/lib/tts-manager'
 import type { TTSSnapshot, TTSToken } from '@/lib/tts-processor'
 import { findTokenIndexByPmPos, findTokenIndexByTextOffset } from '@/lib/tts-processor'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 const SPEEDS = [0.75, 1, 1.25, 1.5, 2] as const
 
@@ -27,6 +34,8 @@ export const NotesReaderBar = forwardRef<NotesReaderBarRef, NotesReaderBarProps>
     const [duration, setDuration] = useState(0)
     const [isScrubbing, setIsScrubbing] = useState(false)
     const [scrubValue, setScrubValue] = useState(0)
+    const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
+    const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>('')
 
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
     const pausedAtRef = useRef(0)
@@ -41,6 +50,51 @@ export const NotesReaderBar = forwardRef<NotesReaderBarRef, NotesReaderBarProps>
     useEffect(() => {
       activeSnapshotRef.current = snapshot
     }, [snapshot])
+
+    useEffect(() => {
+      if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
+
+      const synth = window.speechSynthesis
+      const pickFallbackVoice = (availableVoices: SpeechSynthesisVoice[]) => {
+        return availableVoices.find(v => v.lang.startsWith('en') && v.name.includes('Google'))
+          ?? availableVoices.find(v => v.lang.startsWith('en'))
+          ?? availableVoices[0]
+          ?? null
+      }
+
+      const updateVoices = () => {
+        const availableVoices = synth.getVoices()
+        setVoices(availableVoices)
+
+        if (!availableVoices.length) {
+          setSelectedVoiceURI('')
+          return
+        }
+
+        setSelectedVoiceURI((prev) => {
+          if (prev && availableVoices.some(v => v.voiceURI === prev)) {
+            return prev
+          }
+          return pickFallbackVoice(availableVoices)?.voiceURI ?? ''
+        })
+      }
+
+      updateVoices()
+      if (typeof synth.addEventListener === 'function') {
+        synth.addEventListener('voiceschanged', updateVoices)
+        return () => {
+          synth.removeEventListener('voiceschanged', updateVoices)
+        }
+      }
+
+      const previousOnVoicesChanged = synth.onvoiceschanged
+      synth.onvoiceschanged = updateVoices
+      return () => {
+        if (synth.onvoiceschanged === updateVoices) {
+          synth.onvoiceschanged = previousOnVoicesChanged ?? null
+        }
+      }
+    }, [])
 
     useEffect(() => {
       return () => {
@@ -110,6 +164,10 @@ export const NotesReaderBar = forwardRef<NotesReaderBarRef, NotesReaderBarProps>
       const estimatedDuration = Math.ceil(currentSnapshot.tokens.length / (3.5 * SPEEDS[requestedSpeedIdx]))
       const textToSpeak = currentSnapshot.fullText.slice(startToken.textStart)
       const utterance = new SpeechSynthesisUtterance(textToSpeak)
+      const chosenVoice = voices.find(v => v.voiceURI === selectedVoiceURI)
+      if (chosenVoice) {
+        utterance.voice = chosenVoice
+      }
 
       utterance.rate = SPEEDS[requestedSpeedIdx]
       currentStartTokenIndexRef.current = tokenIndex
@@ -151,7 +209,7 @@ export const NotesReaderBar = forwardRef<NotesReaderBarRef, NotesReaderBarProps>
 
       utteranceRef.current = utterance
       startTTS('notes', utterance)
-    }, [onActiveTokenChange, resetPlaybackState, speedIdx, startTimer])
+    }, [onActiveTokenChange, resetPlaybackState, selectedVoiceURI, speedIdx, startTimer, voices])
 
     useImperativeHandle(ref, () => ({
       playFromPmPosition: (pmPos: number) => {
@@ -194,6 +252,16 @@ export const NotesReaderBar = forwardRef<NotesReaderBarRef, NotesReaderBarProps>
         handlePlayFromToken(resumeTokenIndex, nextIdx)
       }
     }, [handlePlayFromToken, isPlaying, speedIdx])
+
+    const handleVoiceChange = useCallback((voiceURI: string) => {
+      setSelectedVoiceURI(voiceURI)
+
+      if (!isPlaying || isPaused) return
+      const resumeTokenIndex = activeTokenIndexRef.current >= 0
+        ? activeTokenIndexRef.current
+        : currentStartTokenIndexRef.current
+      handlePlayFromToken(resumeTokenIndex)
+    }, [handlePlayFromToken, isPaused, isPlaying])
 
     const handleScrubStart = (e: React.PointerEvent) => {
       e.preventDefault()
@@ -251,7 +319,7 @@ export const NotesReaderBar = forwardRef<NotesReaderBarRef, NotesReaderBarProps>
     const canPlay = !!snapshot && snapshot.tokens.length > 0 && snapshot.fullText.trim().length > 0
 
     return (
-      <div className="shrink-0 flex flex-col gap-2 px-3 py-2 border-t border-border bg-card">
+      <div className="shrink-0 border-t border-border bg-card px-3 py-2">
         <div
           className="relative flex-1 h-3 flex items-center cursor-pointer group select-none touch-none min-w-[80px]"
           onPointerDown={handleScrubStart}
@@ -270,10 +338,30 @@ export const NotesReaderBar = forwardRef<NotesReaderBarRef, NotesReaderBarProps>
           />
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 mt-2">
+          <Select
+            value={selectedVoiceURI}
+            onValueChange={handleVoiceChange}
+            disabled={voices.length === 0}
+          >
+            <SelectTrigger
+              className="h-8 max-w-[240px] rounded-full border-border bg-background px-2 text-xs text-muted-foreground"
+              title="Voice"
+            >
+              <SelectValue placeholder={voices.length === 0 ? 'Loading voices...' : 'Select voice'} />
+            </SelectTrigger>
+            <SelectContent align="start" className="max-w-[340px]">
+              {voices.map((voice) => (
+                <SelectItem key={voice.voiceURI} value={voice.voiceURI} className="text-xs">
+                  {voice.name} ({voice.lang})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           <button
             onClick={handleSpeedChange}
-            className="flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-medium border border-border/70 bg-background text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
             title="Playback speed"
           >
             <Gauge className="w-3.5 h-3.5" />
@@ -286,7 +374,7 @@ export const NotesReaderBar = forwardRef<NotesReaderBarRef, NotesReaderBarProps>
             <button
               onClick={() => handlePlayFromToken(0)}
               disabled={!canPlay}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 h-8 px-3.5 rounded-full text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Play className="w-3 h-3 fill-current" />
               Read aloud
@@ -294,7 +382,7 @@ export const NotesReaderBar = forwardRef<NotesReaderBarRef, NotesReaderBarProps>
           ) : (
             <button
               onClick={handlePauseResume}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm"
+              className="flex items-center gap-1.5 h-8 px-3.5 rounded-full text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm"
             >
               {isPaused
                 ? <><Play className="w-3 h-3 fill-current" />Resume</>
@@ -305,14 +393,14 @@ export const NotesReaderBar = forwardRef<NotesReaderBarRef, NotesReaderBarProps>
           {isPlaying && (
             <button
               onClick={handleStop}
-              className="w-7 h-7 flex items-center justify-center rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+              className="w-8 h-8 flex items-center justify-center rounded-full border border-border/70 bg-background text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
               title="Stop"
             >
               <Square className="w-3 h-3 fill-current" />
             </button>
           )}
 
-          <div className="flex items-center gap-1 text-xs font-mono text-muted-foreground min-w-[50px] justify-end">
+          <div className="flex items-center gap-1 px-2.5 h-8 rounded-full border border-border/70 bg-background text-xs font-mono text-muted-foreground min-w-[92px] justify-center">
             <Timer className="w-3 h-3" />
             {formatTime(elapsed)}/{formatTime(duration)}
           </div>

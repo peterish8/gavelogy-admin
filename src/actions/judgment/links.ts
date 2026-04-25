@@ -108,6 +108,29 @@ export async function updateLinkLabel(id: string, label: string): Promise<void> 
   )
 }
 
+export async function updateLinkRegion(payload: {
+  id: string
+  pdf_page: number
+  x: number
+  y: number
+  width: number
+  height: number
+}): Promise<void> {
+  const token = await getToken()
+  await fetchMutation(
+    (api as any).admin.updateNotePdfLinkRegion,
+    {
+      linkId: payload.id as Id<'note_pdf_links'>,
+      pdf_page: payload.pdf_page,
+      x: payload.x,
+      y: payload.y,
+      width: payload.width,
+      height: payload.height,
+    },
+    token ? { token } : undefined
+  )
+}
+
 export async function deleteLink(id: string): Promise<void> {
   const token = await getToken()
   await fetchMutation(

@@ -534,7 +534,7 @@
   .dark .note-blue   { background: rgba(59, 130, 246, 0.12);  border-color: #3B82F6; }
   .dark .note-green  { background: rgba(34, 197, 94, 0.12);   border-color: #22C55E; }
   .dark .note-red    { background: rgba(239, 68, 68, 0.12);   border-color: #EF4444; }
-  .dark .note-amber  { background: rgba(255, 244, 179, 0.35); border-color: #EBCB67; color: #1F2937 !important; }
+  .dark .note-amber  { background: rgba(255, 244, 179, 0.35); border-color: #EBCB67; color: #F8FAFC !important; }
   .dark .note-purple { background: rgba(168, 85, 247, 0.12);  border-color: #A855F7; }
   .dark .note-violet { background: rgba(124, 58, 237, 0.12);  border-color: #7C3AED; }
   .dark .note-slate  { background: rgba(51, 65, 85, 0.35);    border-color: #475569; color: #FFFFFF !important; }
@@ -547,7 +547,7 @@
   .dark .note-amber strong,
   .dark .note-amber b,
   .dark .prose .note-amber strong {
-    color: #111827 !important;
+    color: #FFFFFF !important;
   }
 
   /* Force Light Note Overrides (prevent html.dark from overriding force-light) */
@@ -847,7 +847,7 @@
   .dark .notes-editor-scroll .note-blue { background: rgba(59, 130, 246, 0.14) !important; border-color: #3b82f6 !important; color: #f8fafc !important; }
   .dark .notes-editor-scroll .note-green { background: rgba(34, 197, 94, 0.14) !important; border-color: #22c55e !important; color: #f8fafc !important; }
   .dark .notes-editor-scroll .note-red { background: rgba(239, 68, 68, 0.14) !important; border-color: #ef4444 !important; color: #f8fafc !important; }
-  .dark .notes-editor-scroll .note-amber { background: rgba(255, 244, 179, 0.34) !important; border-color: #ebcb67 !important; color: #111827 !important; }
+  .dark .notes-editor-scroll .note-amber { background: rgba(255, 244, 179, 0.34) !important; border-color: #ebcb67 !important; color: #f8fafc !important; }
   .dark .notes-editor-scroll .note-purple { background: rgba(168, 85, 247, 0.14) !important; border-color: #a855f7 !important; color: #f8fafc !important; }
   .dark .notes-editor-scroll .note-violet { background: rgba(124, 58, 237, 0.14) !important; border-color: #7c3aed !important; color: #f8fafc !important; }
   .dark .notes-editor-scroll .note-cyan { background: rgba(6, 182, 212, 0.14) !important; border-color: #06b6d4 !important; color: #f8fafc !important; }
@@ -888,7 +888,7 @@
 
   .dark .notes-editor-scroll .note-amber strong,
   .dark .notes-editor-scroll .note-amber b {
-    color: #111827 !important;
+    color: #ffffff !important;
   }
 
   /* Horizontal Rule Styling */
