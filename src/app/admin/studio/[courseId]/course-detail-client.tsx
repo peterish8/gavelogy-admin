@@ -531,7 +531,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
   }
 
   // Copies the structure tree (or a stripped template version) as JSON to the clipboard for backup or import.
-  const handleCopyJson = (mode: 'current' | 'template') => {
+  const handleCopyJson = async (mode: 'current' | 'template') => {
     if (!course || !items) return
 
     let mappedStructure = []
@@ -586,10 +586,34 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
     }
 
     const jsonString = JSON.stringify(exportData, null, 2)
-    
-    navigator.clipboard.writeText(jsonString)
-        .then(() => toast.success(mode === 'template' ? 'Course Template copied!' : 'Course JSON copied!'))
-        .catch(() => toast.error('Failed to copy to clipboard'))
+    const successMsg = mode === 'template' ? 'Course Template copied!' : 'Course JSON copied!'
+
+    try {
+      if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+        throw new Error('Clipboard API unavailable')
+      }
+      await navigator.clipboard.writeText(jsonString)
+      toast.success(successMsg)
+    } catch {
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = jsonString
+        ta.setAttribute('readonly', '')
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        const copied = document.execCommand('copy')
+        document.body.removeChild(ta)
+        if (copied) {
+          toast.success(successMsg)
+          return
+        }
+      } catch {
+        // fallthrough
+      }
+      toast.error('Failed to copy to clipboard')
+    }
   }
 
   // With SSR data seeding, loading should be instant or very brief
@@ -708,26 +732,26 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
                 style={{ width: sidebarWidth, flexShrink: 0 }}
                 className="hidden lg:flex bg-card border border-border rounded-xl flex-col overflow-hidden shadow-sm h-full z-10"
             >
-            <div className="p-4 border-b border-border bg-muted/50 flex flex-col gap-4 shrink-0 transition-all">
+            <div className="p-3 border-b border-border bg-muted/50 flex flex-col gap-3 shrink-0 transition-all">
                
                 {/* Compact stats row (expandable to detailed cards) */}
-                <div className="space-y-2">
-                    <div className="bg-card border border-border rounded-xl px-2.5 py-2 shadow-sm overflow-hidden">
+                <div className="space-y-1.5">
+                    <div className="bg-card border border-border rounded-xl px-2 py-1.5 shadow-sm overflow-hidden">
                         {!showSidebarStatsExpanded ? (
-                            <div className="flex items-center gap-2 text-[11px] font-bold text-muted-foreground/85">
-                                <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-1 rounded-lg bg-blue-50/70 text-blue-700" title={`${stats.folders} Modules`}>
+                            <div className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground/85">
+                                <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-0.5 rounded-lg bg-blue-50/70 text-blue-700" title={`${stats.folders} Modules`}>
                                     <Folder className="h-3.5 w-3.5 shrink-0" />
                                     <span className="tabular-nums">{stats.folders}</span>
                                 </span>
-                                <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-1 rounded-lg bg-purple-50/70 text-purple-700" title={`${stats.files} Files`}>
+                                <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-0.5 rounded-lg bg-purple-50/70 text-purple-700" title={`${stats.files} Files`}>
                                     <FileText className="h-3.5 w-3.5 shrink-0" />
                                     <span className="tabular-nums">{stats.files}</span>
                                 </span>
-                                <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-1 rounded-lg bg-amber-50/70 text-amber-700" title={`${stats.notes} Content`}>
+                                <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-0.5 rounded-lg bg-amber-50/70 text-amber-700" title={`${stats.notes} Content`}>
                                     <StickyNote className="h-3.5 w-3.5 shrink-0" />
                                     <span className="tabular-nums">{stats.notes}</span>
                                 </span>
-                                <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-1 rounded-lg bg-rose-50/70 text-rose-700" title={`${stats.quizzes} Quizzes`}>
+                                <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-0.5 rounded-lg bg-rose-50/70 text-rose-700" title={`${stats.quizzes} Quizzes`}>
                                     <HelpCircle className="h-3.5 w-3.5 shrink-0" />
                                     <span className="tabular-nums">{stats.quizzes}</span>
                                 </span>
@@ -802,7 +826,7 @@ export default function CourseDetailPage({ courseId, initialCourse, initialStruc
                     <input 
                         type="text" 
                         placeholder="Filter course structure..." 
-                        className="w-full pl-9 pr-8 h-10 text-sm rounded-xl border border-border bg-card shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-muted-foreground/70"
+                        className="w-full pl-9 pr-8 h-9 text-sm rounded-xl border border-border bg-card shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all placeholder:text-muted-foreground/70"
                         value={searchQuery}
                         onChange={(e) => handleSearch(e.target.value)}
                     />

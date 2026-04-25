@@ -15,6 +15,8 @@ export interface TTSSnapshot {
   versionKey: string
 }
 
+const CONNECTIONS_JSON_MARKER_RE = /---\s*CONNECTIONS_JSON\s*---/i
+
 export function buildTTSSnapshotFromDoc(doc: ProseMirrorNode): TTSSnapshot {
   let fullText = ''
   const tokens: TTSToken[] = []
@@ -105,6 +107,38 @@ export function buildTTSSnapshotFromDoc(doc: ProseMirrorNode): TTSSnapshot {
   })
 
   flushCurrentToken()
+
+  const markerMatch = CONNECTIONS_JSON_MARKER_RE.exec(fullText)
+  if (markerMatch && typeof markerMatch.index === 'number') {
+    const markerIndex = markerMatch.index
+    fullText = fullText.slice(0, markerIndex).trimEnd()
+
+    const trimmedTokens: TTSToken[] = []
+    for (const token of tokens) {
+      if (token.textStart >= markerIndex) break
+      if (token.textEnd <= markerIndex) {
+        trimmedTokens.push({
+          ...token,
+          index: trimmedTokens.length,
+        })
+        continue
+      }
+
+      const keepChars = Math.max(0, markerIndex - token.textStart)
+      if (keepChars <= 0) break
+
+      trimmedTokens.push({
+        ...token,
+        text: token.text.slice(0, keepChars),
+        textEnd: markerIndex,
+        index: trimmedTokens.length,
+      })
+      break
+    }
+
+    tokens.length = 0
+    tokens.push(...trimmedTokens)
+  }
 
   return {
     fullText,

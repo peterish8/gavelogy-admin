@@ -158,13 +158,18 @@ const highlightColors = [
 ]
 
 const Toolbar = ({ editor }: { editor: Editor | null }) => {
-  if (!editor) return null
   const [copied, setCopied] = useState(false)
+  if (!editor) return null
 
   const copyBeautifyPrompt = () => {
     navigator.clipboard.writeText(BEAUTIFY_PROMPT).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
+    }).catch(() => {
+      setCopied(false)
+      if (typeof window !== 'undefined') {
+        window.alert('Clipboard permission denied. Please copy manually.')
+      }
     })
   }
 

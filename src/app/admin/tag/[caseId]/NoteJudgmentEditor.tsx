@@ -6,6 +6,7 @@ import { insertLink, deleteLink, clearItemPdfUrl } from '@/actions/judgment/link
 import { saveNoteContent } from '@/actions/judgment/note-content'
 import type { NotePdfLink } from '@/actions/judgment/links'
 import { customToHtml, htmlToCustom } from '@/lib/content-converter'
+import { stripConnectionsTail } from '@/lib/connections-json'
 import { DEFAULT_LINK_COLOR, parseLinkMeta, encodeLinkMeta } from '@/lib/pdf-utils'
 import { hexToRgba, findTextInPageData } from '@/lib/pdf-search'
 import { cn } from '@/lib/utils'
@@ -49,12 +50,16 @@ export default function NoteJudgmentEditor({
   const [savingNote, setSavingNote] = useState(false)
   const [noteMode, setNoteMode] = useState<'edit' | 'preview'>('edit')
   // Snapshot of editor HTML captured when switching to preview (ref becomes null after unmount)
-  const [previewHtml, setPreviewHtml] = useState(() => customToHtml(noteContentHtml))
+  const [previewHtml, setPreviewHtml] = useState(() => customToHtml(stripConnectionsTail(noteContentHtml)))
+
+  function sanitizePreviewHtml(html: string): string {
+    return customToHtml(stripConnectionsTail(htmlToCustom(html)))
+  }
 
   // Captures the current editor HTML before switching to preview so the rendered view stays in sync.
   function switchNoteMode(mode: 'edit' | 'preview') {
     if (mode === 'preview' && noteEditorRef.current) {
-      setPreviewHtml(noteEditorRef.current.innerHTML)
+      setPreviewHtml(sanitizePreviewHtml(noteEditorRef.current.innerHTML))
     }
     setNoteMode(mode)
   }
@@ -118,6 +123,7 @@ export default function NoteJudgmentEditor({
   const [signedUrl, setSignedUrl] = useState<string | null>(initialSignedUrl)
   const [uploadingPdf, setUploadingPdf] = useState(false)
   const [deletingPdf, setDeletingPdf] = useState(false)
+  const [isDropzoneActive, setIsDropzoneActive] = useState(false)
   const [numPages, setNumPages] = useState(0)
   const [pageStates, setPageStates] = useState<
     Record<number, { rendered: boolean; width: number; height: number }>
@@ -332,6 +338,16 @@ export default function NoteJudgmentEditor({
     return `link-${base || Date.now()}`
   }
 
+  function buildRangeNeedles(text: string): { start: string; end?: string } {
+    const words = text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
+    if (words.length === 0) return { start: '' }
+    if (words.length < 8) return { start: words.join(' ') }
+    return {
+      start: words.slice(0, 8).join(' '),
+      end: words.slice(-8).join(' '),
+    }
+  }
+
   // Wraps the current selection in a linked-text span with the typed link ID and enters linking mode waiting for a PDF drag.
   function handleStartLinking() {
     const id = linkIdInput.trim()
@@ -422,7 +438,12 @@ export default function NoteJudgmentEditor({
       const createdLinks: NotePdfLink[] = []
       for (const conn of aiConnections) {
         try {
-          const pos = findTextInPageData(pageData, conn.pdfSearchText ?? '', conn.pdfPage)
+          const pos = findTextInPageData(
+            pageData,
+            conn.pdfSearchText ?? '',
+            conn.pdfPage,
+            conn.pdfSearchTextEnd ?? undefined,
+          )
           if (!pos) { console.debug('[generate] not found:', conn.linkId, conn.pdfSearchText); continue }
           const label = encodeLinkMeta(conn.label ?? '', conn.color ?? DEFAULT_LINK_COLOR)
           const newLink = await insertLink({
@@ -447,7 +468,7 @@ export default function NoteJudgmentEditor({
 
       const html = customToHtml(formattedWithLinks)
       if (noteEditorRef.current) noteEditorRef.current.innerHTML = html
-      setPreviewHtml(html)
+      setPreviewHtml(sanitizePreviewHtml(html))
       await saveNoteContent(caseId, formattedWithLinks)
       setNoteDirty(false)
       setLinks(createdLinks)
@@ -470,7 +491,7 @@ export default function NoteJudgmentEditor({
       const customTags = htmlToCustom(noteEditorRef.current.innerHTML)
       await saveNoteContent(caseId, customTags)
       setNoteDirty(false)
-      setPreviewHtml(noteEditorRef.current.innerHTML)
+      setPreviewHtml(sanitizePreviewHtml(noteEditorRef.current.innerHTML))
       toast.success('Note saved')
     } catch (err: any) {
       toast.error(err.message || 'Failed to save')
@@ -513,12 +534,46 @@ export default function NoteJudgmentEditor({
     setConnectPdfCapture(null)
   }
 
-  function handlePdfTextMouseUp(e: React.MouseEvent, pageNum: number) {
+  async function handlePdfTextMouseUp(e: React.MouseEvent, pageNum: number) {
     if (!connectMode || connectStep !== 'pdf' || connectPdfCapture) return
 
     const sel = window.getSelection()
-    if (!sel || sel.isCollapsed || !sel.toString().trim()) return
+    let selectedText = sel?.toString().trim() ?? ''
+    if (!selectedText) {
+      const clickedWord = (e.target as HTMLElement).closest('.pdfTextLayer span') as HTMLElement | null
+      selectedText = clickedWord?.textContent?.trim() ?? ''
+    }
+    if (!selectedText) return
+    const state = pageStates[pageNum]
+    const textLayer = textLayerContainerRefs.current.get(pageNum)
+    if (state?.rendered && textLayer && pdfDocRef.current) {
+      try {
+        const page = await pdfDocRef.current.getPage(pageNum)
+        const content = await page.getTextContent()
+        const { start, end } = buildRangeNeedles(selectedText)
+        const precise = findTextInPageData(
+          [{ pageNum, items: content.items as any[] }],
+          start,
+          pageNum,
+          end,
+        )
+        if (precise) {
+          setConnectPdfCapture({
+            page: pageNum,
+            x: precise.x,
+            y: precise.y,
+            width: precise.width,
+            height: precise.height,
+            text: selectedText,
+          })
+          return
+        }
+      } catch (err) {
+        console.warn('Precise PDF match failed, falling back to selection bounds:', err)
+      }
+    }
 
+    if (!sel || sel.rangeCount === 0) return
     const range = sel.getRangeAt(0)
     const rect = range.getBoundingClientRect()
     const pageEl = pageContainerRefs.current.get(pageNum)
@@ -538,7 +593,7 @@ export default function NoteJudgmentEditor({
       y: (canvasH - mouseY - mouseH) / SCALE,
       width: Math.max(mouseW / SCALE, 10),
       height: Math.max(mouseH / SCALE, 8),
-      text: sel.toString().trim(),
+      text: selectedText,
     })
   }
 
@@ -575,7 +630,7 @@ export default function NoteJudgmentEditor({
       const customTags = htmlToCustom(htmlAfterInsert)
       await saveNoteContent(caseId, customTags)
       setNoteDirty(false)
-      setPreviewHtml(htmlAfterInsert)
+      setPreviewHtml(sanitizePreviewHtml(htmlAfterInsert))
 
       toast.success(`Connected "${linkId}"`)
       exitConnectMode()
@@ -606,6 +661,18 @@ export default function NoteJudgmentEditor({
     } finally {
       setUploadingPdf(false)
     }
+  }
+
+  function isPdfFile(file: File): boolean {
+    return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+  }
+
+  async function handlePdfFileSelected(file: File) {
+    if (!isPdfFile(file)) {
+      toast.error('Please upload a PDF file')
+      return
+    }
+    await handlePdfUpload(file)
   }
 
   // ── PDF delete ─────────────────────────────────────────────────────
@@ -826,7 +893,7 @@ export default function NoteJudgmentEditor({
         const customTags = htmlToCustom(noteEditorRef.current.innerHTML)
         await saveNoteContent(caseId, customTags)
         setNoteDirty(false)
-        setPreviewHtml(noteEditorRef.current.innerHTML)
+        setPreviewHtml(sanitizePreviewHtml(noteEditorRef.current.innerHTML))
       }
 
       // Clear any active connection for this link
@@ -1256,7 +1323,7 @@ export default function NoteJudgmentEditor({
               className="hidden"
               onChange={e => {
                 const f = e.target.files?.[0]
-                if (f) handlePdfUpload(f)
+                if (f) handlePdfFileSelected(f)
                 e.target.value = ''
               }}
             />
@@ -1338,18 +1405,44 @@ export default function NoteJudgmentEditor({
           }}
         >
           {!signedUrl ? (
-            <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
-              <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
-                <FileText className="w-8 h-8 text-muted-foreground/40" />
+            <div className="flex items-center justify-center h-full p-6">
+              <div
+                className={cn(
+                  'w-full max-w-xl rounded-2xl border-2 border-dashed p-8 text-center transition-colors',
+                  isDropzoneActive ? 'border-primary bg-primary/5' : 'border-border bg-card',
+                  (uploadingPdf || deletingPdf) && 'opacity-70 pointer-events-none',
+                )}
+                onDragEnter={e => {
+                  e.preventDefault()
+                  if (!uploadingPdf && !deletingPdf) setIsDropzoneActive(true)
+                }}
+                onDragOver={e => {
+                  e.preventDefault()
+                  if (!uploadingPdf && !deletingPdf) setIsDropzoneActive(true)
+                }}
+                onDragLeave={e => {
+                  e.preventDefault()
+                  const related = e.relatedTarget as Node | null
+                  if (!related || !e.currentTarget.contains(related)) setIsDropzoneActive(false)
+                }}
+                onDrop={e => {
+                  e.preventDefault()
+                  setIsDropzoneActive(false)
+                  if (uploadingPdf || deletingPdf) return
+                  const f = e.dataTransfer.files?.[0]
+                  if (f) void handlePdfFileSelected(f)
+                }}
+              >
+                <div className="mx-auto mb-3 w-14 h-14 rounded-2xl bg-muted flex items-center justify-center">
+                  <FileText className="w-7 h-7 text-muted-foreground/60" />
+                </div>
+                <p className="text-sm font-semibold text-foreground">Drag and drop judgment PDF here</p>
+                <p className="text-xs text-muted-foreground mt-1">or click below to upload/replace PDF</p>
+                <Button onClick={() => fileInputRef.current?.click()} size="sm" className="mt-4">
+                  <Upload className="w-4 h-4 mr-2" />
+                  {uploadingPdf ? 'Uploading…' : 'Upload PDF'}
+                </Button>
               </div>
-              <div>
-                <p className="text-sm font-medium text-foreground">No judgment PDF yet</p>
-                <p className="text-xs text-muted-foreground mt-1">Upload a PDF to start tagging passages</p>
-              </div>
-              <Button onClick={() => fileInputRef.current?.click()} size="sm">
-                <Upload className="w-4 h-4 mr-2" />
-                Upload PDF
-              </Button>
             </div>
           ) : pdfLoading ? (
             <div className="flex items-center justify-center h-full">
