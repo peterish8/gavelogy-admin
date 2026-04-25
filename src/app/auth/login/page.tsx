@@ -44,27 +44,13 @@ export default function LoginPage() {
   // Already authenticated, don't flash login UI
   if (isAuthenticated) return null
 
-  const ADMIN_EMAILS = (process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? '')
-    .split(',').map(e => e.trim().toLowerCase())
-  const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD ?? ''
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError(null)
 
     try {
-      // Reject non-admin emails immediately before even hitting Convex
-      if (!ADMIN_EMAILS.includes(email.trim().toLowerCase())) {
-        throw new Error('Access denied. You do not have admin privileges.')
-      }
-
-      // Validate against env-based admin password
-      if (ADMIN_PASSWORD && password !== ADMIN_PASSWORD) {
-        throw new Error('Invalid password.')
-      }
-
-      const result = await signIn(email, password)
+      const result = await signIn(email.trim(), password)
       if (!result.success) {
         throw new Error(result.error || 'Login failed. Please try again.')
       }
@@ -82,8 +68,8 @@ export default function LoginPage() {
     setDevModeLoading(true)
     setError(null)
 
-    const devEmail = process.env.NEXT_PUBLIC_DEV_ADMIN_EMAIL?.trim() || 'dev-admin@gavelogy.local'
-    const devPassword = process.env.NEXT_PUBLIC_DEV_ADMIN_PASSWORD?.trim() || 'gavelogy-dev-admin'
+    const devEmail = 'dev-admin@gavelogy.local'
+    const devPassword = 'gavelogy-dev-admin'
 
     try {
       const result = await signIn(devEmail, devPassword)
