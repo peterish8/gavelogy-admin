@@ -1,0 +1,1040 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Gavelogy Private Admin API",
+    "version": "1.0.0",
+    "description": "Allowlisted private admin API for GPT/MCP automation. Supports only create/read/update/publish workflows. Deletion remains manual in Gavelogy admin UI."
+  },
+  "servers": [
+    {
+      "url": "https://<my-vercel-domain>"
+    }
+  ],
+  "security": [
+    {
+      "AdminSecret": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "AdminSecret": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-admin-secret"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "CourseCreate": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "price": {
+            "type": "number"
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "is_free": {
+            "type": "boolean"
+          },
+          "icon": {
+            "type": "string"
+          }
+        }
+      },
+      "CoursePatch": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "price": {
+            "type": "number"
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "is_free": {
+            "type": "boolean"
+          },
+          "icon": {
+            "type": "string"
+          }
+        }
+      },
+      "StructureItemCreate": {
+        "type": "object",
+        "required": [
+          "title",
+          "item_type"
+        ],
+        "properties": {
+          "parentId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "item_type": {
+            "type": "string",
+            "enum": [
+              "folder",
+              "file"
+            ]
+          },
+          "order_index": {
+            "type": "number"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "pdf_url": {
+            "type": "string"
+          }
+        }
+      },
+      "StructureItemPatch": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "parentId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "order_index": {
+            "type": "number"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "pdf_url": {
+            "type": "string"
+          },
+          "item_type": {
+            "type": "string",
+            "enum": [
+              "folder",
+              "file"
+            ]
+          }
+        }
+      },
+      "Flashcard": {
+        "type": "object",
+        "required": [
+          "front",
+          "back"
+        ],
+        "properties": {
+          "front": {
+            "type": "string"
+          },
+          "back": {
+            "type": "string"
+          }
+        }
+      },
+      "QuizQuestion": {
+        "type": "object",
+        "required": [
+          "questionText",
+          "options",
+          "correctAnswer"
+        ],
+        "properties": {
+          "questionText": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "correctAnswer": {
+            "type": "string"
+          },
+          "explanation": {
+            "type": "string"
+          }
+        }
+      },
+      "DailyNewsPatch": {
+        "type": "object",
+        "minProperties": 1,
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "content_html": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "category": {
+            "type": "string"
+          },
+          "source_paper": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "paths": {
+    "/api/mcp/admin/capabilities": {
+      "get": {
+        "operationId": "getAdminCapabilities",
+        "summary": "Get allowed and forbidden operations",
+        "responses": {
+          "200": {
+            "description": "Capabilities"
+          }
+        }
+      }
+    },
+    "/api/mcp/admin/courses": {
+      "get": {
+        "operationId": "listCourses",
+        "summary": "List all courses",
+        "responses": {
+          "200": {
+            "description": "Courses list"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCourse",
+        "summary": "Create a course",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CourseCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Course created"
+          }
+        }
+      }
+    },
+    "/api/mcp/admin/courses/{courseId}": {
+      "patch": {
+        "operationId": "updateCourse",
+        "summary": "Update course",
+        "parameters": [
+          {
+            "name": "courseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CoursePatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Course updated"
+          }
+        }
+      }
+    },
+    "/api/mcp/admin/courses/{courseId}/tree": {
+      "get": {
+        "operationId": "getCourseTree",
+        "summary": "Get full course tree and content flags",
+        "parameters": [
+          {
+            "name": "courseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Course tree"
+          }
+        }
+      }
+    },
+    "/api/mcp/admin/courses/{courseId}/items": {
+      "post": {
+        "operationId": "createStructureItem",
+        "summary": "Create structure item in a course",
+        "parameters": [
+          {
+            "name": "courseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StructureItemCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Structure item created"
+          }
+        }
+      }
+    },
+    "/api/mcp/admin/items/{itemId}": {
+      "patch": {
+        "operationId": "updateStructureItem",
+        "summary": "Update structure item",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StructureItemPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Structure item updated"
+          }
+        }
+      }
+    },
+    "/api/mcp/admin/items/{itemId}/note": {
+      "get": {
+        "operationId": "getItemNote",
+        "summary": "Get item note (live by default)",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "includeDraft",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Item note data"
+          }
+        }
+      },
+      "post": {
+        "operationId": "publishNote",
+        "summary": "Publish note to live content",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "content_html"
+                ],
+                "properties": {
+                  "content_html": {
+                    "type": "string"
+                  },
+                  "clear_draft": {
+                    "type": "boolean"
+                  },
+                  "source": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Note published"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateNote",
+        "summary": "Update live note content",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "content_html"
+                ],
+                "properties": {
+                  "content_html": {
+                    "type": "string"
+                  },
+                  "clear_draft": {
+                    "type": "boolean"
+                  },
+                  "source": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Note updated"
+          }
+        }
+      }
+    },
+    "/api/mcp/admin/items/{itemId}/flashcards": {
+      "get": {
+        "operationId": "getFlashcards",
+        "summary": "Get item flashcards",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Flashcards"
+          }
+        }
+      },
+      "post": {
+        "operationId": "publishFlashcards",
+        "summary": "Publish flashcards",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "flashcards"
+                ],
+                "properties": {
+                  "flashcards": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Flashcard"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Flashcards published"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateFlashcards",
+        "summary": "Update flashcards",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "flashcards"
+                ],
+                "properties": {
+                  "flashcards": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Flashcard"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Flashcards updated"
+          }
+        }
+      }
+    },
+    "/api/mcp/admin/items/{itemId}/quiz": {
+      "get": {
+        "operationId": "getAttachedQuiz",
+        "summary": "Get attached quiz and questions",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Quiz details"
+          }
+        }
+      },
+      "post": {
+        "operationId": "publishAttachedQuiz",
+        "summary": "Publish attached quiz",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title",
+                  "questions"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "passing_score": {
+                    "type": "number"
+                  },
+                  "questions": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/QuizQuestion"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Quiz published"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateAttachedQuiz",
+        "summary": "Update attached quiz",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title",
+                  "questions"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "passing_score": {
+                    "type": "number"
+                  },
+                  "questions": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/QuizQuestion"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Quiz updated"
+          }
+        }
+      }
+    },
+    "/api/mcp/admin/items/{itemId}/publish-all": {
+      "post": {
+        "operationId": "publishAllItemContent",
+        "summary": "Publish note + flashcards + quiz in one call",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "content_html": {
+                    "type": "string"
+                  },
+                  "flashcards": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Flashcard"
+                    }
+                  },
+                  "quiz": {
+                    "type": "object",
+                    "properties": {
+                      "title": {
+                        "type": "string"
+                      },
+                      "passing_score": {
+                        "type": "number"
+                      },
+                      "questions": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/components/schemas/QuizQuestion"
+                        }
+                      }
+                    }
+                  },
+                  "clear_draft": {
+                    "type": "boolean"
+                  },
+                  "source": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Per-step publish result"
+          }
+        }
+      }
+    },
+    "/api/mcp/admin/courses/import-structure": {
+      "post": {
+        "operationId": "importCourseStructure",
+        "summary": "Bulk import course and hierarchy",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "courseName",
+                  "items"
+                ],
+                "properties": {
+                  "courseName": {
+                    "type": "string"
+                  },
+                  "courseDescription": {
+                    "type": "string"
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "tempId",
+                        "item_type",
+                        "title",
+                        "order_index"
+                      ],
+                      "properties": {
+                        "tempId": {
+                          "type": "string"
+                        },
+                        "parentTempId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "item_type": {
+                          "type": "string",
+                          "enum": [
+                            "folder",
+                            "file"
+                          ]
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "order_index": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Course imported"
+          }
+        }
+      }
+    },
+    "/api/mcp/admin/courses/crash-course": {
+      "post": {
+        "operationId": "createCrashCourse",
+        "summary": "Create crash course from source courses",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "sourceCourseIds"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "sourceCourseIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "orderIndex": {
+                    "type": "number"
+                  },
+                  "activate": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Crash course created"
+          }
+        }
+      }
+    },
+    "/api/mcp/admin/daily-news": {
+      "get": {
+        "operationId": "listDailyNews",
+        "summary": "List daily news with optional filters",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subject",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily news rows"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createDailyNews",
+        "summary": "Create daily news rows",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "rows"
+                ],
+                "properties": {
+                  "rows": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Daily news created"
+          }
+        }
+      }
+    },
+    "/api/mcp/admin/daily-news/{newsId}": {
+      "patch": {
+        "operationId": "updateDailyNews",
+        "summary": "Update daily news row",
+        "parameters": [
+          {
+            "name": "newsId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DailyNewsPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Daily news updated"
+          }
+        }
+      }
+    },
+    "/api/mcp/admin/courses/{courseId}/bulk-status": {
+      "get": {
+        "operationId": "getCourseBulkStatus",
+        "summary": "Get missing/complete content status for course items",
+        "parameters": [
+          {
+            "name": "courseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bulk status"
+          }
+        }
+      }
+    }
+  }
+}
