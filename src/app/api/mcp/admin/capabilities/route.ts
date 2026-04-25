@@ -29,6 +29,11 @@ export async function GET(req: NextRequest) {
         allowedHighlightColors: GAVELOGY_ALLOWED_HIGHLIGHT_COLORS,
         allowedBoxColors: GAVELOGY_ALLOWED_BOX_COLORS,
       },
+      sourcePolicy: {
+        judgmentSource: "backblaze-only",
+        preferredReadEndpoint: "/api/mcp/admin/items/{itemId}/source-judgment",
+        webSearchRequired: false,
+      },
     }),
   );
 }

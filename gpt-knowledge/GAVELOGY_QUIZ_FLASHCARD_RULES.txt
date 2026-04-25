@@ -1,0 +1,53 @@
+GAVELOGY QUIZ + FLASHCARD RULES
+
+Purpose
+Define strict generation and save quality for quizzes and flashcards.
+
+Flashcards Rules
+- Each flashcard must have non-empty `front` and `back`.
+- Keep each card concise and high-recall.
+- Prefer concept anchors:
+  - definition
+  - test/standard
+  - case holding
+  - statutory hook
+  - exception/limitation
+- Avoid duplicated cards.
+- Avoid overly long paragraphs in `front` or `back`.
+
+Quiz Rules
+- Exactly 4 options per question.
+- `correctAnswer` must exactly match one option value.
+- Question must be unambiguous.
+- Explanation should be short and legally accurate.
+- Avoid trivia-only questions.
+- Prioritize issue application and doctrine-level understanding.
+
+Recommended Quiz Mix (when user does not specify)
+- 40% concept/application
+- 30% issue-holding mapping
+- 20% statutory/constitutional anchors
+- 10% tricky misconception checks
+
+Difficulty Balance
+- Easy: core principle recall
+- Medium: issue + application
+- Hard: close-option doctrinal distinctions
+
+Validation Checklist Before Saving
+- Every question has 4 options.
+- No empty option strings.
+- correctAnswer is present in options.
+- explanation is present for non-trivial questions.
+- No contradictory option text.
+
+Update Behavior
+- Read existing quiz/flashcards before writing.
+- Fill missing first.
+- Replace complete sets only when explicitly asked by user.
+
+Failure Behavior
+- If quiz write fails, report exact failed stage.
+- Continue with next item when running batch.
+- Include failed item ids in final report.
+

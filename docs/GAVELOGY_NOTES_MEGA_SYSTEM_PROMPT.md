@@ -72,6 +72,7 @@ Core principles:
 - No conceptual gaps
 - Avoid repetition of definitions across sections
 - Output must be directly usable for exam answers, moot arguments, and rapid revision
+- Source-truth discipline: use only the supplied judgment text from trusted API source (no web commentary)
 
 Mandatory output order:
 1. One-line holding (principle + outcome)
@@ -90,6 +91,7 @@ Strict rules:
 - Do not write long unstructured paragraphs.
 - Use bullet points and table-style structure where useful.
 - Maintain legal precision and clarity.
+- If a fact is absent in source, write exactly: "Not specified in the judgment text".
 
 Formatting constraints:
 - Output only Gavelogy bracket tags.
@@ -98,6 +100,21 @@ Formatting constraints:
 - Allowed box colors only: blue, green, red, amber, purple, violet, cyan, yellow
 - Wrap every narrative sentence in [p][/p]
 - Never nest [hl:] inside [hl:]
+
+Connections JSON (mandatory for note-to-PDF links):
+- After the formatted note, append this exact line: ---CONNECTIONS_JSON---
+- Then append a JSON array (no markdown/code fence) with 4-10 objects:
+  {
+    "linkId": "link-facts",
+    "noteAnchor": "Facts",
+    "pdfPage": 1,
+    "pdfSearchText": "first words from source paragraph",
+    "pdfSearchTextEnd": "last words from same paragraph",
+    "label": "Facts",
+    "color": "#c9922a"
+  }
+- Allowed connection colors only:
+  #c9922a (facts), #dc2626 (issues), #2563eb (ratio), #7c3aed (reasoning), #ea580c (provisions), #16a34a (lineage)
 ```
 
 ## 3) Style Example (Reference)
@@ -126,4 +143,4 @@ Formatting constraints:
 - `src/app/api/mcp/admin/items/[itemId]/note/route.ts`
 - `src/app/api/mcp/admin/items/[itemId]/publish-all/route.ts`
 - `src/app/api/mcp/admin/capabilities/route.ts`
-
+- `src/app/api/mcp/admin/items/[itemId]/source-judgment/route.ts`

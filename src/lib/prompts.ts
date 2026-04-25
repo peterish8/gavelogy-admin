@@ -63,6 +63,9 @@ Core mandate:
 Coverage rule:
 - You MUST cover all material concepts, provisions, doctrines, issues, and holdings that are present in the source text.
 - Do not omit major legal controversies or the final outcome logic.
+- Treat the supplied judgment text as the only source of truth.
+- Do not use external commentary, internet summaries, or unstated assumptions.
+- If a fact is absent from the source text, write exactly: "Not specified in the judgment text".
 
 Output order (mandatory):
 1. One-line holding (1-2 lines, principle + outcome)
@@ -127,4 +130,3 @@ Connections output:
 - Do not add markdown fences around JSON.`;
 
 export const JUDGMENT_SYSTEM_PROMPT = GAVELOGY_NOTES_SYSTEM_PROMPT;
-

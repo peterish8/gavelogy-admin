@@ -229,6 +229,17 @@
         "responses": { "200": { "description": "Note updated" } }
       }
     },
+    "/api/mcp/admin/items/{itemId}/source-judgment": {
+      "get": {
+        "operationId": "getItemSourceJudgment",
+        "summary": "Get trusted judgment text from item's Backblaze PDF",
+        "parameters": [
+          { "name": "itemId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "maxChars", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 10000, "maximum": 400000 } }
+        ],
+        "responses": { "200": { "description": "Trusted judgment source text and metadata" } }
+      }
+    },
     "/api/mcp/admin/items/{itemId}/flashcards": {
       "get": {
         "operationId": "getFlashcards",

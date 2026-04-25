@@ -7,12 +7,30 @@ export function hasConnectionsJsonMarker(raw: string): boolean {
 export function splitConnectionsPayload(raw: string): { formatted: string; jsonPart: string | null } {
   const match = CONNECTIONS_JSON_MARKER_RE.exec(raw)
   if (!match || typeof match.index !== 'number') {
+    const fallback = splitMarkerlessConnectionsPayload(raw)
+    if (fallback) return fallback
     return { formatted: raw.trim(), jsonPart: null }
   }
 
   const formatted = raw.slice(0, match.index).trim()
   const jsonPart = raw.slice(match.index + match[0].length).trim()
   return { formatted, jsonPart }
+}
+
+function splitMarkerlessConnectionsPayload(raw: string): { formatted: string; jsonPart: string | null } | null {
+  const trimmed = raw.trim()
+  const lastArray = extractLastJsonArray(trimmed)
+  if (!lastArray) return null
+
+  const parsed = safeParseArray(lastArray)
+  if (!looksLikeConnections(parsed)) return null
+
+  const startIndex = trimmed.lastIndexOf(lastArray)
+  if (startIndex <= 0) return null
+
+  const before = trimmed.slice(0, startIndex).trim()
+  if (!before) return null
+  return { formatted: before, jsonPart: lastArray }
 }
 
 export function stripConnectionsTail(raw: string): string {
@@ -71,6 +89,28 @@ function extractFirstJsonArray(value: string): string | null {
   return null
 }
 
+function extractLastJsonArray(value: string): string | null {
+  const lastStart = value.lastIndexOf('[')
+  if (lastStart === -1) return null
+  return extractFirstJsonArray(value.slice(lastStart))
+}
+
+function safeParseArray(value: string): unknown {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
+function looksLikeConnections(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length === 0) return false
+  const sample = value[0]
+  if (!sample || typeof sample !== 'object') return false
+  const row = sample as Record<string, unknown>
+  return typeof row.linkId === 'string' || typeof row.noteAnchor === 'string'
+}
+
 export function parseConnectionsJsonPart(jsonPart: string | null): any[] {
   if (!jsonPart) return []
 
@@ -84,4 +124,3 @@ export function parseConnectionsJsonPart(jsonPart: string | null): any[] {
     return []
   }
 }
-
