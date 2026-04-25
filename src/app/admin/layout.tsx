@@ -1,35 +1,12 @@
-'use client'
-
-import { useAuth } from '@/lib/auth-context'
+import { redirect } from 'next/navigation'
 import AdminLayoutClient from './admin-layout-client'
-import { Loader2 } from 'lucide-react'
-import { useRouter } from 'next/navigation'
-import { useEffect } from 'react'
+import { getAdminUser } from '@/lib/admin-auth'
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading, user } = useAuth()
-  const router = useRouter()
-
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.replace('/auth/login')
-    }
-  }, [isAuthenticated, isLoading, router])
-
-  if (isLoading || !isAuthenticated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="w-8 h-8 animate-spin text-primary/50" />
-      </div>
-    )
-  }
+export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+  const user = await getAdminUser()
 
   if (!user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="w-8 h-8 animate-spin text-primary/50" />
-      </div>
-    )
+    redirect('/auth/login')
   }
 
   return (

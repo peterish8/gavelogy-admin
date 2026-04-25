@@ -31,24 +31,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { success: true };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      // Account doesn't exist - try to auto-create it
-      if (msg.includes("InvalidAccountId") || msg.includes("not found") || msg.includes("Account not found")) {
-        try {
-          await convexSignIn("password", { email, password, flow: "signUp" });
-          return { success: true };
-        } catch (e2) {
-          const signupError = e2 instanceof Error ? e2.message : "Sign up failed";
-          // Check for common password issues
-          if (signupError.includes("password") && (signupError.includes("short") || signupError.includes("8"))) {
-            return { success: false, error: "Password must be at least 8 characters long." };
-          }
-          return { success: false, error: `Account creation failed: ${signupError}` };
-        }
-      }
-      // Show actual error for debugging
+
       if (msg.includes("InvalidCredentials") || msg.includes("invalid credential")) {
-        return { success: false, error: "Invalid password. Please try again." };
+        return { success: false, error: "Invalid email or password. Please try again." };
       }
+
+      if (msg.includes("InvalidAccountId") || msg.includes("not found") || msg.includes("Account not found")) {
+        return { success: false, error: "Account not found. Ask an existing admin to create access first." };
+      }
+
       return { success: false, error: msg || "Login failed. Please try again." };
     }
   };
