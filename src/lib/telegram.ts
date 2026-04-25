@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { extractPdfText } from '@/lib/pdf-text-extract'
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!
 const API_BASE = `https://api.telegram.org/bot${BOT_TOKEN}`
@@ -648,39 +649,4 @@ export function truncate(text: string, max = 3800): string {
 // We lazy-require inside the function so the polyfill runs first and so
 // that this module can be imported in environments where the PDF path is
 // never called (e.g. the Next.js client bundle).
-export async function extractPdfText(pdfBuffer: Buffer): Promise<string> {
-  // Polyfill browser globals that pdfjs-dist expects in a Node environment.
-  if (typeof globalThis.DOMMatrix === 'undefined') {
-    // Minimal stub — pdfjs only needs the constructor to not throw.
-    // @ts-expect-error — polyfilling browser API on globalThis
-    globalThis.DOMMatrix = class DOMMatrix {
-      constructor() {
-        // no-op stub
-      }
-    }
-  }
-  if (typeof globalThis.ImageData === 'undefined') {
-    // @ts-expect-error — polyfilling browser API on globalThis
-    globalThis.ImageData = class ImageData {
-      constructor(public width: number, public height: number) {}
-    }
-  }
-  if (typeof globalThis.Path2D === 'undefined') {
-    // @ts-expect-error — polyfilling browser API on globalThis
-    globalThis.Path2D = class Path2D {}
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const pdfParse = require('pdf-parse') as (buf: Buffer, options?: object) => Promise<{ text: string }>
-
-  const parsed = await pdfParse(pdfBuffer, {
-    // Disable the test-file check that pdf-parse does on first load —
-    // it tries to read a fixture PDF from disk which doesn't exist on Vercel.
-    max: 0,
-  })
-
-  if (!parsed.text?.trim()) {
-    throw new Error('No text extracted from PDF — the file may be scanned/image-based.')
-  }
-  return parsed.text
-}
+export { extractPdfText }

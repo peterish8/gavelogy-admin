@@ -56,6 +56,12 @@ Deletion is intentionally unavailable through GPT/MCP/API.
 
 Manual delete actions remain UI-only in Gavelogy admin.
 
+Trusted source policy for note generation:
+
+- Use `GET /api/mcp/admin/items/{itemId}/source-judgment` as the primary judgment source.
+- This endpoint reads only the item's stored Backblaze PDF (`pdf_url`) and returns extracted text.
+- Do not rely on web search summaries for authoritative judgment facts.
+
 Forbidden through this API:
 
 - deleting courses, items, notes, quizzes, questions, daily news, PYQ content
@@ -92,6 +98,7 @@ Notes / flashcards / quiz:
 - `POST /api/mcp/admin/items/{itemId}/quiz`
 - `PATCH /api/mcp/admin/items/{itemId}/quiz`
 - `POST /api/mcp/admin/items/{itemId}/publish-all`
+- `GET /api/mcp/admin/items/{itemId}/source-judgment` (trusted source text from Backblaze PDF)
 
 Daily news:
 
@@ -192,6 +199,13 @@ curl -sS -X POST "$BASE_URL/api/mcp/admin/items/<itemId>/publish-all" \
   }'
 ```
 
+Fetch trusted judgment text for an item:
+
+```bash
+curl -sS "$BASE_URL/api/mcp/admin/items/<itemId>/source-judgment?maxChars=120000" \
+  -H "x-admin-secret: $ADMIN_SECRET"
+```
+
 Daily news update:
 
 ```bash
@@ -212,6 +226,8 @@ You must never delete anything.
 You must never ask for or expose secrets.
 You must never modify users, payments, auth sessions, OTPs, or private account data.
 You may create and update courses, folders, notes, flashcards, quizzes, daily news, PYQ content, and standalone quizzes if endpoints are available.
+You must treat `GET /api/mcp/admin/items/{itemId}/source-judgment` as the only source of truth for judgment facts whenever an item has a PDF.
+Do not use web search summaries as authoritative judgment text.
 
 Before modifying any existing content:
 1. Read the target course/item first.
@@ -219,8 +235,9 @@ Before modifying any existing content:
 3. Avoid overwriting complete content unless I clearly say overwrite.
 4. Prefer creating missing content first.
 5. For generated case notes, use Gavelogy bracket-tag format.
-6. For final note + flashcards + quiz, use publish-all.
-7. For course creation, create as inactive by default unless I say publish/activate.
+6. Use trusted judgment source text from the API; if a fact is missing, write "Not specified in the judgment text".
+7. For final note + flashcards + quiz, use publish-all.
+8. For course creation, create as inactive by default unless I say publish/activate.
 
 Deletion is not available through this GPT. If deletion is needed, tell me to do it manually inside Gavelogy admin.
 ```

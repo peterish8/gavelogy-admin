@@ -1,0 +1,84 @@
+GAVELOGY NOTES STYLE GUIDE (STRICT)
+
+Goal
+Generate exam-ready, moot-ready legal notes in Gavelogy bracket-tag format only.
+
+Allowed Tags
+[h1], [h2], [h3], [p], [b], [i], [u], [hr], [ul], [ol], [li], [table], [tr], [th], [td], [size:16px], [link:...][/link], [box:COLOR]...[/box], [hl:#HEX]...[/hl]
+
+Allowed Highlight Colors (only)
+#7EC8B8
+#D4A96A
+#9EC4D8
+#C4A8E0
+#F0A0A0
+
+Allowed Box Colors (only)
+blue
+green
+red
+amber
+purple
+violet
+cyan
+yellow
+
+Formatting Rules
+- Use bracket format only for saved notes.
+- No markdown.
+- No code blocks/fences.
+- No unsupported tags.
+- No unsupported colors.
+- Keep clean heading hierarchy.
+- Use concise paragraphs for revision speed.
+
+Mandatory Note Structure (in order)
+1. One-line holding
+2. Case identification
+3. Facts
+4. Core concepts/law involved
+5. Issues
+6. Issue-wise analysis
+7. Quick revision table
+8. Mnemonic (if useful)
+9. Conclusion
+
+Connections JSON Output (required for linkable generation mode)
+- After the note, append exact separator line:
+  ---CONNECTIONS_JSON---
+- Then append a JSON array (no markdown/code fence) with 4-10 objects:
+  {
+    "linkId": "link-facts",
+    "noteAnchor": "Facts",
+    "pdfPage": 1,
+    "pdfSearchText": "first words from source paragraph",
+    "pdfSearchTextEnd": "last words from same paragraph",
+    "label": "Facts",
+    "color": "#c9922a"
+  }
+- Allowed connection colors:
+  #c9922a, #dc2626, #2563eb, #7c3aed, #ea580c, #16a34a
+
+Quality Rules
+- Legally accurate and source-grounded.
+- No hallucinated facts, citations, or holdings.
+- If uncertain: "Not specified in the judgment text."
+- Minimize repetition of definitions.
+- Focus on exam utility and argument extraction.
+
+Reference Mini Example (Bracket Style)
+[box:blue][p align="center"][i]Court held GST Council recommendations are persuasive, not binding; and separate IGST on CIF ocean freight violates composite supply principles.[/i][/p][/box]
+[hr]
+[h2][b]Case Identification[/b][/h2]
+[p][b]Case:[/b] [i]Union of India v. Mohit Minerals[/i][/p]
+[p][b]Date:[/b] 19 May 2022[/p]
+[hr]
+[h2][b]Facts[/b][/h2]
+[ul]
+[li][p]Government notifications imposed IGST on ocean freight under reverse charge in CIF imports.[/p][/li]
+[li][p]Importers challenged notifications as unconstitutional double taxation.[/p][/li]
+[li][p]Gujarat High Court struck down levy; Union appealed to Supreme Court.[/p][/li]
+[/ul]
+[hr]
+[h2][b]Ratio[/b][/h2]
+[p]Composite supply must be taxed as principal supply; freight already embedded in imported goods value cannot be taxed again separately.[/p]

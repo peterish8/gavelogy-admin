@@ -1,0 +1,87 @@
+GAVELOGY ACTIONS ENDPOINT MAP (ALLOWLISTED)
+
+Important
+- Use only create/read/update/publish flows.
+- No delete operations.
+- Deletion remains manual in Gavelogy admin UI.
+
+Auth
+- Actions send `x-admin-secret` header (configured in GPT Actions auth).
+- Do not include secret values in prompts/knowledge files.
+
+Capabilities + Discovery
+- GET /api/mcp/admin/capabilities
+  - Returns allowed and forbidden operations.
+
+Courses
+- GET /api/mcp/admin/courses
+  - List all courses.
+- POST /api/mcp/admin/courses
+  - Create course (default inactive unless explicit).
+- PATCH /api/mcp/admin/courses/{courseId}
+  - Update allowed course fields.
+- GET /api/mcp/admin/courses/{courseId}/tree
+  - Course + full structure + content flags.
+- GET /api/mcp/admin/courses/{courseId}/bulk-status
+  - Missing/completion status per item.
+- POST /api/mcp/admin/courses/import-structure
+  - Bulk create course + hierarchy.
+- POST /api/mcp/admin/courses/crash-course
+  - Create crash course from source courses.
+
+Structure Items
+- POST /api/mcp/admin/courses/{courseId}/items
+  - Create folder/file under course.
+- PATCH /api/mcp/admin/items/{itemId}
+  - Update item allowlisted fields.
+
+Notes
+- GET /api/mcp/admin/items/{itemId}/note
+  - Read live note by default.
+- GET /api/mcp/admin/items/{itemId}/source-judgment
+  - Read trusted judgment text from item's Backblaze PDF.
+  - Use this as source-of-truth before note generation.
+- POST /api/mcp/admin/items/{itemId}/note
+  - Publish note.
+- PATCH /api/mcp/admin/items/{itemId}/note
+  - Update note.
+
+Flashcards
+- GET /api/mcp/admin/items/{itemId}/flashcards
+  - Read flashcards.
+- POST /api/mcp/admin/items/{itemId}/flashcards
+  - Publish flashcards.
+- PATCH /api/mcp/admin/items/{itemId}/flashcards
+  - Update flashcards.
+
+Attached Quiz
+- GET /api/mcp/admin/items/{itemId}/quiz
+  - Read attached quiz + questions.
+- POST /api/mcp/admin/items/{itemId}/quiz
+  - Publish attached quiz.
+- PATCH /api/mcp/admin/items/{itemId}/quiz
+  - Update attached quiz.
+
+Combined Save (Preferred)
+- POST /api/mcp/admin/items/{itemId}/publish-all
+  - Save note + flashcards + quiz in one call.
+  - Preferred for final item publish.
+  - If it fails, fallback to step writes.
+
+Daily News
+- GET /api/mcp/admin/daily-news
+  - List with optional filters.
+- POST /api/mcp/admin/daily-news
+  - Create rows.
+- PATCH /api/mcp/admin/daily-news/{newsId}
+  - Update row.
+
+Execution Strategy
+1) Read course tree/bulk-status
+2) Identify missing items
+3) For each target file item, fetch trusted source text via source-judgment endpoint
+4) Process one item at a time
+5) Generate note + flashcards + quiz
+6) Save using publish-all (preferred)
+7) Verify by re-read
+8) Report completed/skipped/failed
