@@ -181,8 +181,8 @@ export const getItemAccuracy = query({
       .first();
 
     let attempts;
-    let resolvedQuizId: Id<"attached_quizzes"> | null = quiz?._id ?? null;
-    let resolvedQuizTitle = quiz?.title ?? "Quiz";
+    const resolvedQuizId: Id<"attached_quizzes"> | null = quiz?._id ?? null;
+    const resolvedQuizTitle = quiz?.title ?? "Quiz";
 
     if (quiz) {
       // Fast path: quiz found via index, query attempts directly

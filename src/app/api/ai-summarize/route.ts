@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
     // Builds provider messages from the common system prompt and the selected chunk of judgment text.
     const makeMessages = (text: string) => [
       { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: `Generate a complete GAVELOGY case law note (all 13 sections) from the following judgment text:\n\n${text}` },
+      { role: 'user', content: `Generate a complete exam-ready Gavelogy case law note from the following judgment text:\n\n${text}` },
     ]
 
     const errors: string[] = []

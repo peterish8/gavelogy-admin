@@ -2259,18 +2259,18 @@ export function EditorPanel({ itemId, itemType, title, onClose, onTitleChange, m
                         }}
                         disabled={hasPdfAttached}
                         className={cn(
-                            "inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-all",
+                            "inline-flex h-9 w-9 items-center justify-center rounded-lg border text-sm font-semibold transition-all",
                             isTagCaseMode
                                 ? "border-amber-300 bg-amber-100 text-amber-700 dark:border-amber-600 dark:bg-amber-900/40 dark:text-amber-300"
                                 : "border-border bg-muted text-muted-foreground hover:border-amber-300 hover:text-foreground",
                             hasPdfAttached && "cursor-not-allowed opacity-60"
                         )}
                         title={hasPdfAttached ? "Judgment PDF is attached, so Tag Case Notes mode is locked." : (isTagCaseMode ? "Switch back to full notes mode (show all tabs)" : "Switch to Tag Case Notes mode (Note + Judgment only)")}
+                        aria-label={isTagCaseMode ? "Tag Case Notes enabled" : "Enable Tag Mode"}
                     >
                         <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                             <path d="M8 2L10 6H14L11 9L12 13L8 11L4 13L5 9L2 6H6L8 2Z" strokeLinejoin="round" />
                         </svg>
-                        {isTagCaseMode ? 'Tag Case Notes' : 'Enable Tag Mode'}
                     </button>
 
                     <div className="mx-1 hidden h-6 w-px bg-border md:block" />

@@ -647,6 +647,24 @@ export default defineSchema({
     subject: v.optional(v.string()),
   }).index("by_test", ["test_id"]),
 
+  mcp_generation_logs: defineTable({
+    courseId: v.optional(v.id("courses")),
+    itemId: v.optional(v.id("structure_items")),
+    entityType: v.string(),
+    entityId: v.optional(v.string()),
+    action: v.string(),
+    status: v.union(v.literal("success"), v.literal("failed")),
+    source: v.string(),
+    provider: v.optional(v.string()),
+    error: v.optional(v.string()),
+    created_at: v.string(),
+    idempotency_key: v.optional(v.string()),
+  })
+    .index("by_courseId", ["courseId"])
+    .index("by_itemId", ["itemId"])
+    .index("by_created_at", ["created_at"])
+    .index("by_idempotency_key", ["idempotency_key"]),
+
   case_notes: defineTable({
     case_number: v.string(),
     overall_content: v.optional(v.string()),
@@ -658,4 +676,5 @@ export default defineSchema({
     data: v.optional(v.any()),
     user_name: v.optional(v.string()),
   }).index("by_chat_id", ["chat_id"]),
+
 });
