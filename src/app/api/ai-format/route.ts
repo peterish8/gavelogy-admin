@@ -1,49 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isAdminApiRequest, unauthorizedResponse, checkPayloadSize } from '@/lib/admin-auth'
+import { GAVELOGY_NOTES_TIPTAP_INSTRUCTIONS } from '@/lib/prompts'
 
-const SYSTEM_PROMPT = `You are a legal study notes formatter for Gavelogy, a law exam prep platform.
-You receive raw unformatted notes text and must return it formatted using a specific custom tag system.
+const SYSTEM_PROMPT = `You are Gavelogy's legal notes formatter.
+Your task: reformat raw legal notes into Gavelogy bracket-tag format WITHOUT changing substance.
 
-CUSTOM TAG SYSTEM:
-- [h1]Title[/h1]         → Main heading (case name, act name, topic title)
-- [h2]Title[/h2]         → Section heading (Facts, Held, Ratio, Issues, Significance, etc.)
-- [h3]Title[/h3]         → Sub-section heading
-- [p]Text[/p]            → Regular paragraph
-- [b]text[/b]            → Bold (key terms, court names, article/section numbers, party names)
-- [i]text[/i]            → Italic (Latin phrases, case citations, statute names)
-- [u]text[/u]            → Underline (definitions, first-use of a defined term)
-- [hl:#fef08a]text[/hl]  → Yellow highlight (key facts that decided the case)
-- [hl:#bbf7d0]text[/hl]  → Green highlight (final judgment / held / positive outcomes)
-- [hl:#bfdbfe]text[/hl]  → Blue highlight (core legal principle / ratio decidendi)
-- [hl:#fbcfe8]text[/hl]  → Pink highlight (issue / legal question raised)
-- [hl:#fed7aa]text[/hl]  → Orange highlight (exception / limitation / dissent / caution)
-- [box:blue]...[/box]    → Blue box (general important note or context)
-- [box:green]...[/box]   → Green box (exam tip, mnemonic, how to remember)
-- [box:amber]...[/box]   → Amber box (watch out / common mistake / caution)
-- [box:red]...[/box]     → Red box (critical must-remember point, marked with !! or *)
-- [box:violet]...[/box]  → Violet box (related cases / comparison / analogy)
-- [ul][li]item[/li][/ul] → Bullet list
-- [ol][li]item[/li][/ol] → Numbered list
-- [hr]                   → Horizontal divider between major sections
+${GAVELOGY_NOTES_TIPTAP_INSTRUCTIONS}
 
-FORMATTING RULES:
-1. Wrap all body paragraphs in [p][/p]
-2. Use [h2] for standard legal sections: Facts, Issues, Held, Ratio Decidendi, Obiter Dicta, Significance, Test Applied
-3. Bold ([b]) every article number (Art. 21, Art. 14), section number, court name, and party name
-4. Italic ([i]) for all Latin phrases and case citations written as "X v. Y"
-5. Yellow highlight: 2-3 key facts that were decisive
-6. Blue highlight: the exact ratio decidendi / core legal principle stated
-7. Green highlight: the final holding / judgment sentence
-8. Pink highlight: the precise legal question/issue the court addressed
-9. Orange highlight: any exception, dissent, or limitation on the ruling
-10. Use [box:red] for anything marked !! * IMPORTANT or "MUST KNOW"
-11. Use [box:green] for exam tips, tricks, or "remember this as..." type notes
-12. Use [box:amber] for "note that", "be careful", "common mistake" type content
-13. Use [box:blue] for additional context, background, or "also note" content
-14. Use [box:violet] for "compare with", "related to", "distinguished from" content
-15. Preserve all original content — do not add or remove information, only format it
+Formatting rules:
+1. Keep all original meaning and legal content intact.
+2. Do not add new legal claims or citations.
+3. Use [h1]/[h2]/[h3] for hierarchy and [p] for body text.
+4. Use highlights and boxes only when they improve clarity.
+5. Keep output clean and directly pasteable into Gavelogy editor.
 
-IMPORTANT: Return ONLY the formatted content using the tag system above. No explanations, no markdown code blocks, no JSON wrapper. Just the raw tagged content starting directly with the first tag.`
+Return only the formatted bracket-tag output.`
 
 // Calls NVIDIA's Kimi model, the preferred formatter for converting raw notes into tagged Gavelogy markup.
 async function callNvidia(messages: any[], apiKey: string, maxTokens = 4000): Promise<string> {

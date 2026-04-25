@@ -15,6 +15,9 @@ const eslintConfig = [
     ignores: [
       "node_modules/**",
       ".next/**",
+      ".agent/**",
+      ".claude/**",
+      "public/pdf.worker.min.mjs",
       "out/**",
       "build/**",
       "next-env.d.ts",

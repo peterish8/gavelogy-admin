@@ -18,6 +18,7 @@ import type * as caseNotes from "../caseNotes.js";
 import type * as content from "../content.js";
 import type * as game from "../game.js";
 import type * as http from "../http.js";
+import type * as mcpAdmin from "../mcpAdmin.js";
 import type * as mistakes from "../mistakes.js";
 import type * as payments from "../payments.js";
 import type * as pyq from "../pyq.js";
@@ -47,6 +48,7 @@ declare const fullApi: ApiFromModules<{
   content: typeof content;
   game: typeof game;
   http: typeof http;
+  mcpAdmin: typeof mcpAdmin;
   mistakes: typeof mistakes;
   payments: typeof payments;
   pyq: typeof pyq;
